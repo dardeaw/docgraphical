@@ -1,0 +1,40 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "docgraph"
+version = "1.0.0"
+authors = [
+  { name="Chunghsing Tech / CodeGraph Team", email="a1081@chenbro.com" },
+]
+description = "Surgical precision Markdown AST, TOC outline & section slicer for AI Coding Agents. Save 97% tokens."
+readme = "README.md"
+requires-python = ">=3.9"
+license = { text = "MIT" }
+keywords = ["docgraph", "markdown", "ast", "toc", "ai-agent", "mcp", "llm-tokens", "rag"]
+classifiers = [
+    "Development Status :: 5 - Production/Stable",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Software Development :: Documentation",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+dependencies = []
+
+[project.optional-dependencies]
+mcp = ["mcp>=1.0.0"]
+dev = ["pytest>=7.0.0", "flake8>=6.0.0"]
+
+[project.urls]
+"Homepage" = "https://github.com/dardeaw/docgraph"
+"Bug Tracker" = "https://github.com/dardeaw/docgraph/issues"
+
+[project.scripts]
+docgraph = "docgraph.cli:main"
