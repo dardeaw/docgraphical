@@ -25,3 +25,6 @@ htmlcov/
 env/
 venv/
 ENV/
+
+node_modules/
+dist/
