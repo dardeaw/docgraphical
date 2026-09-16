@@ -1,0 +1,28 @@
+{
+  "name": "docgraph",
+  "version": "1.0.0",
+  "description": "Surgical precision Markdown AST, TOC outline & section slicer for AI Agents. Save 97% tokens.",
+  "main": "lib/docgraph.js",
+  "bin": {
+    "docgraph": "./bin/docgraph.js"
+  },
+  "scripts": {
+    "test": "node test.js"
+  },
+  "keywords": [
+    "docgraph",
+    "markdown",
+    "ast",
+    "toc",
+    "ai-agent",
+    "mcp",
+    "token-saver",
+    "rag",
+    "spec"
+  ],
+  "author": "Chunghsing Tech / CodeGraph Team",
+  "license": "MIT",
+  "engines": {
+    "node": ">=16.0.0"
+  }
+}
