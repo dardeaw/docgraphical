@@ -1,0 +1,169 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>DocGraph - Markdown AST & Intelligence Suite</title>
+  <link rel="stylesheet" href="static/docgraph.css">
+  <!-- Marked for Markdown Rendering -->
+  <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+  <!-- Highlight.js for Syntax Highlighting -->
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark-dimmed.min.css">
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+</head>
+<body class="theme-dark">
+  <div id="app" class="app-container">
+    <!-- Top Header Bar -->
+    <header class="app-header">
+      <div class="header-left">
+        <img src="../assets/icon.png" alt="DocGraph" class="app-logo">
+        <div class="brand-text">
+          <span class="brand-title">DocGraph</span>
+          <span class="brand-tag">v1.0.0</span>
+        </div>
+      </div>
+      <div class="header-center">
+        <div class="search-box">
+          <span class="search-icon">🔍</span>
+          <input type="text" id="searchInput" placeholder="Search headings, content or lines... (Ctrl+F)">
+        </div>
+      </div>
+      <div class="header-right">
+        <button id="openFileBtn" class="btn btn-primary">📂 Open File</button>
+        <button id="openFolderBtn" class="btn btn-secondary">📁 Open Folder</button>
+      </div>
+    </header>
+
+    <!-- Main Workspace -->
+    <main class="workspace">
+      <!-- Left Sidebar: Explorer & TOC Outline -->
+      <aside class="sidebar">
+        <div class="sidebar-tabs">
+          <button class="tab-btn active" data-tab="toc">📑 Outline (TOC)</button>
+          <button class="tab-btn" data-tab="files">📁 Files</button>
+        </div>
+
+        <!-- TOC Panel -->
+        <div id="tocPanel" class="tab-content active">
+          <div class="panel-header">
+            <span class="panel-title" id="currentDocName">No file selected</span>
+            <span class="badge" id="headingCountBadge">0 Headings</span>
+          </div>
+          <div id="tocTree" class="tree-container">
+            <div class="empty-state">
+              <p>Drag & drop a <code>.md</code> file here, or click <b>Open File</b>.</p>
+            </div>
+          </div>
+        </div>
+
+        <!-- Files Explorer Panel -->
+        <div id="filesPanel" class="tab-content">
+          <div class="panel-header">
+            <span class="panel-title">Workspace Files</span>
+            <span class="badge" id="fileCountBadge">0 Files</span>
+          </div>
+          <div id="fileTree" class="tree-container">
+            <div class="empty-state">
+              <p>No folder opened.</p>
+            </div>
+          </div>
+        </div>
+      </aside>
+
+      <!-- Center: Surgical Viewer & Preview -->
+      <section class="content-viewport">
+        <div class="viewport-toolbar">
+          <div class="breadcrumbs">
+            <span id="breadcrumbPath">Welcome to DocGraph</span>
+          </div>
+          <div class="toolbar-actions">
+            <button id="toggleSliceModeBtn" class="btn btn-sm btn-outline active">🗡️ Section Focus</button>
+            <button id="copySliceBtn" class="btn btn-sm btn-outline">📋 Copy Sliced Section</button>
+          </div>
+        </div>
+
+        <div id="dropZoneOverlay" class="drop-zone-overlay hidden">
+          <div class="drop-zone-box">
+            <span class="drop-icon">📄</span>
+            <h3>Drop Markdown File Here</h3>
+            <p>Instant AST parsing, TOC tree extraction & surgical token slicer</p>
+          </div>
+        </div>
+
+        <div id="markdownContainer" class="markdown-body">
+          <div class="welcome-hero">
+            <h1>📄 Welcome to DocGraph</h1>
+            <p class="subtitle">The Surgical Precision Markdown AST & Section Slicer for AI Agents & Developers.</p>
+            
+            <div class="hero-cards">
+              <div class="hero-card" onclick="document.getElementById('openFileBtn').click()">
+                <div class="card-icon">📂</div>
+                <h3>Open Markdown File</h3>
+                <p>Instantly extract TOC outline and slice chapters.</p>
+              </div>
+              <div class="hero-card" onclick="document.getElementById('openFolderBtn').click()">
+                <div class="card-icon">📁</div>
+                <h3>Open Documentation Folder</h3>
+                <p>Browse specs and search across markdown repositories.</p>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Right Sidebar: Token & Section Intelligence -->
+      <aside class="stats-drawer">
+        <div class="drawer-header">
+          <h3>⚡ Intelligence</h3>
+        </div>
+        <div class="stats-body">
+          <!-- Token Meter -->
+          <div class="stat-card">
+            <div class="stat-header">
+              <span class="stat-label">Token Savings</span>
+              <span class="stat-badge" id="savingPercentBadge">97.2%</span>
+            </div>
+            <div class="progress-bar-bg">
+              <div class="progress-bar-fill" id="tokenSavingsFill" style="width: 97.2%;"></div>
+            </div>
+            <div class="stat-subtext">
+              <span>Full Doc: <b id="fullTokenCount">0</b></span>
+              <span>Sliced: <b id="slicedTokenCount">0</b></span>
+            </div>
+          </div>
+
+          <!-- Section Info -->
+          <div class="stat-card">
+            <h4>🎯 Active Section</h4>
+            <div class="info-row">
+              <span class="info-key">Heading:</span>
+              <span class="info-val" id="activeHeadingTitle">-</span>
+            </div>
+            <div class="info-row">
+              <span class="info-key">Level:</span>
+              <span class="info-val" id="activeHeadingLevel">-</span>
+            </div>
+            <div class="info-row">
+              <span class="info-key">Line Span:</span>
+              <span class="info-val" id="activeLineSpan">-</span>
+            </div>
+            <div class="info-row">
+              <span class="info-key">Characters:</span>
+              <span class="info-val" id="activeCharCount">0</span>
+            </div>
+          </div>
+
+          <!-- Quick MCP Export -->
+          <div class="stat-card">
+            <h4>🤖 MCP Prompt Payload</h4>
+            <textarea id="mcpPayloadBox" readonly placeholder="Click any section to generate instant surgical prompt..."></textarea>
+            <button id="copyMcpBtn" class="btn btn-secondary btn-block">📋 Copy for AI Agent</button>
+          </div>
+        </div>
+      </aside>
+    </main>
+  </div>
+
+  <script src="static/docgraph.js"></script>
+</body>
+</html>

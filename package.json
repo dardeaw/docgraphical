@@ -2,12 +2,17 @@
   "name": "docgraph",
   "version": "1.0.0",
   "description": "Surgical precision Markdown AST, TOC outline & section slicer for AI Agents. Save 97% tokens.",
-  "main": "lib/docgraph.js",
+  "main": "electron/main.js",
   "bin": {
     "docgraph": "./bin/docgraph.js"
   },
   "scripts": {
-    "test": "node test.js"
+    "start": "electron .",
+    "dev": "electron .",
+    "test": "node test.js",
+    "dist:win": "electron-builder --win",
+    "dist:mac": "electron-builder --mac",
+    "dist:linux": "electron-builder --linux"
   },
   "keywords": [
     "docgraph",
@@ -17,12 +22,49 @@
     "ai-agent",
     "mcp",
     "token-saver",
-    "rag",
-    "spec"
+    "rag"
   ],
   "author": "Chunghsing Tech / CodeGraph Team",
   "license": "MIT",
-  "engines": {
-    "node": ">=16.0.0"
+  "devDependencies": {
+    "electron": "^31.0.0",
+    "electron-builder": "^24.13.3"
+  },
+  "build": {
+    "appId": "com.docgraph.app",
+    "productName": "DocGraph",
+    "directories": {
+      "output": "dist",
+      "buildResources": "assets"
+    },
+    "files": [
+      "electron/**/*",
+      "app/**/*",
+      "assets/**/*",
+      "lib/**/*",
+      "bin/**/*",
+      "package.json"
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": ["x64"]
+        },
+        {
+          "target": "portable",
+          "arch": ["x64"]
+        }
+      ],
+      "icon": "assets/icon.ico"
+    },
+    "nsis": {
+      "oneClick": true,
+      "perMachine": false,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "DocGraph"
+    },
+    "icon": "assets/icon.png"
   }
 }
