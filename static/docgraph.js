@@ -49,6 +49,7 @@ document.addEventListener('DOMContentLoaded', () => {
   init3DGraph();
   initAutoRotate();
   initResizers();
+  initDrawerHorizontalResizer();
   initDraggableLegend();
   initSearch();
   loadProjects();
@@ -857,7 +858,9 @@ function openDrawer(node) {
     return src === node.id || tgt === node.id;
   });
 
-  const relList = document.getElementById('d-relations');
+    const relList = document.getElementById('d-relations');
+  const relCountEl = document.getElementById('d-rel-count');
+  if (relCountEl) relCountEl.textContent = connectedLinks.length;
   if (relList) {
     relList.innerHTML = '';
     connectedLinks.forEach(l => {
@@ -1117,4 +1120,40 @@ function toggleLanguage() {
 
 function escapeHtml(str) {
   return (str || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+function initDrawerHorizontalResizer() {
+  const resizer = document.getElementById('drawer-h-resizer');
+  const topPane = document.getElementById('drawer-top-pane');
+  const drawerBody = document.querySelector('.drawer-body');
+  if (!resizer || !topPane || !drawerBody) return;
+
+  let isDragging = false;
+  let startY = 0;
+  let startHeight = 0;
+
+  resizer.addEventListener('mousedown', (e) => {
+    isDragging = true;
+    startY = e.clientY;
+    startHeight = topPane.offsetHeight;
+    resizer.classList.add('dragging');
+    document.body.style.cursor = 'row-resize';
+    e.preventDefault();
+  });
+
+  window.addEventListener('mousemove', (e) => {
+    if (!isDragging) return;
+    const dy = e.clientY - startY;
+    const bodyHeight = drawerBody.offsetHeight;
+    const newHeight = Math.max(120, Math.min(bodyHeight - 100, startHeight + dy));
+    topPane.style.height = `${newHeight}px`;
+  });
+
+  window.addEventListener('mouseup', () => {
+    if (isDragging) {
+      isDragging = false;
+      resizer.classList.remove('dragging');
+      document.body.style.cursor = 'default';
+    }
+  });
 }

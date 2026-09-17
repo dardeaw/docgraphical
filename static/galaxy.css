@@ -992,3 +992,71 @@ html, body {
 .code-syntax-var {
   color: #d29922;
 }
+
+/* Drawer Split Panes & Horizontal Resizer */
+.drawer-top-pane {
+  display: flex;
+  flex-direction: column;
+  min-height: 160px;
+  height: 58%;
+  overflow: hidden;
+  gap: 6px;
+}
+
+.drawer-top-pane #d-code-markdown {
+  flex: 1;
+  min-height: 80px;
+  background: #0d1117;
+  border: 1px solid #30363d;
+  border-radius: 6px;
+  padding: 10px 12px;
+  overflow-y: auto;
+  line-height: 1.6;
+  font-size: 13px;
+}
+
+.drawer-h-resizer {
+  height: 8px;
+  margin: 2px 0;
+  cursor: row-resize;
+  background: #21262d;
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.15s ease;
+  user-select: none;
+  flex-shrink: 0;
+}
+
+.drawer-h-resizer:hover, .drawer-h-resizer.dragging {
+  background: #58a6ff;
+  box-shadow: 0 0 8px rgba(88, 166, 255, 0.4);
+}
+
+.drawer-h-resizer::after {
+  content: '┄┄┄';
+  font-size: 10px;
+  color: #8b949e;
+  letter-spacing: 2px;
+  line-height: 8px;
+}
+
+.drawer-bottom-pane {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 80px;
+  overflow: hidden;
+  gap: 6px;
+}
+
+.drawer-bottom-pane .rel-list {
+  flex: 1;
+  min-height: 60px;
+  overflow-y: auto;
+  padding-right: 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
