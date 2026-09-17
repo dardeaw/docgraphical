@@ -56,12 +56,33 @@ document.addEventListener('DOMContentLoaded', () => {
 });
 
 // ─── 1. 3D WebGL Scene & Node Rendering ───────────────────────────
+function updateGraphSize() {
+  if (!Graph) return;
+  const pane3D = document.getElementById('viewport-3d-pane');
+  const graphEl = document.getElementById('3d-graph');
+  if (!pane3D || !graphEl) return;
+
+  const header = pane3D.querySelector('.graph-pane-header');
+  const headerH = header ? header.offsetHeight : 30;
+
+  // Strictly measure ONLY the upper 3D pane, never the drawer below!
+  const w = pane3D.clientWidth;
+  const h = Math.max(100, pane3D.clientHeight - headerH);
+
+  if (w > 0 && h > 0) {
+    Graph.width(w).height(h);
+  }
+}
+
 function init3DGraph() {
   const elem = document.getElementById('3d-graph');
-  if (!elem) return;
+  const pane3D = document.getElementById('viewport-3d-pane');
+  if (!elem || !pane3D) return;
 
-  const width = elem.clientWidth || 400;
-  const height = elem.clientHeight || 300;
+  const header = pane3D.querySelector('.graph-pane-header');
+  const headerH = header ? header.offsetHeight : 30;
+  const width = pane3D.clientWidth || 400;
+  const height = Math.max(100, (pane3D.clientHeight || 350) - headerH);
 
   Graph = ForceGraph3D()(elem)
     .width(width)
@@ -136,13 +157,10 @@ function init3DGraph() {
       .distanceMax(100);
   }
 
-  // Dynamic ResizeObserver ensures 3D canvas always matches container exactly
-  const pane3D = document.getElementById('viewport-3d-pane');
+  // Dynamic ResizeObserver strictly measures ONLY the 3D pane viewport
   if (pane3D && window.ResizeObserver) {
     const ro = new ResizeObserver(() => {
-      if (Graph && elem && elem.clientWidth > 0 && elem.clientHeight > 0) {
-        Graph.width(elem.clientWidth).height(elem.clientHeight);
-      }
+      updateGraphSize();
     });
     ro.observe(pane3D);
   }
@@ -277,6 +295,7 @@ function initAutoRotate() {
 
 function autoFrameGraph() {
   if (!Graph) return;
+  updateGraphSize();
   const nodes = (filteredData.nodes || []);
   if (nodes.length === 0) return;
 
@@ -285,16 +304,16 @@ function autoFrameGraph() {
     const tx = singleNode.x || 0;
     const ty = singleNode.y || 0;
     const tz = singleNode.z || 0;
-    // Exactly center single node at pleasant distance without giant sphere magnification
+    // Aim directly at the single node and frame it dead-center in the 3D viewport
     Graph.cameraPosition(
-      { x: tx, y: ty, z: tz + 110 },
+      { x: tx, y: ty, z: tz + 90 },
       { x: tx, y: ty, z: tz },
-      700
+      600
     );
   } else if (nodes.length <= 4) {
-    Graph.zoomToFit(600, 50);
+    Graph.zoomToFit(600, 45);
   } else {
-    Graph.zoomToFit(600, 20);
+    Graph.zoomToFit(600, 22);
   }
 }
 
@@ -1115,6 +1134,7 @@ function initColumnResizers() {
       if (!isDragging) return;
       const newWidth = Math.max(300, Math.min(window.innerWidth * 0.75, window.innerWidth - e.clientX));
       graphPanel.style.width = `${newWidth}px`;
+      updateGraphSize();
     });
 
     window.addEventListener('mouseup', () => {
@@ -1150,6 +1170,7 @@ function initColumnResizers() {
       const totalH = graphContainer.offsetHeight;
       const newH = Math.max(140, Math.min(totalH - 100, startHeight + dy));
       pane3D.style.height = `${newH}px`;
+      updateGraphSize();
     });
 
     window.addEventListener('mouseup', () => {
