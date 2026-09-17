@@ -5,7 +5,7 @@ from flask import Flask, jsonify, request, Response, render_template
 from .config import load_config, save_config, get_search_roots
 from .scanner import scan_doc_repositories, get_dir_file_tree, get_repo_doc_metrics
 from .parser import extract_toc, extract_section, search_doc, parse_headings
-from .db import index_repository, fetch_graph_data, get_db_path
+from .db import index_repository, fetch_graph_data, get_db_path, get_db_stats, uninit_repository
 
 
 def create_app(initial_paths: Optional[List[str]] = None, search_roots: Optional[List[str]] = None) -> Flask:
@@ -60,16 +60,19 @@ def create_app(initial_paths: Optional[List[str]] = None, search_roots: Optional
         result = []
         for name, p in repos.items():
             metrics = get_repo_doc_metrics(p)
-            db_file = get_db_path(p)
-            has_db = os.path.exists(db_file)
+            stats = get_db_stats(p)
+            has_db = stats["has_db"]
             result.append({
                 "name": name,
                 "path": p,
                 "files": metrics["files"],
                 "headings": metrics["headings"],
+                "nodes": stats["nodes"],
+                "links": stats["links"],
                 "size": metrics["size"],
+                "is_indexed": has_db,
                 "has_db": has_db,
-                "status": "ready" if metrics["files"] > 0 else "empty"
+                "status": "ready" if has_db else "unindexed"
             })
         return jsonify(result)
 
@@ -181,5 +184,35 @@ def create_app(initial_paths: Optional[List[str]] = None, search_roots: Optional
             cfg["excluded_paths"].append(abs_p)
         save_config(cfg)
         return jsonify({"success": True, "path": abs_p})
+
+
+    @app.route("/api/sync", methods=["POST"])
+    def sync_project():
+        data = request.get_json(silent=True) or {}
+        target_path = data.get("path", "").strip()
+        if not target_path or not os.path.exists(target_path):
+            return jsonify({"success": False, "error": "Invalid project path"}), 400
+        f_cnt, n_cnt, e_cnt = index_repository(target_path)
+        return jsonify({"success": True, "files": f_cnt, "nodes": n_cnt, "edges": e_cnt})
+
+    @app.route("/api/reindex", methods=["POST"])
+    def reindex_project():
+        data = request.get_json(silent=True) or {}
+        target_path = data.get("path", "").strip()
+        if not target_path or not os.path.exists(target_path):
+            return jsonify({"success": False, "error": "Invalid project path"}), 400
+        # Delete old DB then rebuild fresh
+        uninit_repository(target_path)
+        f_cnt, n_cnt, e_cnt = index_repository(target_path)
+        return jsonify({"success": True, "files": f_cnt, "nodes": n_cnt, "edges": e_cnt})
+
+    @app.route("/api/uninit", methods=["POST"])
+    def uninit_project():
+        data = request.get_json(silent=True) or {}
+        target_path = data.get("path", "").strip()
+        if not target_path or not os.path.exists(target_path):
+            return jsonify({"success": False, "error": "Invalid project path"}), 400
+        success = uninit_repository(target_path)
+        return jsonify({"success": True, "uninitialized": success})
 
     return app

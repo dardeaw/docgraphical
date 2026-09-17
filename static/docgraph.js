@@ -1256,40 +1256,107 @@ function renderRepoTable(projects) {
   const tbody = document.getElementById('manager-table-body');
   if (!tbody) return;
   tbody.innerHTML = '';
+  
   (projects || []).forEach(p => {
     const tr = document.createElement('tr');
+    const isIndexed = p.is_indexed || p.has_db;
+    const metricsText = isIndexed ? `${p.nodes || 0} / ${p.links || 0}` : '--';
+    const escapedPath = p.path.replace(/\\/g, '\\\\');
+
+    let actionsHtml = '';
+    if (isIndexed) {
+      actionsHtml = `
+        <div class="action-btn-group">
+          <button class="act-btn" onclick="syncRepo('${escapedPath}')">Incremental Index</button>
+          <button class="act-btn" onclick="rebuildRepo('${escapedPath}')">Full Rebuild</button>
+          <button class="act-btn danger" onclick="uninitRepo('${escapedPath}')">Uninit</button>
+        </div>
+      `;
+    } else {
+      actionsHtml = `
+        <div class="action-btn-group">
+          <button class="act-btn green" onclick="initRepo('${escapedPath}')">Create Index</button>
+          <button class="act-btn danger" onclick="excludeRepo('${escapedPath}')">Exclude</button>
+        </div>
+      `;
+    }
+
     tr.innerHTML = `
       <td style="font-weight:600; color:#58a6ff;">${escapeHtml(p.name)}</td>
-      <td style="font-family:monospace; font-size:11px; color:#8b949e; max-width:260px; overflow:hidden; text-overflow:ellipsis;" title="${p.path}">${escapeHtml(p.path)}</td>
-      <td>${p.files !== undefined ? p.files : (p.file_count || 0)}</td>
+      <td style="font-family:monospace; font-size:11px; color:#8b949e;" title="${escapeHtml(p.path)}">${escapeHtml(p.path)}</td>
+      <td style="font-family:monospace; font-size:11px; color:#c9d1d9;">${metricsText}</td>
       <td>
-        <span style="color:${p.has_db ? '#00ffaa' : '#e3b341'}; font-weight:600;">
-          ${p.has_db ? 'Indexed (AST Database)' : 'Not Indexed'}
+        <span class="status-tag ${isIndexed ? 'ready' : 'unindexed'}">
+          ${isIndexed ? 'Indexed' : 'Unindexed'}
         </span>
       </td>
-      <td>
-        <button class="mini-btn" onclick="selectRepo('${p.path.replace(/\\/g, '\\\\')}')">Open</button>
-        <button class="mini-btn" style="background:#1f6feb; color:#fff;" onclick="reindexRepo('${p.path.replace(/\\/g, '\\\\')}')">Index</button>
-      </td>
+      <td>${actionsHtml}</td>
     `;
     tbody.appendChild(tr);
   });
 }
 
-function selectRepo(path) {
-  closePathModal();
-  fetch(`/api/graph?path=${encodeURIComponent(path)}`)
-    .then(res => res.json())
-    .then(data => {
-      rawData = data || { nodes: [], links: [] };
-      applyLODAndFilter();
-      buildProjectTree();
-      buildLegends();
-    });
+function syncRepo(path) {
+  showToast('⏳ Performing incremental AST sync...');
+  fetch('/api/sync', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ path })
+  })
+  .then(res => res.json())
+  .then(res => {
+    if (res.success) {
+      showToast(`✅ Synced: ${res.files} files, ${res.nodes} nodes, ${res.edges} links!`);
+      loadProjects();
+    } else {
+      alert('Sync failed: ' + res.error);
+    }
+  })
+  .catch(err => alert('Sync error: ' + err));
 }
 
-function reindexRepo(path) {
-  showToast('⏳ Indexing documentation into .docgraph/docgraph.db...');
+function rebuildRepo(path) {
+  if (!confirm('Are you sure you want to perform a full AST rebuild?')) return;
+  showToast('⏳ Full rebuild in progress...');
+  fetch('/api/reindex', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ path })
+  })
+  .then(res => res.json())
+  .then(res => {
+    if (res.success) {
+      showToast(`✅ Rebuilt: ${res.files} files, ${res.nodes} nodes, ${res.edges} links!`);
+      loadProjects();
+    } else {
+      alert('Rebuild failed: ' + res.error);
+    }
+  })
+  .catch(err => alert('Rebuild error: ' + err));
+}
+
+function uninitRepo(path) {
+  if (!confirm('Uninitialize repository? This removes the local .docgraphical database.')) return;
+  showToast('⏳ Removing index database...');
+  fetch('/api/uninit', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ path })
+  })
+  .then(res => res.json())
+  .then(res => {
+    if (res.success) {
+      showToast('🗑️ Repository uninitialized.');
+      loadProjects();
+    } else {
+      alert('Uninit failed: ' + res.error);
+    }
+  })
+  .catch(err => alert('Uninit error: ' + err));
+}
+
+function initRepo(path) {
+  showToast('⏳ Creating AST index for repository...');
   fetch('/api/index', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -1298,13 +1365,33 @@ function reindexRepo(path) {
   .then(res => res.json())
   .then(res => {
     if (res.success) {
-      showToast(`✅ Indexed ${res.files} files, ${res.nodes} nodes, ${res.edges} edges!`);
+      showToast(`✅ Index created: ${res.files} files, ${res.nodes} nodes, ${res.edges} links!`);
       loadProjects();
     } else {
       alert('Index failed: ' + res.error);
     }
-  });
+  })
+  .catch(err => alert('Index error: ' + err));
 }
+
+function excludeRepo(path) {
+  fetch('/api/paths/exclude', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ path })
+  })
+  .then(res => res.json())
+  .then(res => {
+    if (res.success) {
+      showToast('🚫 Repository excluded from view.');
+      loadProjects();
+    } else {
+      alert('Exclude failed: ' + res.error);
+    }
+  })
+  .catch(err => alert('Exclude error: ' + err));
+}
+
 
 function checkElectronNative() {
   if (window.electronAPI && typeof window.electronAPI.openDirectoryDialog === 'function') {

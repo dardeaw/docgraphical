@@ -167,38 +167,42 @@
 
 </div>
 
-<!-- Modal: Repositories -->
-<div id="path-modal">
+<!-- Modal: Repository Management -->
+<div id="path-modal" class="modal-overlay">
   <div class="modal-card">
     <div class="modal-header">
-      <span style="font-weight:600; font-size:14px; color:#58a6ff;" id="lbl-modal-title">Documentation Repositories</span>
+      <span style="font-weight:600; font-size:14px; color:#58a6ff;" id="lbl-modal-title">Repository Management</span>
       <button class="drawer-close" onclick="closePathModal()">×</button>
     </div>
     <div class="modal-body">
-      <p style="font-size:12px; color:#8b949e;" id="lbl-modal-sub">
-        Scan local markdown documentation repositories, build SQLite AST index (.docgraph/docgraph.db), and render 3D knowledge topology.
+      <p style="font-size:12px; color:#8b949e; margin-bottom:4px;" id="lbl-modal-sub">
+        Scan local project directories, build index (init), incremental sync (sync), full rebuild (index), or uninitialize (uninit).
+      </p>
+      <p style="font-size:11px; color:#3fb950; margin-bottom:12px; display:flex; align-items:center; gap:6px;">
+        <span style="width:7px; height:7px; border-radius:50%; background:#3fb950; display:inline-block;"></span>
+        <span>DocGraphical 1.0.0 connected (native AST engine)</span>
       </p>
 
-      <div style="display:flex; flex-direction:column; gap:6px;">
-        <label style="font-size:12px; font-weight:500;" id="lbl-add-dir">Scan Documentation Directory:</label>
+      <div style="display:flex; flex-direction:column; gap:6px; margin-bottom:12px;">
+        <label style="font-size:12px; font-weight:600; color:#c9d1d9;" id="lbl-add-dir">Scan Project Directory:</label>
         <div class="add-path-box">
-          <input type="text" id="custom-path-input" class="add-path-input" placeholder="Enter absolute directory path (e.g. D:\Projects\specs)" />
+          <input type="text" id="custom-path-input" class="add-path-input" placeholder="Enter absolute directory path (e.g. D:\Projects)" />
           <button class="mini-btn" id="btn-browse-path" onclick="browseDirectoryNative()" style="padding:6px 12px; background:#21262d; border-color:#30363d; color:#c9d1d9; display:none;">📁 Browse...</button>
-          <button class="mini-btn" id="btn-add-path" onclick="submitAddPath()" style="padding:6px 12px; background:#1f6feb; border-color:#388bfd; color:#fff;">Add Path</button>
+          <button class="mini-btn" id="btn-add-path" onclick="submitAddPath()" style="padding:6px 14px; background:#1f6feb; border-color:#388bfd; color:#fff; font-weight:600;">Add Path</button>
         </div>
       </div>
 
       <div style="display:flex; flex-direction:column; gap:6px;">
-        <span style="font-size:12px; font-weight:500;" id="lbl-repo-list">Discovered Documentation Repos:</span>
-        <div class="table-container" style="max-height:280px; overflow-y:auto;">
+        <span style="font-size:12px; font-weight:600; color:#c9d1d9;" id="lbl-repo-list">Discovered Repositories:</span>
+        <div class="table-container">
           <table class="repo-table">
             <thead>
               <tr>
-                <th>Project</th>
-                <th>Directory Path</th>
-                <th>Files</th>
-                <th>Index (.docgraph.db)</th>
-                <th>Actions</th>
+                <th style="width:18%;">Project</th>
+                <th style="width:34%;">Directory Path</th>
+                <th style="width:12%;">Metrics</th>
+                <th style="width:12%;">Status</th>
+                <th style="width:24%;">Actions</th>
               </tr>
             </thead>
             <tbody id="manager-table-body"></tbody>
@@ -207,7 +211,7 @@
       </div>
     </div>
     <div class="modal-footer">
-      <button class="mini-btn" onclick="closePathModal()" style="padding:6px 14px;">Close</button>
+      <button class="mini-btn" onclick="closePathModal()" style="padding:6px 16px; background:#21262d; border-color:#30363d; color:#c9d1d9;">Close</button>
     </div>
   </div>
 </div>

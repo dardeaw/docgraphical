@@ -313,3 +313,43 @@ def fetch_graph_data(repo_path: str) -> Dict[str, Any]:
     conn.close()
     return {"nodes": nodes, "links": edges}
 
+
+
+def get_db_stats(repo_path: str) -> Dict[str, Any]:
+    """Get node and link counts for a repository database."""
+    repo_path = os.path.abspath(repo_path)
+    for candidate in [
+        os.path.join(repo_path, ".docgraphical", "docgraphical.db"),
+        os.path.join(repo_path, ".docgraph", "docgraph.db"),
+        os.path.join(repo_path, ".docgraphical", "docgraph.db"),
+        os.path.join(repo_path, ".docgraph", "docgraphical.db"),
+    ]:
+        if os.path.exists(candidate):
+            try:
+                conn = sqlite3.connect(candidate)
+                cur = conn.cursor()
+                cur.execute("SELECT count(*) FROM nodes")
+                n_cnt = cur.fetchone()[0]
+                cur.execute("SELECT count(*) FROM edges")
+                e_cnt = cur.fetchone()[0]
+                conn.close()
+                return {"has_db": True, "nodes": n_cnt, "links": e_cnt}
+            except Exception:
+                pass
+    return {"has_db": False, "nodes": 0, "links": 0}
+
+
+def uninit_repository(repo_path: str) -> bool:
+    """Delete .docgraphical and .docgraph directories for a repository."""
+    import shutil
+    repo_path = os.path.abspath(repo_path)
+    removed = False
+    for dot_name in [".docgraphical", ".docgraph"]:
+        dot_dir = os.path.join(repo_path, dot_name)
+        if os.path.exists(dot_dir):
+            try:
+                shutil.rmtree(dot_dir)
+                removed = True
+            except Exception as e:
+                print(f"Error removing {dot_dir}: {e}")
+    return removed
