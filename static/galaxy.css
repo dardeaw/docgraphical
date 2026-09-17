@@ -1272,7 +1272,7 @@ html, body {
 
 /* Column 3: 3D Knowledge Galaxy & Links Hub */
 #graph-panel {
-  width: 440px;
+  width: 40%;
   min-width: 320px;
   max-width: 750px;
   height: 100%;
@@ -1378,4 +1378,105 @@ html, body {
   display: flex;
   flex-direction: column;
   gap: 4px;
+}
+
+
+/* Integrated Mode & Connected Links Hub */
+#integrated-mode-panel {
+  background: #0d1117;
+  border-bottom: 1px solid #21262d;
+  padding: 8px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.mode-panel-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.mode-panel-title {
+  font-size: 11px;
+  font-weight: 600;
+  color: #58a6ff;
+  letter-spacing: 0.5px;
+}
+
+.mode-reset-btn {
+  background: transparent;
+  border: 1px solid transparent;
+  color: #58a6ff;
+  font-size: 10px;
+  cursor: pointer;
+  padding: 2px 6px;
+  border-radius: 4px;
+  transition: all 0.15s;
+}
+
+.mode-reset-btn:hover {
+  background: rgba(88, 166, 255, 0.12);
+  border-color: #58a6ff;
+}
+
+.mode-panel-tabs {
+  display: flex;
+  gap: 6px;
+  border-bottom: 1px solid #21262d;
+  padding-bottom: 4px;
+  margin-top: 2px;
+}
+
+.legend-list.inline-chips {
+  display: flex;
+  flex-direction: row;
+  flex-wrap: wrap;
+  gap: 4px;
+  padding-top: 2px;
+  max-height: 85px;
+  overflow-y: auto;
+}
+
+.legend-list.inline-chips .legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 2px 7px;
+  font-size: 10px;
+  background: #161b22;
+  border: 1px solid #30363d;
+  border-radius: 12px;
+  cursor: pointer;
+  user-select: none;
+  transition: all 0.15s;
+}
+
+.legend-list.inline-chips .legend-item:hover {
+  background: #21262d;
+  border-color: #58a6ff;
+  transform: translateY(-1px);
+}
+
+.legend-list.inline-chips .legend-item.dimmed {
+  opacity: 0.35;
+  filter: grayscale(80%);
+}
+
+.legend-list.inline-chips .legend-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.legend-list.inline-chips .legend-count-badge {
+  font-size: 9px;
+  color: #8b949e;
+  background: #21262d;
+  padding: 1px 4px;
+  border-radius: 6px;
 }

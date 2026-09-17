@@ -49,7 +49,6 @@ document.addEventListener('DOMContentLoaded', () => {
   init3DGraph();
   initAutoRotate();
   initColumnResizers();
-  initDraggableLegend();
   initSearch();
   loadProjects();
   checkElectronNative();
@@ -1024,7 +1023,7 @@ function initColumnResizers() {
 
     window.addEventListener('mousemove', (e) => {
       if (!isDragging) return;
-      const newWidth = Math.max(300, Math.min(800, window.innerWidth - e.clientX));
+      const newWidth = Math.max(300, Math.min(window.innerWidth * 0.75, window.innerWidth - e.clientX));
       graphPanel.style.width = `${newWidth}px`;
     });
 

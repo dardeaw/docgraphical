@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>DocGraph 3D - Markdown Knowledge Studio</title>
 <script src="/static/3d-force-graph.min.js"></script>
-<link rel="stylesheet" href="/static/galaxy.css?v=2.0.0">
+<link rel="stylesheet" href="/static/galaxy.css?v=2.1.0">
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark-dimmed.min.css">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
@@ -116,55 +116,66 @@
   <!-- Resizer 2: Between Doc and 3D Hub -->
   <div class="column-resizer" id="resizer-doc-3d"></div>
 
-  <!-- Column 3: Right 3D Knowledge Galaxy & Connected Links Hub -->
+  <!-- Column 3: Right 3D Knowledge Galaxy & Connected Links Hub (Default 40% Width) -->
   <div id="graph-panel">
 
-    <!-- Upper Pane: 3D Force-Graph Canvas -->
+    <!-- Upper Pane: 3D Force-Graph Canvas (Pure & Unobstructed) -->
     <div id="viewport-3d-pane">
       <div class="graph-pane-header">
-        <span style="font-size:11px; font-weight:600; color:#58a6ff;">🪐 3D Knowledge Topology</span>
+        <span style="font-size:11px; font-weight:600; color:#58a6ff; display:flex; align-items:center; gap:5px;">
+          <span>🪐</span> <span>3D Knowledge Topology</span>
+        </span>
         <div style="display:flex; gap:4px; margin-left:auto;">
-          <button class="mini-btn" onclick="resetCamera()" style="font-size:10px; padding:2px 6px;">Reset</button>
+          <button class="mini-btn" id="btn-rotate" title="Toggle 3D Auto-Rotation" style="font-size:10px; padding:2px 7px;">🔄 Rotate</button>
+          <button class="mini-btn" onclick="resetCamera()" title="Reset 3D Camera" style="font-size:10px; padding:2px 7px;">🎯 Reset</button>
         </div>
       </div>
       <div id="3d-graph"></div>
-
-      <!-- Mode & LOD Floating Controls (Docked inside 3D Pane) -->
-      <div id="legend-panel">
-        <div class="legend-mode-header" id="legend-drag-handle" title="Drag to move panel">
-          <div class="legend-mode-title-row">
-            <span class="legend-mode-title" id="lbl-mode-title">Mode</span>
-            <span class="legend-drag-hint">⋮⋮ Drag</span>
-          </div>
-          <div class="lod-group">
-            <button class="lod-btn" data-lod="arch" id="lod-arch" onclick="changeLOD('arch')">Documents</button>
-            <button class="lod-btn" data-lod="standard" id="lod-standard" onclick="changeLOD('standard')">Standard</button>
-            <button class="lod-btn active" data-lod="all" id="lod-all" onclick="changeLOD('all')">Detailed</button>
-            <button class="lod-btn" data-lod="custom" id="lod-custom" onclick="changeLOD('custom')">Custom</button>
-          </div>
-        </div>
-        <div class="legend-tab-header">
-          <button class="legend-tab-btn active" id="tab-btn-nodes" onclick="switchLegendTab('nodes')">AST Layers</button>
-          <button class="legend-tab-btn" id="tab-btn-edges" onclick="switchLegendTab('edges')">Relationships</button>
-          <button onclick="resetFilters()" id="btn-legend-all" style="margin-left:auto; background:none; border:none; color:#58a6ff; font-size:11px; cursor:pointer;">Reset</button>
-        </div>
-        <div id="legend-nodes-list" class="legend-list"></div>
-        <div id="legend-edges-list" class="legend-list" style="display:none;"></div>
-      </div>
     </div>
 
-    <!-- Horizontal Resizer: Between 3D Canvas and Links -->
-    <div class="pane-h-resizer" id="resizer-3d-links" title="Drag up/down to adjust 3D vs Links height"></div>
+    <!-- Horizontal Resizer: Between 3D Canvas and Mode / Links Hub -->
+    <div class="pane-h-resizer" id="resizer-3d-links" title="Drag up/down to adjust 3D vs Control Hub height"></div>
 
-    <!-- Lower Pane: Connected Links & References -->
+    <!-- Lower Pane: Integrated Mode & Connected Links Hub (Fixed, Non-draggable) -->
     <div id="viewport-links-pane">
+      
+      <!-- Docked Mode & AST Filter Section -->
+      <div id="integrated-mode-panel">
+        <div class="mode-panel-top">
+          <div style="display:flex; align-items:center; gap:8px;">
+            <span class="mode-panel-title">🎛️ Mode</span>
+            <div class="lod-group">
+              <button class="lod-btn" data-lod="arch" id="lod-arch" onclick="changeLOD('arch')">Documents</button>
+              <button class="lod-btn" data-lod="standard" id="lod-standard" onclick="changeLOD('standard')">Standard</button>
+              <button class="lod-btn active" data-lod="all" id="lod-all" onclick="changeLOD('all')">Detailed</button>
+              <button class="lod-btn" data-lod="custom" id="lod-custom" onclick="changeLOD('custom')">Custom</button>
+            </div>
+          </div>
+          <button onclick="resetFilters()" id="btn-legend-all" class="mode-reset-btn" title="Reset all layer filters">Reset</button>
+        </div>
+
+        <div class="mode-panel-tabs">
+          <button class="legend-tab-btn active" id="tab-btn-nodes" onclick="switchLegendTab('nodes')">AST Layers</button>
+          <button class="legend-tab-btn" id="tab-btn-edges" onclick="switchLegendTab('edges')">Relationships</button>
+        </div>
+
+        <div id="legend-nodes-list" class="legend-list inline-chips"></div>
+        <div id="legend-edges-list" class="legend-list inline-chips" style="display:none;"></div>
+      </div>
+
+      <!-- Connected Links Header -->
       <div class="links-pane-header">
-        <span style="font-size:11px; font-weight:600; color:#e6edf3;">🔗 Connected Links (<span id="d-rel-count" style="color:#00ffaa;">0</span>)</span>
+        <span style="font-size:11px; font-weight:600; color:#e6edf3; display:flex; align-items:center; gap:4px;">
+          <span>🔗</span> Connected Links (<span id="d-rel-count" style="color:#00ffaa;">0</span>)
+        </span>
         <span style="font-size:10px; color:#8b949e;">Interactive Nav</span>
       </div>
+
+      <!-- Scrollable Connected Relationships -->
       <div class="rel-list" id="d-relations">
         <div style="font-size:11px; color:#8b949e; padding:8px;">Select a node to view relationships</div>
       </div>
+
     </div>
 
   </div>
@@ -218,6 +229,6 @@
 
 <div id="toast"></div>
 
-<script src="/static/docgraph.js?v=2.0.0"></script>
+<script src="/static/docgraph.js?v=2.1.0"></script>
 </body>
 </html>
