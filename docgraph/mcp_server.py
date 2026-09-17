@@ -5,7 +5,6 @@ Full integration with SQLite Graph Topology (.docgraph/docgraph.db), TOC Slicing
 from __future__ import annotations
 
 import json
-import os
 import sys
 from docgraph.parser import extract_toc, extract_section, search_doc
 from docgraph.db import index_repository, fetch_graph_data, get_db_path

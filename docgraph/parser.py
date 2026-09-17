@@ -52,7 +52,7 @@ def parse_headings(file_path: str) -> List[HeadingNode]:
 
 def extract_toc(file_path: str, format_type: str = "text") -> str:
     """Extract Table of Contents (TOC) with line number anchors.
-    
+
     format_type: 'text' (indented tree), 'json', or 'markdown'
     """
     try:
@@ -187,7 +187,7 @@ def search_doc(
         try:
             with open(mf, "r", encoding="utf-8", errors="replace") as f:
                 lines = f.readlines()
-            
+
             for idx, line in enumerate(lines, 1):
                 if query_clean in line.lower():
                     rel_path = os.path.relpath(mf, path) if os.path.isdir(path) else os.path.basename(mf)

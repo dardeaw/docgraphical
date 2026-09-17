@@ -12,7 +12,7 @@ def main():
         description="DocGraph: Precision Markdown AST, TOC & Section Slicer for AI Agents & Developers."
     )
     parser.add_argument("-v", "--version", action="version", version=f"%(prog)s {__version__}")
-    
+
     subparsers = parser.add_subparsers(dest="command", help="Available subcommands")
 
     # Command: toc
@@ -34,7 +34,7 @@ def main():
     search_parser.add_argument("--limit", type=int, default=30, help="Maximum number of search results")
 
     # Command: mcp
-    mcp_parser = subparsers.add_parser("mcp", help="Start DocGraph Model Context Protocol (MCP) server")
+    subparsers.add_parser("mcp", help="Start DocGraph Model Context Protocol (MCP) server")
 
     args = parser.parse_args()
 

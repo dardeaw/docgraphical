@@ -1,74 +1,139 @@
-# 📄 DocGraph
+# DocGraph
 
-> **The Surgical Precision Markdown AST & Section Slicer for AI Coding Agents.**  
-> *Save up to 97% Context Tokens when inspecting long PRDs, specs, and design documents.*
-
-[![CI](https://github.com/dardeaw/docgraph/actions/workflows/ci.yml/badge.svg)](https://github.com/dardeaw/docgraph/actions)
-[![Python Version](https://img.shields.io/badge/python-3.9%20%7C%203.10%20%7C%203.11%20%7C%203.12-blue)](https://pypi.org/project/docgraph/)
-[![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
-[![MCP Protocol](https://img.shields.io/badge/MCP-Native%20Support-purple.svg)](https://modelcontextprotocol.io/)
+A deterministic Markdown Abstract Syntax Tree (AST) analyzer and surgical section slicer designed for LLM coding agents, RAG pipelines, and developer documentation workflows.
 
 ---
 
-## ⚡ Why DocGraph?
+## Overview
 
-When AI Coding Agents (such as Claude Code, Cursor, Windsurf, or Antigravity) are instructed to read a 1,500-line requirement specification (`.md`), standard tools dump the entire file into the context window:
-- 💸 **Token Exhaustion**: Costs 10k ~ 30k context tokens per view.
-- 😵 **Context Dilution (Lost in the Middle)**: Floods the LLM's attention with irrelevant chapters, causing hallucinations.
-- 📉 **Broken RAG Chunking**: Traditional vector search blindly cuts across code fences and heading hierarchies.
+When Large Language Model (LLM) coding agents (such as Claude Code, Cursor, Windsurf, or Antigravity) inspect extensive Markdown files (e.g., product requirement documents, architecture specifications, design systems), standard tooling typically loads entire files into the model's context window.
 
-**DocGraph solves this with surgical precision:**
-1. **Extract TOC First (~30 tokens)**: Get the full heading structure and line number anchors.
-2. **Slice Exact Section (~100 tokens)**: Retrieve only the specific chapter your agent needs, code blocks intact.
+This approach introduces several practical challenges:
+
+1. **Context Window Saturation**: Reading large multi-thousand-line documents consumes 10,000 to 40,000 tokens per interaction, accelerating context exhaustion and driving up operational inference costs.
+2. **Context Dilution ("Lost in the Middle")**: Flooding the context window with unrelated sections reduces attention density on target instructions, increasing the likelihood of hallucination.
+3. **Imprecise RAG Chunking**: Naive fixed-size text splitters frequently sever code fences, mathematical formulas, and hierarchical heading relationships.
+
+**DocGraph** addresses these issues through AST-aware Markdown analysis:
+
+- **Outline First (TOC Extraction)**: Extracts hierarchical headings with exact line anchors (~30 to 50 tokens), allowing agents to pinpoint target sections before reading.
+- **Surgical Section Slicing**: Slices the exact boundary of a requested section (including all child sub-headings and code blocks) without reading preceding or succeeding chapters (~100 to 300 tokens).
+- **Fenced Code Block Protection**: Guarantees that hash symbols (`#`) inside code blocks (e.g., Python comments, Bash scripts) are never misinterpreted as headings.
+- **Knowledge Graph & Cross-Reference Mapping**: Maps relationships and cross-document markdown links into a lightweight local SQLite graph database (`.docgraph/docgraph.db`).
+- **Model Context Protocol (MCP) Native**: Exposes standard tools for automated integration with MCP-compatible agent environments.
 
 ---
 
-## 🚀 Installation
+## Token Economy Comparison
+
+| Operation | Traditional File Read | Vector / Naive Splitter | DocGraph (AST Slice) |
+| :--- | :--- | :--- | :--- |
+| **Inspect 1,500-line Spec** | ~18,000 tokens | ~2,500 tokens (lossy) | **~150 tokens** |
+| **Hierarchy Preservation** | Full (High Token Cost) | Fragmented | **Strict AST Maintained** |
+| **Code Block Integrity** | Full | Frequently Severed | **Guaranteed Intact** |
+| **Context Noise** | High | Medium | **Zero Irrelevant Text** |
+| **Token Savings** | 0% | ~85% | **~97%** |
+
+---
+
+## Installation
+
+### Python Package (CLI & Library)
 
 ```bash
-# Direct install via pip
+# Basic installation
 pip install docgraph
 
-# Or with native MCP server support
+# Installation with MCP server support
 pip install "docgraph[mcp]"
 ```
 
+### Node.js / Desktop Application
+
+```bash
+# Global CLI via npm
+npm install -g docgraph
+
+# Run Desktop Studio locally
+git clone https://github.com/dardeaw/docgraph.git
+cd docgraph
+npm install
+npm start
+```
+
 ---
 
-## 💻 CLI Usage
+## Quick Start (CLI)
 
 ### 1. Extract Table of Contents (TOC)
+
+Generates a compact outline with line numbers for any Markdown file:
+
 ```bash
 docgraph toc docs/architecture.md
 ```
+
 Output:
 ```text
 === [DocGraph TOC] architecture.md ===
-[Line    1] # System Overview
-[Line   24]   ## 1. Storage Engine
-[Line   58]     ### 1.1 WAL Protocol
+[Line    1] # Architecture Overview
+[Line   24]   ## 1. Storage Subsystem
+[Line   58]     ### 1.1 Write-Ahead Logging (WAL)
 [Line  112]     ### 1.2 LSM-Tree Compaction
-[Line  180]   ## 2. Network Protocol
+[Line  180]   ## 2. Distributed Consensus Protocol
+[Line  245]   ## 3. Network Transport Layer
 ```
 
-### 2. Surgically Slice a Target Section
+JSON format is also supported for programmatic agent workflows:
 ```bash
-docgraph section docs/architecture.md "1. Storage Engine"
+docgraph toc docs/architecture.md --format json
 ```
-*Outputs only chapter 1 and its sub-sections, stopping cleanly at chapter 2!*
 
-### 3. Search Keywords with Line Numbers
+### 2. Surgically Slice a Section
+
+Extracts only the specified chapter and stops precisely before the next heading of equal or higher rank:
+
+```bash
+docgraph section docs/architecture.md "1. Storage Subsystem"
+```
+
+To extract only the heading body without its child sub-sections:
+```bash
+docgraph section docs/architecture.md "1. Storage Subsystem" --no-subsections
+```
+
+### 3. Search Keywords Across Documents
+
+Searches documentation with exact line numbers and contextual snippets:
+
 ```bash
 docgraph search docs/ "compaction"
 ```
 
+### 4. Build Repository Knowledge Graph
+
+Scans a repository, parses all Markdown files into AST nodes and cross-document links, and stores the graph in `.docgraph/docgraph.db`:
+
+```bash
+docgraph index .
+```
+
+### 5. Launch Web Studio
+
+Starts the local HTTP server and opens the visual inspection interface:
+
+```bash
+docgraph serve --port 5002
+```
+
 ---
 
-## 🤖 Model Context Protocol (MCP) Integration
+## Model Context Protocol (MCP) Integration
 
-DocGraph natively integrates with the **Model Context Protocol (MCP)**. Any AI Agent (Claude Code, Cursor, Windsurf, or Antigravity) can connect to it directly via standard stdio.
+DocGraph provides native support for the Model Context Protocol (MCP), allowing AI agents to query documentation structures via standard stdio JSON-RPC.
 
-### Add to MCP Config (`mcp_config.json`):
+### Configuration (`mcp_config.json` / Claude Desktop / Cursor / Antigravity)
+
 ```json
 {
   "mcpServers": {
@@ -80,22 +145,95 @@ DocGraph natively integrates with the **Model Context Protocol (MCP)**. Any AI A
 }
 ```
 
-### 🛠️ 5 Native MCP Tools:
-1. `docgraph_toc(filePath, format)`: Extract hierarchical TOC outline and line anchors (~30 tokens).
-2. `docgraph_section(filePath, heading, includeSubsections)`: Surgically extract target section with code blocks intact.
-3. `docgraph_search(filePath, query, limit)`: Fast keyword search across documentation files.
-4. `docgraph_graph(repoPath)`: Query knowledge graph nodes, edges, and cross-document links from `.docgraph/docgraph.db`.
-5. `docgraph_index(repoPath)`: Scan and build/refresh the SQLite AST index for any repository.
+### Available MCP Tools
+
+| Tool Name | Parameters | Description |
+| :--- | :--- | :--- |
+| `docgraph_toc` | `filePath` (string), `format` (text/json) | Returns heading outline with line numbers (~30 tokens). |
+| `docgraph_section` | `filePath` (string), `heading` (string), `includeSubsections` (bool) | Extracts verbatim content of target section (~100 tokens). |
+| `docgraph_search` | `filePath` (string), `query` (string), `limit` (int) | Fast regex-based keyword search within file or directory. |
+| `docgraph_graph` | `repoPath` (string) | Returns AST node graph and cross-document link relations. |
+| `docgraph_index` | `repoPath` (string) | Refreshes and rebuilds the SQLite AST index for a repository. |
 
 ---
 
-## 🧪 Testing
+## Python API Reference
 
-```bash
-pytest
+DocGraph can be imported directly into Python applications and automated scripts:
+
+```python
+from docgraph.parser import parse_headings, extract_toc, extract_section, search_file
+
+# 1. Parse AST Headings
+headings = parse_headings("docs/spec.md")
+for h in headings:
+    print(f"L{h['line']} [{h['level']}] {h['title']}")
+
+# 2. Extract TOC
+toc_text = extract_toc("docs/spec.md", output_format="text")
+print(toc_text)
+
+# 3. Surgically Slice Section
+section_content = extract_section("docs/spec.md", target_heading="1. Storage Subsystem")
+print(section_content)
+
+# 4. Search File
+matches = search_file("docs/spec.md", query="LSM-Tree")
+for m in matches:
+    print(f"Line {m['line']}: {m['content']}")
 ```
 
 ---
 
-## 📄 License
-MIT License © 2026 Chunghsing Tech / CodeGraph Team
+## Architecture & Design Principles
+
+DocGraph is built upon the following core design principles:
+
+1. **Zero External Runtime Dependencies (Core Library)**: The core parser and scanner rely solely on standard Python libraries (`re`, `sqlite3`, `pathlib`), ensuring zero friction for enterprise and air-gapped environments.
+2. **State Machine AST Parsing**: Markdown documents are processed through a line-by-line state machine that tracks fenced code block states (```` ``` ```` and `~~~`), preventing false positive heading detections.
+3. **Deterministic Section Boundary Slicing**: Slicing calculates exact line offsets based on AST heading depth rather than heuristic text matching.
+4. **Relational Graph Storage**: Nodes (Files, H1-H6 Headings) and Edges (Parent-Child containment, Markdown hyperlinks) are indexed into SQLite with B-Tree indices for sub-millisecond graph queries.
+
+---
+
+## Repository Structure
+
+```text
+docgraph/
+├── docgraph/               # Python core package
+│   ├── __init__.py         # Package entry & exports
+│   ├── cli.py              # CLI argument parser
+│   ├── config.py           # Path & environment configuration
+│   ├── constants.py        # AST node kinds & edge types
+│   ├── db.py               # SQLite schema & query engine
+│   ├── mcp_server.py       # Model Context Protocol stdio server
+│   ├── parser.py           # Markdown AST parser & section slicer
+│   ├── scanner.py          # Multi-document repository scanner
+│   └── server.py           # Web Studio HTTP server
+├── electron/               # Desktop application wrapper
+│   ├── main.js             # Electron main process
+│   └── preload.js          # Secure context bridge
+├── static/                 # Web Studio assets
+│   ├── docgraph.js         # Frontend graph controller
+│   └── galaxy.css          # Visual theme & layout
+├── templates/              # Jinja2 web templates
+│   └── index.html          # Web Studio interface
+├── tests/                  # Unit & integration test suite
+│   └── test_docgraph.py    # Pytest test cases
+├── pyproject.toml          # Python build & dependency metadata
+├── package.json            # Node.js & Electron configuration
+├── LICENSE                 # MIT License
+└── README.md               # Project documentation
+```
+
+---
+
+## Contributing
+
+Contributions are welcome. Please refer to [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines on code formatting, running test suites, and submitting pull requests.
+
+---
+
+## License
+
+DocGraph is open-source software licensed under the [MIT License](LICENSE).

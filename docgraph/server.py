@@ -81,7 +81,7 @@ def create_app(initial_paths: Optional[List[str]] = None, search_roots: Optional
         if not target_path or not os.path.exists(target_path):
             roots = get_search_roots(search_roots)
             target_path = roots[0] if roots else os.getcwd()
-        
+
         data = fetch_graph_data(target_path)
         return jsonify(data)
 
@@ -91,7 +91,7 @@ def create_app(initial_paths: Optional[List[str]] = None, search_roots: Optional
         target_path = data.get("path", "").strip()
         if not target_path or not os.path.exists(target_path):
             return jsonify({"success": False, "error": "Invalid project path"}), 400
-        
+
         f_cnt, n_cnt, e_cnt = index_repository(target_path)
         return jsonify({"success": True, "files": f_cnt, "nodes": n_cnt, "edges": e_cnt})
 
@@ -134,7 +134,7 @@ def create_app(initial_paths: Optional[List[str]] = None, search_roots: Optional
             with open(file_path, "r", encoding="utf-8", errors="replace") as f:
                 content = f.read()
             return jsonify({"heading": "Full Document", "content": content, "sliced": False})
-        
+
         sec = extract_section(file_path, heading, include_subsections=include_sub)
         return jsonify({"heading": heading, "content": sec, "sliced": True})
 
@@ -148,7 +148,7 @@ def create_app(initial_paths: Optional[List[str]] = None, search_roots: Optional
             target_path = roots[0] if roots else os.getcwd()
         if not query:
             return jsonify({"results": []})
-        
+
         output = search_doc(target_path, query, max_results=limit)
         return jsonify({"query": query, "output": output})
 
@@ -158,7 +158,7 @@ def create_app(initial_paths: Optional[List[str]] = None, search_roots: Optional
         new_path = data.get("path", "").strip()
         if not new_path or not os.path.exists(new_path):
             return jsonify({"success": False, "error": "Invalid or nonexistent directory path"}), 400
-        
+
         abs_p = os.path.abspath(new_path)
         cfg = load_config()
         if abs_p not in cfg["custom_roots"]:
@@ -174,7 +174,7 @@ def create_app(initial_paths: Optional[List[str]] = None, search_roots: Optional
         target_path = data.get("path", "").strip()
         if not target_path:
             return jsonify({"success": False, "error": "Missing path parameter"}), 400
-        
+
         abs_p = os.path.abspath(target_path)
         cfg = load_config()
         if abs_p in cfg["custom_roots"]:

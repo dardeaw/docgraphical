@@ -12,16 +12,16 @@ def scan_doc_repositories(search_roots: List[str]) -> Dict[str, str]:
     """Discover all folders containing markdown documents under search roots."""
     cfg = load_config()
     excluded = [os.path.abspath(p) for p in cfg.get("excluded_paths", [])]
-    
+
     repos: Dict[str, str] = {}
-    
+
     for root_dir in search_roots:
         if not os.path.isdir(root_dir):
             continue
         abs_root = os.path.abspath(root_dir)
         if abs_root in excluded:
             continue
-            
+
         # Add root itself
         repos[os.path.basename(abs_root) or abs_root] = abs_root
 
