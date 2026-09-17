@@ -93,6 +93,18 @@ def index_repository(repo_path: str) -> Tuple[int, int, int]:
     total_edges = 0
     pending_edges: List[Tuple[str, str, str, str, int]] = []
 
+    all_rel_files = set(os.path.relpath(f, repo_path).replace("\\", "/") for f in md_files)
+    all_rel_lower = {f.lower(): f for f in all_rel_files}
+
+    # Count unique basenames for cross-doc mention resolution
+    basename_counts: Dict[str, int] = {}
+    for f in all_rel_files:
+        b = os.path.basename(f)
+        basename_counts[b] = basename_counts.get(b, 0) + 1
+    unique_basenames = {b: f for b, f in [(os.path.basename(f), f) for f in all_rel_files] if basename_counts[b] == 1}
+
+    link_pattern = re.compile(r"\[([^\]]+)\]\(([^)#\s]+)(?:#[^)]*)?\)")
+
     for file_path in md_files:
         rel_path = os.path.relpath(file_path, repo_path).replace("\\", "/")
         try:
@@ -158,15 +170,51 @@ def index_repository(repo_path: str) -> Tuple[int, int, int]:
 
         cur.execute("UPDATE files SET node_count = ? WHERE path = ?", (headings_in_file + 1, rel_path))
 
-        # Check for cross-file links
-        link_matches = re.finditer(r"\[([^\]]+)\]\(([^)]+\.(?:md|markdown|mdown))(?:\#([^)]+))?\)", content)
-        for lm in link_matches:
-            target_link = lm.group(2).strip().replace("\\", "/")
-            current_dir = os.path.dirname(rel_path)
-            target_rel = os.path.normpath(os.path.join(current_dir, target_link)).replace("\\", "/")
-            link_edge_id = f"link::{file_node_id}->{target_rel}::{lm.start()}"
-            pending_edges.append((link_edge_id, file_node_id, f"file::{target_rel}", "doc_link", 0))
-            total_edges += 1
+        # 1. Comprehensive cross-doc Markdown links resolution
+        current_dir = os.path.dirname(rel_path)
+        linked_targets = set()
+
+        for lm in link_pattern.finditer(content):
+            raw_target = lm.group(2).strip().replace("\\", "/")
+            if re.match(r"^(?:https?|mailto|ftp):", raw_target):
+                continue
+
+            candidates = [
+                os.path.normpath(os.path.join(current_dir, raw_target)).replace("\\", "/"),
+                os.path.normpath(os.path.join(current_dir, raw_target + ".md")).replace("\\", "/"),
+                os.path.normpath(os.path.join(current_dir, raw_target, "README.md")).replace("\\", "/"),
+                os.path.normpath(raw_target).replace("\\", "/"),
+                os.path.normpath(raw_target + ".md").replace("\\", "/")
+            ]
+
+            target_match = None
+            for cand in candidates:
+                cand_l = cand.lower()
+                if cand_l in all_rel_lower and all_rel_lower[cand_l] != rel_path:
+                    target_match = all_rel_lower[cand_l]
+                    break
+
+            if target_match and target_match not in linked_targets:
+                linked_targets.add(target_match)
+                link_edge_id = f"link::{file_node_id}->file::{target_match}"
+                pending_edges.append((link_edge_id, file_node_id, f"file::{target_match}", "doc_link", 0))
+                total_edges += 1
+
+        # 2. Textual path and unique doc mentions (forming rich knowledge topology)
+        for other_f in all_rel_files:
+            if other_f != rel_path and other_f not in linked_targets and other_f in content:
+                linked_targets.add(other_f)
+                link_edge_id = f"path::{file_node_id}->file::{other_f}"
+                pending_edges.append((link_edge_id, file_node_id, f"file::{other_f}", "doc_link", 0))
+                total_edges += 1
+
+        for b, target_f in unique_basenames.items():
+            if target_f != rel_path and target_f not in linked_targets and len(b) > 6:
+                if b not in ["README.md", "requirements.txt", "SKILL.md"] and b in content:
+                    linked_targets.add(target_f)
+                    link_edge_id = f"mention::{file_node_id}->file::{target_f}"
+                    pending_edges.append((link_edge_id, file_node_id, f"file::{target_f}", "doc_link", 0))
+                    total_edges += 1
 
     for e in pending_edges:
         cur.execute("INSERT OR IGNORE INTO edges VALUES (?, ?, ?, ?, ?)", e)
@@ -194,13 +242,13 @@ def fetch_graph_data(repo_path: str) -> Dict[str, Any]:
 
     nodes = []
     KIND_COLORS = {
-        "file": "#f0883e",       # File Orange (Galaxy Mode 1)
-        "heading_1": "#58a6ff",  # H1 Function Blue (Galaxy Mode 2)
-        "heading_2": "#3fb950",  # H2 Class Green (Galaxy Mode 3)
-        "heading_3": "#bc8cff",  # H3 Import Purple (Galaxy Mode 4)
-        "heading_4": "#d29922",  # H4 Variable Gold (Galaxy Mode 5)
-        "heading_5": "#79c0ff",
-        "heading_6": "#a5d6ff",
+        "file": "#f0883e",       # Document (Warm Cyber Orange)
+        "heading_1": "#58a6ff",  # H1 Primary (Electric Blue)
+        "heading_2": "#3fb950",  # H2 Major (Emerald Green)
+        "heading_3": "#bc8cff",  # H3 Subsection (Vivid Purple)
+        "heading_4": "#ff7bba",  # H4 Detail (Vibrant Rose Pink - 100% distinct from Document Orange!)
+        "heading_5": "#00d2d3",  # H5 Fine (Cyan / Turquoise)
+        "heading_6": "#ffd700",  # H6 Micro (Bright Gold)
     }
 
     # Hierarchy-based gradual sizing: File(12) -> H1(8.5) -> H2(6.0) -> H3(4.2) -> H4(3.0) -> H5/6(2.2)

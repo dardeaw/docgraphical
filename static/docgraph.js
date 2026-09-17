@@ -21,13 +21,13 @@ const hiddenKinds = new Set();
 const hiddenEdgeKinds = new Set();
 
 const KIND_COLORS = {
-  file: '#f0883e',       // Orange (Document)
-  heading_1: '#58a6ff',  // Blue (H1 Primary)
-  heading_2: '#3fb950',  // Green (H2 Major)
-  heading_3: '#bc8cff',  // Purple (H3 Subsection)
-  heading_4: '#d29922',  // Gold (H4 Detail)
-  heading_5: '#79c0ff',
-  heading_6: '#a5d6ff'
+  file: '#f0883e',       // Document (Warm Cyber Orange)
+  heading_1: '#58a6ff',  // H1 Primary (Electric Blue)
+  heading_2: '#3fb950',  // H2 Major (Emerald Green)
+  heading_3: '#bc8cff',  // H3 Subsection (Vivid Purple)
+  heading_4: '#ff7bba',  // H4 Detail (Vibrant Rose Pink - 100% distinct from Document Orange!)
+  heading_5: '#00d2d3',  // H5 Fine (Cyan / Turquoise)
+  heading_6: '#ffd700'   // H6 Micro (Bright Gold)
 };
 
 const KIND_SIZES = {
@@ -814,16 +814,7 @@ function openDrawer(node) {
     badge.style.background = KIND_COLORS[node.kind] || '#1f6feb';
   }
 
-  // IDE Launchers
-  const filePath = node.abs_path || node.file || '';
-  const encodedPath = encodeURIComponent(filePath.replace(/\\/g, '/'));
-  const startLine = node.line || 1;
-  const vsc = document.getElementById('ide-vscode');
-  const cur = document.getElementById('ide-cursor');
-  const agy = document.getElementById('ide-antigravity');
-  if (vsc) vsc.href = `vscode://file/${encodedPath}:${startLine}`;
-  if (cur) cur.href = `cursor://file/${encodedPath}:${startLine}`;
-  if (agy) agy.href = `vscode://file/${encodedPath}:${startLine}`;
+  // IDE Launchers removed per specification
 
   // Fetch Section / Full Content
   const queryFile = node.abs_path || node.file || '';
@@ -858,32 +849,41 @@ function openDrawer(node) {
       }
     });
 
-  // Connected Relations
+  // Connected Relations (Cross-doc links & AST hierarchy)
   const rawLinks = rawData.links || [];
-  const outLinks = rawLinks.filter(l => {
+  const connectedLinks = rawLinks.filter(l => {
     const src = typeof l.source === 'object' ? l.source.id : l.source;
-    return src === node.id;
+    const tgt = typeof l.target === 'object' ? l.target.id : l.target;
+    return src === node.id || tgt === node.id;
   });
 
   const relList = document.getElementById('d-relations');
   if (relList) {
     relList.innerHTML = '';
-    outLinks.forEach(l => {
+    connectedLinks.forEach(l => {
+      const srcId = typeof l.source === 'object' ? l.source.id : l.source;
       const tgtId = typeof l.target === 'object' ? l.target.id : l.target;
-      const tgtNode = rawData.nodes.find(n => n.id === tgtId);
-      if (!tgtNode) return;
+      const otherId = (srcId === node.id) ? tgtId : srcId;
+      const otherNode = rawData.nodes.find(n => n.id === otherId);
+      if (!otherNode) return;
+
+      const isDocLink = l.kind === 'doc_link';
+      const isOut = (srcId === node.id);
+      const relLabel = isDocLink ? (isOut ? '🔗 References' : '↩ Referenced By') : (isOut ? '▾ Contains' : '▴ Parent');
 
       const row = document.createElement('div');
       row.className = 'rel-row';
+      row.style.cursor = 'pointer';
       row.innerHTML = `
-        <span class="rel-kind">${l.kind === 'parent_child' ? 'contains' : 'links_to'}</span>
-        <span class="rel-target">${escapeHtml(tgtNode.name)}</span>
+        <span class="rel-kind" style="background:${isDocLink ? '#23863644' : '#1f6feb33'}; color:${isDocLink ? '#00ffaa' : '#58a6ff'}; border:1px solid ${isDocLink ? '#238636aa' : '#1f6feb88'};">${relLabel}</span>
+        <span class="rel-target" style="color:#e6edf3; font-weight:500;">${escapeHtml(otherNode.name)}</span>
+        <span class="node-kind-tag" style="margin-left:auto; font-size:10px;">${otherNode.kind === 'file' ? 'DOC' : 'H' + (otherNode.level || 1)}</span>
       `;
       row.onclick = () => {
-        highlightScope('node', tgtNode);
-        focusOnNode(tgtNode);
-        openDrawer(tgtNode);
-        syncExplorerSelection(tgtNode);
+        highlightScope('node', otherNode);
+        focusOnNode(otherNode);
+        openDrawer(otherNode);
+        syncExplorerSelection(otherNode);
       };
       relList.appendChild(row);
     });
