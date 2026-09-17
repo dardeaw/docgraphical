@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>DocGraph 3D - Markdown Knowledge Studio</title>
 <script src="/static/3d-force-graph.min.js"></script>
-<link rel="stylesheet" href="/static/galaxy.css?v=2.5.0">
+<link rel="stylesheet" href="/static/galaxy.css?v=2.6.0">
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark-dimmed.min.css">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
@@ -134,24 +134,14 @@
     <!-- Lower Pane: Integrated Mode & Connected Links Hub (Fixed, Non-draggable) -->
     <div id="viewport-links-pane">
       
-      <!-- Docked Mode & AST Filter Section -->
+      <!-- Docked AST & Relationship Filter Section (Clean & Streamlined) -->
       <div id="integrated-mode-panel">
         <div class="mode-panel-top">
-          <div style="display:flex; align-items:center; gap:8px;">
-            <span class="mode-panel-title">🎛️ Mode</span>
-            <div class="lod-group">
-              <button class="lod-btn" data-lod="arch" id="lod-arch" onclick="changeLOD('arch')">Documents</button>
-              <button class="lod-btn" data-lod="standard" id="lod-standard" onclick="changeLOD('standard')">Standard</button>
-              <button class="lod-btn active" data-lod="all" id="lod-all" onclick="changeLOD('all')">Detailed</button>
-              <button class="lod-btn" data-lod="custom" id="lod-custom" onclick="changeLOD('custom')">Custom</button>
-            </div>
+          <div class="legend-tab-header">
+            <button class="legend-tab-btn active" id="tab-btn-nodes" onclick="switchLegendTab('nodes')">AST Layers</button>
+            <button class="legend-tab-btn" id="tab-btn-edges" onclick="switchLegendTab('edges')">Relationships</button>
           </div>
-          <button onclick="resetFilters()" id="btn-legend-all" class="mode-reset-btn" title="Reset all layer filters">Reset</button>
-        </div>
-
-        <div class="mode-panel-tabs">
-          <button class="legend-tab-btn active" id="tab-btn-nodes" onclick="switchLegendTab('nodes')">AST Layers</button>
-          <button class="legend-tab-btn" id="tab-btn-edges" onclick="switchLegendTab('edges')">Relationships</button>
+          <button onclick="resetFilters()" id="btn-legend-all" class="mode-reset-btn" title="Reset to default (Documents + H1)">Reset</button>
         </div>
 
         <div id="legend-nodes-list" class="legend-list inline-chips"></div>
@@ -224,6 +214,6 @@
 
 <div id="toast"></div>
 
-<script src="/static/docgraph.js?v=2.5.0"></script>
+<script src="/static/docgraph.js?v=2.6.0"></script>
 </body>
 </html>

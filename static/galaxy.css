@@ -1391,6 +1391,12 @@ html, body {
   flex-shrink: 0;
 }
 
+.mode-panel-top .legend-tab-header {
+  margin-bottom: 0;
+  border-bottom: none;
+  padding-bottom: 0;
+}
+
 .mode-panel-top {
   display: flex;
   align-items: center;
@@ -1478,4 +1484,30 @@ html, body {
   background: #21262d;
   padding: 1px 4px;
   border-radius: 6px;
+}
+
+
+/* 3D ForceGraph Tooltip Precision Styling */
+.scene-tooltip {
+  background: rgba(13, 17, 23, 0.94);
+  border: 1px solid #30363d;
+  border-radius: 6px;
+  padding: 6px 10px;
+  box-shadow: 0 6px 20px rgba(0,0,0,0.65);
+  pointer-events: none;
+  font-family: inherit;
+  line-height: 1.35;
+  backdrop-filter: blur(10px);
+}
+
+.scene-tooltip .tooltip-title {
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.3px;
+}
+
+.scene-tooltip .tooltip-sub {
+  font-size: 10px; /* Exactly 2px smaller than title (12px -> 10px) */
+  color: #8b949e;
+  margin-top: 2px;
 }

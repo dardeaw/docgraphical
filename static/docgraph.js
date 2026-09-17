@@ -18,7 +18,7 @@ let currentLanguage = 'en';
 
 // Mode & Filter States
 let currentLOD = 'all'; // 'arch', 'standard', 'all', 'custom'
-const hiddenKinds = new Set();
+const hiddenKinds = new Set(['heading_2', 'heading_3', 'heading_4', 'heading_5', 'heading_6']);
 const hiddenEdgeKinds = new Set();
 
 const KIND_COLORS = {
@@ -92,7 +92,11 @@ function init3DGraph() {
     .nodeLabel(n => {
       const typeLabel = n.kind === 'file' ? 'Document' : `H${n.level || 1} Section`;
       const fileName = (n.file || '').split(/[\\/]/).pop();
-      return `<div class="scene-tooltip"><div class="tooltip-title">${escapeHtml(n.name)}</div><div class="tooltip-sub">${typeLabel} · ${escapeHtml(fileName)} · Line ${n.line || 1}</div></div>`;
+      const nodeColor = KIND_COLORS[n.kind] || '#58a6ff';
+      return `<div class="scene-tooltip">
+        <div class="tooltip-title" style="color:${nodeColor};">${escapeHtml(n.name)}</div>
+        <div class="tooltip-sub">${typeLabel} · ${escapeHtml(fileName)} · Line ${n.line || 1}</div>
+      </div>`;
     })
     .nodeColor(n => {
       if (highlightNodes.size > 0) {
@@ -986,9 +990,7 @@ function buildLegends() {
       } else {
         hiddenKinds.add(item.kind);
       }
-      currentLOD = 'custom';
-      document.querySelectorAll('.lod-btn').forEach(b => b.classList.toggle('active', b.dataset.lod === 'custom'));
-      updateLegendUI();
+      el.classList.toggle('dimmed', hiddenKinds.has(item.kind));
       applyLODAndFilter();
     };
     nodesList.appendChild(el);
@@ -1049,8 +1051,11 @@ function switchLegendTab(tab) {
 
 function resetFilters() {
   hiddenKinds.clear();
+  // Default to Documents and H1 Section
+  ['heading_2', 'heading_3', 'heading_4', 'heading_5', 'heading_6'].forEach(k => hiddenKinds.add(k));
   hiddenEdgeKinds.clear();
-  changeLOD('all');
+  applyLODAndFilter();
+  buildLegends();
 }
 
 function initDraggableLegend() {
