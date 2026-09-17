@@ -528,33 +528,10 @@ function renderDirContents(projName, dirObj, parentEl, openDirs, openFiles, sele
       selectTreeNode(fileNodeEl);
     }
 
-    // 3. Render Headings (TOC) inside fileChildrenEl sorted by line
+    // 3. Convert flat headings into a nested AST hierarchy tree (Every level collapsible!)
     const sortedHeadings = symList.slice().sort((a, b) => (a.line || 0) - (b.line || 0));
-    sortedHeadings.forEach(s => {
-      const symNodeEl = document.createElement('div');
-      symNodeEl.className = 'tree-node';
-      symNodeEl.setAttribute('data-tree-node-id', s.id);
-
-      symNodeEl.innerHTML = `
-        <span style="color:${KIND_COLORS[s.kind] || '#58a6ff'}; margin-right:4px;">${'#'.repeat(s.level || 1)}</span>
-        <span style="color:#8b949e; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${escapeHtml(s.name)}</span>
-        <span class="tree-line-badge" style="margin-left:auto; font-size:10px; color:#6e7681;">L${s.line || 1}</span>
-      `;
-
-      symNodeEl.onclick = (e) => {
-        e.stopPropagation();
-        selectTreeNode(symNodeEl);
-        highlightScope('node', s);
-        focusOnNode(s);
-        openDrawer(s);
-      };
-
-      if (selectedKey === s.id) {
-        selectTreeNode(symNodeEl);
-      }
-
-      fileChildrenEl.appendChild(symNodeEl);
-    });
+    const headingTree = buildHeadingTree(sortedHeadings);
+    renderNestedHeadingTree(headingTree, fileChildrenEl, openDirs, selectedKey);
 
     parentEl.appendChild(fileNodeEl);
     parentEl.appendChild(fileChildrenEl);
@@ -1154,6 +1131,74 @@ function initDrawerHorizontalResizer() {
       isDragging = false;
       resizer.classList.remove('dragging');
       document.body.style.cursor = 'default';
+    }
+  });
+}
+
+// Build hierarchical AST tree from flat headings list
+function buildHeadingTree(flatHeadings) {
+  const root = [];
+  const stack = [{ level: 0, children: root }];
+
+  flatHeadings.forEach(h => {
+    const node = { ...h, children: [] };
+    while (stack.length > 1 && stack[stack.length - 1].level >= (h.level || 1)) {
+      stack.pop();
+    }
+    stack[stack.length - 1].children.push(node);
+    stack.push(node);
+  });
+
+  return root;
+}
+
+// Render nested heading AST tree with collapsible levels
+function renderNestedHeadingTree(headingNodes, parentEl, openDirs, selectedKey) {
+  if (!headingNodes || headingNodes.length === 0) return;
+
+  headingNodes.forEach(h => {
+    const hasChildren = h.children && h.children.length > 0;
+    const isHeadingOpen = openDirs ? openDirs.has(h.id) : false;
+
+    const hNodeEl = document.createElement('div');
+    hNodeEl.className = 'tree-node';
+    hNodeEl.setAttribute('data-tree-node-id', h.id);
+
+    hNodeEl.innerHTML = `
+      <span class="tree-arrow ${isHeadingOpen ? 'open' : ''}" style="${hasChildren ? '' : 'visibility:hidden;'}">▸</span>
+      <span style="color:${KIND_COLORS[h.kind] || '#58a6ff'}; margin-right:4px; font-weight:700; font-size:11px;">${'#'.repeat(h.level || 1)}</span>
+      <span style="color:#e6edf3; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:12px;">${escapeHtml(h.name)}</span>
+      <span class="tree-line-badge" style="margin-left:auto; font-size:10px; color:#6e7681;">L${h.line || 1}</span>
+    `;
+
+    const hChildrenEl = document.createElement('div');
+    hChildrenEl.className = `tree-children ${isHeadingOpen ? 'open' : ''}`;
+
+    const arrow = hNodeEl.querySelector('.tree-arrow');
+    if (arrow && hasChildren) {
+      arrow.onclick = (e) => {
+        e.stopPropagation();
+        hChildrenEl.classList.toggle('open');
+        arrow.classList.toggle('open');
+      };
+    }
+
+    hNodeEl.onclick = (e) => {
+      e.stopPropagation();
+      selectTreeNode(hNodeEl);
+      highlightScope('node', h);
+      focusOnNode(h);
+      openDrawer(h);
+    };
+
+    if (selectedKey === h.id) {
+      selectTreeNode(hNodeEl);
+    }
+
+    parentEl.appendChild(hNodeEl);
+    if (hasChildren) {
+      renderNestedHeadingTree(h.children, hChildrenEl, openDirs, selectedKey);
+      parentEl.appendChild(hChildrenEl);
     }
   });
 }

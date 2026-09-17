@@ -132,10 +132,15 @@ def index_repository(repo_path: str) -> Tuple[int, int, int]:
 
         heading_stack: List[Tuple[int, str]] = [(0, file_node_id)]
         headings_in_file = 0
+        in_code_block = False
 
         for idx, line in enumerate(lines, 1):
             stripped = line.strip()
             if stripped.startswith("```") or stripped.startswith("~~~"):
+                in_code_block = not in_code_block
+                continue
+
+            if in_code_block:
                 continue
 
             m = re.match(r"^(#{1,6})\s+(.+)$", stripped)
