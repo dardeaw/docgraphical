@@ -1,5 +1,5 @@
 // DocGraph 3D - Flagship Knowledge Topology & AST Slicer
-// 100% Faithful to CodeGraph Galaxy Architecture & UX
+// 100% Faithful to CodeGraph Galaxy Architecture & UX with Hierarchical Directory Tree
 
 let Graph = null;
 let rawData = { nodes: [], links: [] };
@@ -146,7 +146,43 @@ function highlightScope(scopeType, targetObj) {
 
   const rawLinks = rawData.links || [];
 
-  if (scopeType === 'node') {
+  if (scopeType === 'project') {
+    const projName = targetObj.name;
+    rawData.nodes.forEach(n => highlightNodes.add(n.id));
+    rawLinks.forEach(l => highlightLinks.add(l));
+    if (Graph) Graph.zoomToFit(600, 40);
+  } else if (scopeType === 'dir') {
+    const dirPrefix = (targetObj.dir_path || '').replace(/^\/+/, '');
+    rawData.nodes.filter(n => {
+      const f = (n.file || '').replace(/\\/g, '/').replace(/^\/+/, '');
+      return f.startsWith(dirPrefix);
+    }).forEach(n => highlightNodes.add(n.id));
+
+    rawLinks.forEach(l => {
+      const sId = typeof l.source === 'object' ? l.source.id : l.source;
+      const tId = typeof l.target === 'object' ? l.target.id : l.target;
+      if (highlightNodes.has(sId) || highlightNodes.has(tId)) {
+        highlightLinks.add(l);
+      }
+    });
+    if (Graph) Graph.zoomToFit(600, 40);
+  } else if (scopeType === 'file') {
+    const fileNode = targetObj.node;
+    if (fileNode) highlightNodes.add(fileNode.id);
+    (targetObj.symbols || targetObj.headings || []).forEach(h => highlightNodes.add(h.id));
+
+    rawLinks.forEach(l => {
+      const sId = typeof l.source === 'object' ? l.source.id : l.source;
+      const tId = typeof l.target === 'object' ? l.target.id : l.target;
+      if (highlightNodes.has(sId) || highlightNodes.has(tId)) {
+        highlightLinks.add(l);
+        highlightNodes.add(sId);
+        highlightNodes.add(tId);
+      }
+    });
+
+    if (fileNode && fileNode.x !== undefined) focusOnNode(fileNode);
+  } else if (scopeType === 'node') {
     const node = targetObj;
     highlightNodes.add(node.id);
 
@@ -161,22 +197,6 @@ function highlightScope(scopeType, targetObj) {
         highlightNodes.add(sId);
       }
     });
-  } else if (scopeType === 'file') {
-    const fileNode = targetObj.node;
-    if (fileNode) highlightNodes.add(fileNode.id);
-    (targetObj.headings || []).forEach(h => highlightNodes.add(h.id));
-
-    rawLinks.forEach(l => {
-      const sId = typeof l.source === 'object' ? l.source.id : l.source;
-      const tId = typeof l.target === 'object' ? l.target.id : l.target;
-      if (highlightNodes.has(sId) || highlightNodes.has(tId)) {
-        highlightLinks.add(l);
-        highlightNodes.add(sId);
-        highlightNodes.add(tId);
-      }
-    });
-
-    if (fileNode && fileNode.x !== undefined) focusOnNode(fileNode);
   }
 
   // Refresh 3D Graph elements
@@ -279,68 +299,103 @@ function buildProjectTree() {
   const container = document.getElementById('tree-container');
   if (!container) return;
 
-  // Snapshot currently open folders
+  // Snapshot currently open folders and selection
+  const openProjs = new Set();
   const openDirs = new Set();
-  container.querySelectorAll('.tree-children.open').forEach(el => {
-    const prev = el.previousElementSibling;
-    if (prev && prev.getAttribute('data-tree-dir')) {
-      openDirs.add(prev.getAttribute('data-tree-dir'));
-    }
-    if (prev && prev.getAttribute('data-tree-file')) {
-      openDirs.add(prev.getAttribute('data-tree-file'));
+  const openFiles = new Set();
+
+  container.querySelectorAll('.tree-children.open').forEach(childEl => {
+    const prev = childEl.previousElementSibling;
+    if (prev) {
+      const p = prev.getAttribute('data-tree-proj');
+      const d = prev.getAttribute('data-tree-dir');
+      const f = prev.getAttribute('data-tree-file');
+      if (p) openProjs.add(p);
+      if (d) openDirs.add(d);
+      if (f) openFiles.add(f);
     }
   });
+
+  const selectedKey = selectedTreeNodeEl ? (
+    selectedTreeNodeEl.getAttribute('data-tree-node-id') ||
+    selectedTreeNodeEl.getAttribute('data-tree-file') ||
+    selectedTreeNodeEl.getAttribute('data-tree-dir') ||
+    selectedTreeNodeEl.getAttribute('data-tree-proj')
+  ) : null;
 
   container.innerHTML = '';
   const summaryEl = document.getElementById('lbl-proj-summary');
   if (summaryEl) summaryEl.innerText = `${selectedProjects.size} Active`;
 
-  // Build recursive directory structure from rawData.nodes
-  // dir -> { name, path, files: { fileName: { name, path, headings: [] } }, subdirs: {} }
-  const rootTree = {};
+  // Build recursive directory structure for projects
+  // projRoots[projName] = { name, dirs: {}, files: {} }
+  const projRoots = {};
 
   (rawData.nodes || []).forEach(n => {
-    const filePath = (n.file || '').replace(/\\/g, '/');
-    if (!filePath) return;
-
-    const parts = filePath.split('/');
-    const fileName = parts.pop();
-    const dirPath = parts.join('/');
-
-    if (!rootTree[dirPath]) {
-      rootTree[dirPath] = { name: parts[parts.length - 1] || 'Root', path: dirPath, files: {}, subdirs: {} };
+    const proj = n.project || (allProjectsList[0] ? allProjectsList[0].name : 'Project');
+    if (!projRoots[proj]) {
+      projRoots[proj] = { name: proj, dirs: {}, files: {} };
     }
-    if (!rootTree[dirPath].files[fileName]) {
-      rootTree[dirPath].files[fileName] = { name: fileName, path: filePath, node: null, headings: [] };
+
+    const rawPath = (n.file || n.file_path || '').replace(/\\/g, '/').replace(/^\/+/, '');
+    if (!rawPath) return;
+
+    const parts = rawPath.split('/');
+    const fileName = parts.pop();
+
+    let currentDir = projRoots[proj];
+    let accumulatedPath = '';
+
+    parts.forEach(p => {
+      accumulatedPath = accumulatedPath ? `${accumulatedPath}/${p}` : p;
+      if (!currentDir.dirs[p]) {
+        currentDir.dirs[p] = {
+          name: p,
+          path: accumulatedPath,
+          dirs: {},
+          files: {}
+        };
+      }
+      currentDir = currentDir.dirs[p];
+    });
+
+    if (!currentDir.files[fileName]) {
+      currentDir.files[fileName] = {
+        name: fileName,
+        path: rawPath,
+        symbols: [],
+        node: null
+      };
     }
 
     if (n.kind === 'file') {
-      rootTree[dirPath].files[fileName].node = n;
+      currentDir.files[fileName].node = n;
     } else {
-      rootTree[dirPath].files[fileName].headings.push(n);
+      currentDir.files[fileName].symbols.push(n);
     }
   });
 
-  // Render Projects / Root Folders with Checkbox (Galaxy standard: Checkbox at Project level!)
+  // Render All Projects
   allProjectsList.forEach(proj => {
     const projName = proj.name;
     const isSelected = selectedProjects.has(projName);
+    const projData = projRoots[projName] || { dirs: {}, files: {} };
+    const isProjOpen = openProjs.size === 0 ? true : openProjs.has(projName);
 
     const projNodeEl = document.createElement('div');
     projNodeEl.className = 'tree-node';
     projNodeEl.setAttribute('data-tree-proj', projName);
 
     projNodeEl.innerHTML = `
-      <span class="tree-arrow open">▸</span>
+      <span class="tree-arrow ${isProjOpen ? 'open' : ''}">▸</span>
       <input type="checkbox" ${isSelected ? 'checked' : ''} title="Toggle project inclusion" />
       <span style="font-weight:600; color:#58a6ff;">📦 ${escapeHtml(projName)}</span>
-      <span class="node-kind-tag" style="margin-left:auto;">${proj.files} files</span>
+      <span class="node-kind-tag" style="margin-left:auto;">${proj.files || Object.keys(projData.files).length} files</span>
     `;
 
     const projChildrenEl = document.createElement('div');
-    projChildrenEl.className = 'tree-children open';
+    projChildrenEl.className = `tree-children ${isProjOpen ? 'open' : ''}`;
 
-    // Project Checkbox click
     const cb = projNodeEl.querySelector('input[type="checkbox"]');
     cb.onclick = (e) => {
       e.stopPropagation();
@@ -349,7 +404,6 @@ function buildProjectTree() {
       loadGraphForSelectedProjects();
     };
 
-    // Project Arrow toggle
     const arrow = projNodeEl.querySelector('.tree-arrow');
     arrow.onclick = (e) => {
       e.stopPropagation();
@@ -357,81 +411,153 @@ function buildProjectTree() {
       arrow.classList.toggle('open');
     };
 
-    // Render Directories & Files inside project
-    renderProjectFiles(rootTree, projChildrenEl, openDirs);
+    projNodeEl.onclick = () => {
+      selectTreeNode(projNodeEl);
+      highlightScope('project', { name: projName });
+    };
+
+    if (selectedKey === projName) {
+      selectTreeNode(projNodeEl);
+    }
+
+    // Recursively render directories and files inside project
+    renderDirContents(projName, projData, projChildrenEl, openDirs, openFiles, selectedKey);
 
     container.appendChild(projNodeEl);
     container.appendChild(projChildrenEl);
   });
 }
 
-function renderProjectFiles(fileTree, container, openDirs) {
-  for (const [dirKey, dirData] of Object.entries(fileTree)) {
-    // Render Files under this dir (NO checkboxes on files! Only arrow + icon + badge)
-    for (const [fName, fileData] of Object.entries(dirData.files)) {
-      const fileNodeEl = document.createElement('div');
-      fileNodeEl.className = 'tree-node';
-      fileNodeEl.setAttribute('data-tree-file', fileData.path);
-      fileNodeEl.style.paddingLeft = '20px';
+// Recursive directory & file renderer (100% CodeGraph Galaxy architecture)
+function renderDirContents(projName, dirObj, parentEl, openDirs, openFiles, selectedKey) {
+  if (!dirObj) return;
 
-      const isFileOpen = openDirs.has(fileData.path);
+  // 1. Render Subdirectories (Folders)
+  const dirNames = Object.keys(dirObj.dirs || {}).sort();
+  dirNames.forEach(dName => {
+    const subDir = dirObj.dirs[dName];
+    const cleanSubPath = (subDir.path || '').replace(/\\/g, '/');
+    const dirKey = `${projName}:${cleanSubPath}`;
+    const isDirOpen = openDirs ? openDirs.has(dirKey) : false;
 
-      fileNodeEl.innerHTML = `
-        <span class="tree-arrow ${isFileOpen ? 'open' : ''}">▸</span>
-        <span style="color:#c9d1d9;">📄 ${escapeHtml(fName)}</span>
-        <span class="node-kind-tag">${fileData.headings.length}h</span>
-      `;
+    const dirNodeEl = document.createElement('div');
+    dirNodeEl.className = 'tree-node';
+    dirNodeEl.setAttribute('data-tree-dir', dirKey);
 
-      const fileChildrenEl = document.createElement('div');
-      fileChildrenEl.className = `tree-children ${isFileOpen ? 'open' : ''}`;
+    dirNodeEl.innerHTML = `
+      <span class="tree-arrow ${isDirOpen ? 'open' : ''}">▸</span>
+      <span style="font-weight:500; color:#e6edf3;">📁 ${escapeHtml(dName)}</span>
+    `;
 
-      // Arrow toggle for Headings (TOC)
-      const fArrow = fileNodeEl.querySelector('.tree-arrow');
-      fArrow.onclick = (e) => {
+    const dirChildrenEl = document.createElement('div');
+    dirChildrenEl.className = `tree-children ${isDirOpen ? 'open' : ''}`;
+
+    const arrow = dirNodeEl.querySelector('.tree-arrow');
+    arrow.onclick = (e) => {
+      e.stopPropagation();
+      dirChildrenEl.classList.toggle('open');
+      arrow.classList.toggle('open');
+    };
+
+    dirNodeEl.onclick = () => {
+      selectTreeNode(dirNodeEl);
+      highlightScope('dir', { project: projName, dir_path: cleanSubPath });
+    };
+
+    if (selectedKey === dirKey) {
+      selectTreeNode(dirNodeEl);
+    }
+
+    // Recursively render subdirectory contents
+    renderDirContents(projName, subDir, dirChildrenEl, openDirs, openFiles, selectedKey);
+
+    parentEl.appendChild(dirNodeEl);
+    parentEl.appendChild(dirChildrenEl);
+  });
+
+  // 2. Render Markdown Files in this directory
+  const fileNames = Object.keys(dirObj.files || {}).sort();
+  fileNames.forEach(fName => {
+    const fileData = dirObj.files[fName];
+    const symList = fileData.symbols || [];
+    const cleanFilePath = (fileData.path || '').replace(/\\/g, '/');
+    const fileKey = `${projName}:${cleanFilePath}`;
+    const isFileOpen = openFiles ? openFiles.has(fileKey) : false;
+
+    // Find or create file node
+    const fileNode = fileData.node || {
+      id: `file::${cleanFilePath}`,
+      name: fName,
+      kind: 'file',
+      project: projName,
+      file: cleanFilePath,
+      line: 1
+    };
+
+    const fileNodeEl = document.createElement('div');
+    fileNodeEl.className = 'tree-node';
+    fileNodeEl.setAttribute('data-tree-file', fileKey);
+
+    fileNodeEl.innerHTML = `
+      <span class="tree-arrow ${isFileOpen ? 'open' : ''}">▸</span>
+      <span style="color:#c9d1d9;">📄 ${escapeHtml(fName)}</span>
+      <span class="node-kind-tag">${symList.length}h</span>
+    `;
+
+    const fileChildrenEl = document.createElement('div');
+    fileChildrenEl.className = `tree-children ${isFileOpen ? 'open' : ''}`;
+
+    const arrow = fileNodeEl.querySelector('.tree-arrow');
+    if (arrow) {
+      arrow.onclick = (e) => {
         e.stopPropagation();
         fileChildrenEl.classList.toggle('open');
-        fArrow.classList.toggle('open');
+        arrow.classList.toggle('open');
       };
-
-      // File Click: Highlight scope, Focus 3D Node & Open Drawer
-      fileNodeEl.onclick = () => {
-        selectTreeNode(fileNodeEl);
-        highlightScope('file', fileData);
-        if (fileData.node) {
-          focusOnNode(fileData.node);
-          openDrawer(fileData.node);
-        }
-      };
-
-      // Render Headings under this file (Issue 5: TOC fully populated in Explorer!)
-      fileData.headings.forEach(h => {
-        const hNodeEl = document.createElement('div');
-        hNodeEl.className = 'tree-node';
-        hNodeEl.setAttribute('data-tree-node-id', h.id);
-        hNodeEl.style.paddingLeft = `${(h.level || 1) * 12 + 28}px`;
-
-        hNodeEl.innerHTML = `
-          <span style="color:${KIND_COLORS[h.kind] || '#58a6ff'}; margin-right:4px;">${'#'.repeat(h.level || 1)}</span>
-          <span style="color:#8b949e; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${escapeHtml(h.name)}</span>
-          <span class="tree-line-badge" style="margin-left:auto; font-size:10px; color:#6e7681;">L${h.line || 1}</span>
-        `;
-
-        // Heading Click: Focus 3D AST Node, Highlight & Open Drawer
-        hNodeEl.onclick = (e) => {
-          e.stopPropagation();
-          selectTreeNode(hNodeEl);
-          highlightScope('node', h);
-          focusOnNode(h);
-          openDrawer(h);
-        };
-
-        fileChildrenEl.appendChild(hNodeEl);
-      });
-
-      container.appendChild(fileNodeEl);
-      container.appendChild(fileChildrenEl);
     }
-  }
+
+    fileNodeEl.onclick = () => {
+      selectTreeNode(fileNodeEl);
+      highlightScope('file', { project: projName, file: cleanFilePath, node: fileNode, symbols: symList });
+      openDrawer(fileNode);
+      if (fileNode.x !== undefined) focusOnNode(fileNode);
+    };
+
+    if (selectedKey === fileKey) {
+      selectTreeNode(fileNodeEl);
+    }
+
+    // 3. Render Headings (TOC) inside fileChildrenEl sorted by line
+    const sortedHeadings = symList.slice().sort((a, b) => (a.line || 0) - (b.line || 0));
+    sortedHeadings.forEach(s => {
+      const symNodeEl = document.createElement('div');
+      symNodeEl.className = 'tree-node';
+      symNodeEl.setAttribute('data-tree-node-id', s.id);
+
+      symNodeEl.innerHTML = `
+        <span style="color:${KIND_COLORS[s.kind] || '#58a6ff'}; margin-right:4px;">${'#'.repeat(s.level || 1)}</span>
+        <span style="color:#8b949e; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${escapeHtml(s.name)}</span>
+        <span class="tree-line-badge" style="margin-left:auto; font-size:10px; color:#6e7681;">L${s.line || 1}</span>
+      `;
+
+      symNodeEl.onclick = (e) => {
+        e.stopPropagation();
+        selectTreeNode(symNodeEl);
+        highlightScope('node', s);
+        focusOnNode(s);
+        openDrawer(s);
+      };
+
+      if (selectedKey === s.id) {
+        selectTreeNode(symNodeEl);
+      }
+
+      fileChildrenEl.appendChild(symNodeEl);
+    });
+
+    parentEl.appendChild(fileNodeEl);
+    parentEl.appendChild(fileChildrenEl);
+  });
 }
 
 function selectTreeNode(el) {
@@ -442,9 +568,11 @@ function selectTreeNode(el) {
 
 function syncExplorerSelection(node) {
   if (!node) return;
+  const cleanPath = (node.file || '').replace(/\\/g, '/');
   let targetEl = null;
+
   if (node.kind === 'file') {
-    targetEl = document.querySelector(`[data-tree-file="${node.file}"]`);
+    targetEl = document.querySelector(`[data-tree-file$="${cleanPath}"]`);
   } else {
     targetEl = document.querySelector(`[data-tree-node-id="${node.id}"]`);
   }
@@ -453,7 +581,7 @@ function syncExplorerSelection(node) {
     selectTreeNode(targetEl);
     targetEl.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
 
-    // Open parents
+    // Open parents recursively
     let p = targetEl.parentElement;
     while (p && p.id !== 'tree-container') {
       if (p.classList.contains('tree-children')) {
@@ -490,7 +618,7 @@ function selectAllProjects(val) {
   loadGraphForSelectedProjects();
 }
 
-// ─── 5. Mode / LOD & Legend Control (Issue 3 Fixed) ───────────────
+// ─── 5. Mode / LOD & Legend Control (Galaxy Standard) ─────────────
 function changeLOD(mode) {
   currentLOD = mode;
   document.querySelectorAll('.lod-btn').forEach(b => {
@@ -667,7 +795,7 @@ function initDraggableLegend() {
   });
 }
 
-// ─── 6. Inspector Drawer & Reader (Issue 2 Fixed) ──────────────────
+// ─── 6. Inspector Drawer & Reader (Markdown Slicing) ──────────────
 function openDrawer(node) {
   if (!node) return;
   activeNode = node;
@@ -687,7 +815,8 @@ function openDrawer(node) {
   }
 
   // IDE Launchers
-  const encodedPath = encodeURIComponent((node.file || '').replace(/\\/g, '/'));
+  const filePath = node.abs_path || node.file || '';
+  const encodedPath = encodeURIComponent(filePath.replace(/\\/g, '/'));
   const startLine = node.line || 1;
   const vsc = document.getElementById('ide-vscode');
   const cur = document.getElementById('ide-cursor');
@@ -697,11 +826,12 @@ function openDrawer(node) {
   if (agy) agy.href = `vscode://file/${encodedPath}:${startLine}`;
 
   // Fetch Section / Full Content
+  const queryFile = node.abs_path || node.file || '';
   const headingParam = node.kind === 'file' ? '' : `&heading=${encodeURIComponent(node.name)}`;
-  fetch(`/api/doc/section?file=${encodeURIComponent(node.file)}${headingParam}&sub=1`)
+  fetch(`/api/doc/section?file=${encodeURIComponent(queryFile)}${headingParam}&sub=1`)
     .then(res => res.json())
     .then(data => {
-      const content = data.content || '';
+      const content = data.content || node.content || '';
       renderMarkdown(content);
 
       // Token Intelligence
@@ -721,7 +851,12 @@ function openDrawer(node) {
       if (sTokens) sTokens.textContent = `${slicedTokens.toLocaleString()} tokens`;
       if (mcpBox) mcpBox.value = `[DocGraph Sliced Context: ${node.name}]\n${content}`;
     })
-    .catch(err => console.error('Section read error:', err));
+    .catch(err => {
+      console.error('Section read error, falling back to cached content:', err);
+      if (node.content) {
+        renderMarkdown(node.content);
+      }
+    });
 
   // Connected Relations
   const rawLinks = rawData.links || [];
