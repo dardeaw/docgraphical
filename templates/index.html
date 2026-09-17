@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>DocGraph 3D - Markdown Knowledge Galaxy</title>
 <script src="/static/3d-force-graph.min.js"></script>
-<link rel="stylesheet" href="/static/galaxy.css?v=1.0.9">
+<link rel="stylesheet" href="/static/galaxy.css?v=1.1.0">
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark-dimmed.min.css">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
@@ -123,36 +123,29 @@
       <!-- Token Intelligence Metric -->
       <div class="code-preview-header" style="flex-shrink:0;">
         <span class="code-preview-title">⚡ Token Savings</span>
-        <span style="color:#00ffaa; font-weight:700; font-size:13px;" id="stat-savings-badge">97.2%</span>
+        <span style="color:#00ffaa; font-weight:700; font-size:13px;" id="stat-savings-badge">0.0%</span>
       </div>
       <div style="height:6px; background:#21262d; border-radius:3px; overflow:hidden; flex-shrink:0;">
-        <div id="stat-savings-fill" style="width:97.2%; height:100%; background:linear-gradient(90deg, #00ffaa, #58a6ff);"></div>
+        <div id="stat-savings-fill" style="width:0%; height:100%; background:linear-gradient(90deg, #00ffaa, #58a6ff);"></div>
       </div>
-      <div style="display:flex; justify-content:space-between; font-size:11px; color:#8b949e; flex-shrink:0;">
+      <div style="display:flex; justify-content:space-between; font-size:11px; color:#8b949e; flex-shrink:0; margin-bottom:4px;">
         <span>Full: <b id="stat-full-tokens" style="color:#c9d1d9;">0</b> tokens</span>
         <span>Sliced: <b id="stat-sliced-tokens" style="color:#00ffaa;">0</b> tokens</span>
       </div>
 
-      <!-- Sliced Section Markdown Preview -->
-      <div class="code-preview-header" style="flex-shrink:0; margin-top:4px;">
+      <!-- Sliced Section Markdown Header & Action Buttons -->
+      <div class="code-preview-header" style="flex-shrink:0;">
         <span class="code-preview-title" id="d-code-title">🗡️ Sliced Section Markdown</span>
         <div style="display:flex; gap:6px;">
-          <button class="mini-btn" onclick="copyCurrentSection()">📋 Copy</button>
-          <button class="mini-btn" onclick="copyMcpPayload()">🤖 Prompt</button>
+          <button class="mini-btn" onclick="copyCurrentSection()" title="Copy raw markdown text">📋 Copy Markdown</button>
+          <button class="mini-btn" style="background:#238636; color:#fff; border-color:#2ea043;" onclick="copyMcpPayload()" title="Copy structured payload with metadata for AI Agent">🤖 Copy for Agent</button>
         </div>
       </div>
-      <div id="d-code-markdown">
+
+      <!-- Full-height Scrollable Markdown Preview -->
+      <div id="d-code-markdown" style="flex:1; min-height:120px; overflow-y:auto;">
         <p style="color:#8b949e;">Click any node to preview section.</p>
       </div>
-
-      <!-- Agent Prompt Box -->
-      <div class="code-preview-header" style="flex-shrink:0; margin-top:2px;">
-        <span class="code-preview-title">🤖 Agent Surgical Payload</span>
-      </div>
-      <textarea id="mcp-prompt-box" readonly style="width:100%; height:55px; min-height:45px; background:#0d1117; border:1px solid #30363d; border-radius:6px; color:#58a6ff; font-family:monospace; font-size:11px; padding:6px; resize:none; outline:none; flex-shrink:0;"></textarea>
-      <button class="mini-btn" style="width:100%; padding:6px; background:#1f6feb; color:#fff; flex-shrink:0;" onclick="copyMcpPayload()">
-        📋 Copy Payload for AI Agent
-      </button>
     </div>
 
     <!-- Draggable Horizontal Resizer Divider between Markdown and Connected Links -->
@@ -216,6 +209,6 @@
 
 <div id="toast"></div>
 
-<script src="/static/docgraph.js?v=1.0.9"></script>
+<script src="/static/docgraph.js?v=1.1.0"></script>
 </body>
 </html>

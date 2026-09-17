@@ -818,7 +818,7 @@ function openDrawer(node) {
       if (savFill) savFill.style.width = savings;
       if (fTokens) fTokens.textContent = `${fullTokens.toLocaleString()} tokens`;
       if (sTokens) sTokens.textContent = `${slicedTokens.toLocaleString()} tokens`;
-      if (mcpBox) mcpBox.value = `[DocGraph Sliced Context: ${node.name}]\n${content}`;
+      window._activeSurgicalPayload = `[DocGraph Sliced Context: ${node.name} | ${node.file || ''} | Line ${node.line || 1}]\n${content}`;
     })
     .catch(err => {
       console.error('Section read error, falling back to cached content:', err);
@@ -896,10 +896,13 @@ function copyCurrentSection() {
 }
 
 function copyMcpPayload() {
-  const el = document.getElementById('mcp-prompt-box');
-  if (!el || !el.value) return;
-  navigator.clipboard.writeText(el.value);
-  showToast('✅ AI Prompt payload copied!');
+  const payload = window._activeSurgicalPayload;
+  if (!payload) {
+    showToast('⚠️ No section selected yet');
+    return;
+  }
+  navigator.clipboard.writeText(payload);
+  showToast('🤖 AI Agent Sliced Payload copied to clipboard!');
 }
 
 // ─── 7. Header & Toolbar Controls ─────────────────────────────────
