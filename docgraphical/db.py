@@ -54,7 +54,16 @@ CREATE VIRTUAL TABLE IF NOT EXISTS nodes_fts USING fts5(
 
 
 def get_db_path(repo_path: str) -> str:
-    dot_dir = os.path.join(os.path.abspath(repo_path), ".docgraphical")
+    repo_path = os.path.abspath(repo_path)
+    for candidate in [
+        os.path.join(repo_path, ".docgraphical", "docgraphical.db"),
+        os.path.join(repo_path, ".docgraph", "docgraph.db"),
+        os.path.join(repo_path, ".docgraphical", "docgraph.db"),
+        os.path.join(repo_path, ".docgraph", "docgraphical.db"),
+    ]:
+        if os.path.exists(candidate):
+            return candidate
+    dot_dir = os.path.join(repo_path, ".docgraphical")
     os.makedirs(dot_dir, exist_ok=True)
     return os.path.join(dot_dir, "docgraphical.db")
 

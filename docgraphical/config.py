@@ -11,28 +11,74 @@ def get_default_repo_root() -> str:
 
 
 def get_docgraph_dir(repo_path: Optional[str] = None) -> str:
-    """Return .docgraphical directory path."""
+    """Return .docgraphical or .docgraph directory path."""
     base = repo_path or get_default_repo_root()
-    return os.path.join(base, ".docgraphical")
+    docgraphical_dir = os.path.join(base, ".docgraphical")
+    docgraph_dir = os.path.join(base, ".docgraph")
+    if os.path.exists(docgraphical_dir):
+        return docgraphical_dir
+    if os.path.exists(docgraph_dir):
+        return docgraph_dir
+    return docgraphical_dir
 
 
 def get_default_db_path(repo_path: Optional[str] = None) -> str:
-    """Return default SQLite database path."""
-    return os.path.join(get_docgraph_dir(repo_path), "docgraphical.db")
+    """Return SQLite database path, checking both .docgraphical and .docgraph."""
+    base = repo_path or get_default_repo_root()
+    for candidate in [
+        os.path.join(base, ".docgraphical", "docgraphical.db"),
+        os.path.join(base, ".docgraph", "docgraph.db"),
+        os.path.join(base, ".docgraphical", "docgraph.db"),
+        os.path.join(base, ".docgraph", "docgraphical.db"),
+    ]:
+        if os.path.exists(candidate):
+            return candidate
+    return os.path.join(base, ".docgraphical", "docgraphical.db")
 
 
 def load_config() -> Dict[str, List[str]]:
-    """Load configuration from user home directory."""
+    """Load configuration, seamlessly migrating from legacy config if needed."""
+    legacy_cfg_path = os.path.expanduser("~/.docgraph_config.json")
+    
+    roots: List[str] = []
+    excluded: List[str] = []
+
+    # 1. Try modern config file
     if os.path.exists(CONFIG_FILE):
         try:
             with open(CONFIG_FILE, "r", encoding="utf-8") as f:
                 data = json.load(f)
                 roots = data.get("custom_roots") or []
                 excluded = data.get("excluded_paths") or []
-                return {"custom_roots": roots, "excluded_paths": excluded}
         except Exception:
             pass
-    return {"custom_roots": [], "excluded_paths": []}
+
+    # 2. If modern config has no roots, check legacy config
+    if not roots and os.path.exists(legacy_cfg_path):
+        try:
+            with open(legacy_cfg_path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+                roots = data.get("custom_roots") or []
+                if not excluded:
+                    excluded = data.get("excluded_paths") or []
+                # Save migrated config
+                save_config({"custom_roots": roots, "excluded_paths": excluded})
+        except Exception:
+            pass
+
+    # 3. If still empty, check standard OneDrive PythonCode folder
+    if not roots:
+        standard_roots = [
+            os.path.abspath(r"D:\OneDrive - 勤誠興業股份有限公司\文件\PythonCode"),
+            os.path.abspath(r"C:\OneDrive - 勤誠興業股份有限公司\文件\PythonCode"),
+        ]
+        for sr in standard_roots:
+            if os.path.exists(sr) and sr not in roots:
+                roots.append(sr)
+        if roots:
+            save_config({"custom_roots": roots, "excluded_paths": excluded})
+
+    return {"custom_roots": roots, "excluded_paths": excluded}
 
 
 def save_config(cfg: Dict[str, List[str]]) -> None:
@@ -41,7 +87,7 @@ def save_config(cfg: Dict[str, List[str]]) -> None:
         with open(CONFIG_FILE, "w", encoding="utf-8") as f:
             json.dump(cfg, f, indent=2, ensure_ascii=False)
     except Exception as e:
-        print(f"Failed to save docgraph config: {e}", file=sys.stderr)
+        print(f"Failed to save docgraphical config: {e}", file=sys.stderr)
 
 
 def get_search_roots(extra_paths: Optional[List[str]] = None) -> List[str]:

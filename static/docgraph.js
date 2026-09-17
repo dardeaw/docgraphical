@@ -1261,10 +1261,10 @@ function renderRepoTable(projects) {
     tr.innerHTML = `
       <td style="font-weight:600; color:#58a6ff;">${escapeHtml(p.name)}</td>
       <td style="font-family:monospace; font-size:11px; color:#8b949e; max-width:260px; overflow:hidden; text-overflow:ellipsis;" title="${p.path}">${escapeHtml(p.path)}</td>
-      <td>${p.files}</td>
+      <td>${p.files !== undefined ? p.files : (p.file_count || 0)}</td>
       <td>
         <span style="color:${p.has_db ? '#00ffaa' : '#e3b341'}; font-weight:600;">
-          ${p.has_db ? 'Indexed (.docgraph/docgraph.db)' : 'Not Indexed'}
+          ${p.has_db ? 'Indexed (AST Database)' : 'Not Indexed'}
         </span>
       </td>
       <td>

@@ -60,7 +60,7 @@ def create_app(initial_paths: Optional[List[str]] = None, search_roots: Optional
         result = []
         for name, p in repos.items():
             metrics = get_repo_doc_metrics(p)
-            db_file = os.path.join(p, ".docgraphical", "docgraphical.db")
+            db_file = get_db_path(p)
             has_db = os.path.exists(db_file)
             result.append({
                 "name": name,
