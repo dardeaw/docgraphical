@@ -31,13 +31,13 @@ const KIND_COLORS = {
 };
 
 const KIND_SIZES = {
-  file: 6.5,
-  heading_1: 4.5,
-  heading_2: 3.2,
-  heading_3: 2.2,
-  heading_4: 1.5,
-  heading_5: 1.0,
-  heading_6: 0.8
+  file: 3.0,       // Document (Warm Cyber Orange) - scaled down for compact 3D view
+  heading_1: 2.0,  // H1 Primary (Electric Blue)
+  heading_2: 1.4,  // H2 Major (Emerald Green)
+  heading_3: 0.95, // H3 Subsection (Vivid Purple)
+  heading_4: 0.65, // H4 Detail (Vibrant Rose Pink)
+  heading_5: 0.45, // H5 Fine (Cyan / Turquoise)
+  heading_6: 0.3   // H6 Micro (Bright Gold)
 };
 
 const EDGE_COLORS = {
@@ -79,11 +79,11 @@ function init3DGraph() {
       return KIND_COLORS[n.kind] || '#58a6ff';
     })
     .nodeVal(n => {
-      let base = KIND_SIZES[n.kind] || 2.0;
-      if (highlightNodes.has(n.id)) return base * 1.8;
+      let base = KIND_SIZES[n.kind] || 1.0;
+      if (highlightNodes.has(n.id)) return base * 1.4;
       return base;
     })
-    .nodeRelSize(5)
+    .nodeRelSize(1.8)
     .nodeResolution(16)
     .linkOpacity(l => {
       if (highlightNodes.size > 0) {
@@ -99,20 +99,20 @@ function init3DGraph() {
     })
     .linkWidth(l => {
       if (highlightNodes.size > 0) {
-        return highlightLinks.has(l) ? 2.4 : 0.4;
+        return highlightLinks.has(l) ? 1.2 : 0.15;
       }
-      return l.kind === 'doc_link' ? 1.6 : 0.8;
+      return l.kind === 'doc_link' ? 0.7 : 0.3;
     })
     .linkDirectionalParticles(l => {
       if (highlightNodes.size > 0) {
-        return highlightLinks.has(l) ? 4 : 0;
+        return highlightLinks.has(l) ? 2 : 0;
       }
-      return l.kind === 'doc_link' ? 2 : 0;
+      return l.kind === 'doc_link' ? 1 : 0;
     })
-    .linkDirectionalParticleWidth(l => highlightLinks.has(l) ? 2.4 : 1.4)
-    .linkDirectionalParticleSpeed(l => highlightLinks.has(l) ? 0.008 : 0.004)
-    .d3AlphaDecay(0.02)
-    .d3VelocityDecay(0.3)
+    .linkDirectionalParticleWidth(l => highlightLinks.has(l) ? 1.0 : 0.6)
+    .linkDirectionalParticleSpeed(l => highlightLinks.has(l) ? 0.005 : 0.0025)
+    .d3AlphaDecay(0.03)
+    .d3VelocityDecay(0.35)
     .onNodeClick(node => {
       highlightScope('node', node);
       focusOnNode(node);
@@ -122,6 +122,18 @@ function init3DGraph() {
     .onBackgroundClick(() => {
       clearHighlight();
     });
+
+  // Configure tight d3 forces: small distance and controlled repulsion for compact 3D viewport
+  if (Graph.d3Force('link')) {
+    Graph.d3Force('link')
+      .distance(l => (l.kind === 'doc_link' ? 22 : 7))
+      .strength(l => (l.kind === 'doc_link' ? 0.35 : 0.85));
+  }
+  if (Graph.d3Force('charge')) {
+    Graph.d3Force('charge')
+      .strength(-14)
+      .distanceMax(100);
+  }
 
   // Dynamic ResizeObserver ensures 3D canvas always matches container exactly
   const pane3D = document.getElementById('viewport-3d-pane');
@@ -138,7 +150,7 @@ function init3DGraph() {
 function focusOnNode(node) {
   if (!node || node.x === undefined) return;
   activeNode = node;
-  const distance = 90;
+  const distance = 32; // Tightly scaled focus distance
   const distRatio = 1 + distance / Math.hypot(node.x || 1, node.y || 1, node.z || 1);
   if (Graph) {
     Graph.cameraPosition(
@@ -158,7 +170,7 @@ function highlightScope(scopeType, targetObj) {
   if (scopeType === 'project') {
     rawData.nodes.forEach(n => highlightNodes.add(n.id));
     rawLinks.forEach(l => highlightLinks.add(l));
-    if (Graph) Graph.zoomToFit(600, 40);
+    if (Graph) Graph.zoomToFit(600, 15);
   } else if (scopeType === 'dir') {
     const dirPrefix = (targetObj.dir_path || '').replace(/^\/+/, '');
     rawData.nodes.filter(n => {
@@ -173,7 +185,7 @@ function highlightScope(scopeType, targetObj) {
         highlightLinks.add(l);
       }
     });
-    if (Graph) Graph.zoomToFit(600, 40);
+    if (Graph) Graph.zoomToFit(600, 15);
   } else if (scopeType === 'file') {
     const fileNode = targetObj.node;
     if (fileNode) highlightNodes.add(fileNode.id);
@@ -244,7 +256,7 @@ function initAutoRotate() {
 
     if (isRotating) {
       let angle = 0;
-      const distance = 360;
+      const distance = 130; // Compact orbital distance
       window._rotateTimer = setInterval(() => {
         if (!isRotating) { clearInterval(window._rotateTimer); return; }
         angle += Math.PI / 800;
@@ -263,7 +275,9 @@ function initAutoRotate() {
 
 function resetCamera() {
   clearHighlight();
-  if (Graph) Graph.cameraPosition({ x: 0, y: 0, z: 320 }, { x: 0, y: 0, z: 0 }, 1200);
+  if (Graph) {
+    Graph.zoomToFit(800, 15);
+  }
 }
 
 // ─── 3. Project & Graph Data Loading ──────────────────────────────
@@ -840,6 +854,9 @@ function applyLODAndFilter() {
   filteredData = { nodes: activeNodes, links: activeLinks };
   if (Graph) {
     Graph.graphData(filteredData);
+    setTimeout(() => {
+      if (Graph) Graph.zoomToFit(600, 15);
+    }, 250);
   }
 
   const nBadge = document.getElementById('stats-nodes');
