@@ -3,22 +3,19 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>DocGraph - Markdown AST & 3D Knowledge Topology</title>
+<title>DocGraph 3D - Markdown Knowledge Galaxy</title>
 <script src="/static/3d-force-graph.min.js"></script>
-<link rel="stylesheet" href="/static/docgraph.css?v=1.0.1">
-<script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+<link rel="stylesheet" href="/static/galaxy.css?v=1.0.5">
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark-dimmed.min.css">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
 </head>
 <body>
 
-<!-- 3D WebGL Canvas (Identical to CodeGraph Galaxy) -->
-<div id="3d-graph"></div>
-
-<!-- Top Toolbar -->
+<!-- Top Toolbar (100% CodeGraph Galaxy Layout) -->
 <div id="toolbar">
-  <div class="brand-badge" onclick="resetToWelcome()">
-    <div class="brand-dot"></div>
+  <div class="brand-badge">
+    <div class="brand-dot" style="background:#00ffaa; box-shadow:0 0 10px #00ffaa;"></div>
     <span id="app-logo">DocGraph 3D</span>
   </div>
 
@@ -26,25 +23,17 @@
     📁 Explorer
   </button>
 
-  <button class="tool-btn" id="btn-open-folder" onclick="openPathModal()" title="Manage & Scan Documentation Repos">
+  <button class="tool-btn" id="btn-open-folder" onclick="openPathModal()" title="Manage Repositories">
     📂 Repositories
   </button>
 
   <div id="search-wrapper">
-    <input type="text" id="search-box" placeholder="Search headings, specs or keywords... (Enter to focus)" />
+    <input type="text" id="search-box" placeholder="Search markdown headings, files, sections..." />
     <div id="search-results"></div>
   </div>
 
-  <button class="tool-btn" id="btn-rotate" onclick="toggleRotate()">Auto Rotate</button>
+  <button class="tool-btn" id="btn-rotate">Auto Rotate</button>
   <button class="tool-btn" id="btn-reset-cam" onclick="resetCamera()">Reset View</button>
-
-  <button class="tool-btn emerald active" id="btn-toggle-slice" onclick="toggleSliceMode()">
-    🗡️ Section Focus
-  </button>
-
-  <button class="tool-btn" id="btn-toggle-drawer" onclick="toggleDrawer()">
-    ⚡ Intelligence
-  </button>
 
   <div class="toolbar-right">
     <button class="tool-btn" id="btn-lang" onclick="toggleLanguage()">Language: EN</button>
@@ -55,115 +44,134 @@
   </div>
 </div>
 
-<!-- Left Explorer Tree Panel -->
+<!-- Left Explorer Tree Panel (100% CodeGraph Galaxy Layout) -->
 <div id="tree-panel">
   <div class="panel-resizer-right" id="tree-resizer"></div>
   <div class="tree-header">
-    <span class="tree-title" id="lbl-tree-title">📁 Documentation Explorer</span>
+    <span class="tree-title" id="lbl-tree-title">📁 Explorer</span>
     <div style="display:flex; gap:4px; align-items:center;">
-      <button onclick="openPathModal()" class="mini-btn" id="btn-manage-repos" title="Manage Directories">⚙️</button>
+      <button onclick="openPathModal()" class="mini-btn" id="btn-repo-mgr" title="Manage Repositories">⚙ Repositories</button>
+      <button onclick="clearHighlight()" class="mini-btn" id="btn-clear-hl" style="font-size:10px;">Clear</button>
     </div>
   </div>
-
-  <div class="tree-tabs">
-    <button class="tree-tab-btn active" id="tab-toc-btn" onclick="switchTab('toc')">📑 Outline (TOC)</button>
-    <button class="tree-tab-btn" id="tab-files-btn" onclick="switchTab('files')">📁 Files</button>
+  
+  <div class="tree-actions-bar">
+    <button class="mini-btn" id="btn-sel-all" onclick="selectAllProjects(true)">Select All</button>
+    <button class="mini-btn" id="btn-sel-none" onclick="selectAllProjects(false)">Clear</button>
+    <span id="lbl-proj-summary" style="margin-left:auto; font-size:10px; color:#8b949e;">0 Active</span>
   </div>
 
-  <!-- TOC Outline View -->
-  <div id="tree-toc-content" class="tree-content">
-    <div style="padding:16px; color:#8b949e; font-size:12px; text-align:center;">
-      Select a Markdown file to view TOC outline.
-    </div>
+  <div class="tree-search-box">
+    <input type="text" id="tree-search" class="tree-input" placeholder="Filter documentation tree..." oninput="filterTree(this.value)" />
   </div>
 
-  <!-- Files Explorer View -->
-  <div id="tree-files-content" class="tree-content" style="display:none;">
-    <div style="padding:16px; color:#8b949e; font-size:12px; text-align:center;">
-      Loading repositories...
-    </div>
+  <div class="tree-body" id="tree-container">
+    <!-- Tree rendered dynamically -->
   </div>
 </div>
 
-<!-- Right Inspector & Section Reader Drawer -->
+<!-- Breadcrumb -->
+<div id="breadcrumb">
+  <span class="bc-item" onclick="resetCamera()" id="bc-root">Overview</span>
+</div>
+
+<!-- 3D WebGL Canvas -->
+<div id="3d-graph"></div>
+
+<!-- Draggable Mode / Legend Panel (100% CodeGraph Galaxy Standard) -->
+<div id="legend-panel">
+  <div class="legend-mode-header" id="legend-drag-handle" title="Drag to move panel">
+    <div class="legend-mode-title-row">
+      <span class="legend-mode-title" id="lbl-mode-title">Mode</span>
+      <span class="legend-drag-hint">⋮⋮ Drag</span>
+    </div>
+    <div class="lod-group">
+      <button class="lod-btn" data-lod="arch" id="lod-arch" onclick="changeLOD('arch')">Documents</button>
+      <button class="lod-btn" data-lod="standard" id="lod-standard" onclick="changeLOD('standard')">Standard</button>
+      <button class="lod-btn active" data-lod="all" id="lod-all" onclick="changeLOD('all')">Detailed</button>
+      <button class="lod-btn" data-lod="custom" id="lod-custom" onclick="changeLOD('custom')">Customized</button>
+    </div>
+  </div>
+  <div class="legend-tab-header">
+    <button class="legend-tab-btn active" id="tab-btn-nodes" onclick="switchLegendTab('nodes')">AST Layers</button>
+    <button class="legend-tab-btn" id="tab-btn-edges" onclick="switchLegendTab('edges')">Relationships</button>
+    <button onclick="resetFilters()" id="btn-legend-all" style="margin-left:auto; background:none; border:none; color:#58a6ff; font-size:11px; cursor:pointer;">Reset</button>
+  </div>
+  <div id="legend-nodes-list" class="legend-list"></div>
+  <div id="legend-edges-list" class="legend-list" style="display:none;"></div>
+</div>
+
+<!-- Inspector Drawer (100% CodeGraph Galaxy Standard) -->
 <div id="drawer">
   <div class="panel-resizer-left" id="drawer-resizer"></div>
+  
   <div class="drawer-header">
-    <span class="drawer-title" id="lbl-intel-title">⚡ Intelligence Analysis & Reader</span>
-    <button class="mini-btn" onclick="toggleDrawer()">×</button>
+    <div class="drawer-header-top">
+      <div class="drawer-panel-badge">
+        <span id="lbl-drawer-panel-title">🔍 Inspector</span>
+        <span class="node-kind-tag" id="d-kind-badge" style="background:#1f6feb;">NODE</span>
+      </div>
+      <button class="drawer-close" onclick="closeDrawer()">✕</button>
+    </div>
+    <div class="drawer-node-name" id="d-name">Node Name</div>
+    <div class="drawer-node-sub" id="d-sub">Path or identifier</div>
+
+    <!-- IDE Launchers -->
+    <div class="ide-launchers">
+      <span class="ide-launchers-label">Open in IDE:</span>
+      <a class="ide-btn" id="ide-vscode" href="#" title="VS Code">VS Code</a>
+      <a class="ide-btn" id="ide-cursor" href="#" title="Cursor">Cursor</a>
+      <a class="ide-btn" id="ide-antigravity" href="#" title="Antigravity">Antigravity</a>
+    </div>
   </div>
+
   <div class="drawer-body">
-    <!-- Token Savings Card -->
-    <div class="intel-card">
-      <div style="display:flex; justify-content:space-between; align-items:center;">
-        <h4>Token Savings</h4>
-        <span style="font-weight:700; color:#00ffaa; font-size:16px;" id="stat-savings-badge">97.2%</span>
-      </div>
-      <div class="token-stat-bar">
-        <div class="token-stat-fill" id="stat-savings-fill" style="width: 97.2%;"></div>
-      </div>
-      <div class="key-val-row">
-        <span class="k">Full Document:</span>
-        <span class="v" id="stat-full-tokens">0 tokens</span>
-      </div>
-      <div class="key-val-row">
-        <span class="k">Sliced Section:</span>
-        <span class="v" id="stat-sliced-tokens" style="color:#00ffaa;">0 tokens</span>
-      </div>
+    <!-- Token Intelligence Metric -->
+    <div class="code-preview-header">
+      <span class="code-preview-title">⚡ Token Savings</span>
+      <span style="color:#00ffaa; font-weight:700; font-size:13px;" id="stat-savings-badge">97.2%</span>
+    </div>
+    <div style="height:6px; background:#21262d; border-radius:3px; overflow:hidden; margin-bottom:12px;">
+      <div id="stat-savings-fill" style="width:97.2%; height:100%; background:linear-gradient(90deg, #00ffaa, #58a6ff);"></div>
+    </div>
+    <div style="display:flex; justify-content:space-between; font-size:11px; color:#8b949e; margin-bottom:16px;">
+      <span>Full: <b id="stat-full-tokens" style="color:#c9d1d9;">0</b> tokens</span>
+      <span>Sliced: <b id="stat-sliced-tokens" style="color:#00ffaa;">0</b> tokens</span>
     </div>
 
-    <!-- Active Section Details -->
-    <div class="intel-card">
-      <h4>Active Section</h4>
-      <div class="key-val-row">
-        <span class="k">Heading:</span>
-        <span class="v" id="active-sec-title">-</span>
+    <!-- Sliced Section Markdown Preview -->
+    <div class="code-preview-header">
+      <span class="code-preview-title" id="d-code-title">🗡️ Sliced Section Markdown</span>
+      <div style="display:flex; gap:6px;">
+        <button class="mini-btn" onclick="copyCurrentSection()">📋 Copy</button>
+        <button class="mini-btn" onclick="copyMcpPayload()">🤖 Prompt</button>
       </div>
-      <div class="key-val-row">
-        <span class="k">Kind:</span>
-        <span class="v" id="active-sec-kind">-</span>
-      </div>
-      <div class="key-val-row">
-        <span class="k">Line Anchor:</span>
-        <span class="v" id="active-sec-line">-</span>
-      </div>
-      <div class="key-val-row">
-        <span class="k">Characters:</span>
-        <span class="v" id="active-sec-chars">0</span>
-      </div>
+    </div>
+    <div id="d-code-markdown" style="background:#0d1117; border:1px solid #30363d; border-radius:6px; padding:12px; max-height:260px; overflow-y:auto; line-height:1.6; font-size:13px; margin-bottom:16px;">
+      <p style="color:#8b949e;">Click any node to preview section.</p>
     </div>
 
-    <!-- Markdown Rendered Section -->
-    <div class="intel-card">
-      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
-        <h4>🗡️ Sliced Section Content</h4>
-        <div style="display:flex; gap:6px;">
-          <button class="mini-btn" onclick="copyCurrentSection()">📋 Copy</button>
-          <button class="mini-btn" onclick="copyMcpPayload()">🤖 AI Payload</button>
-        </div>
-      </div>
-      <div id="markdown-render-area" class="markdown-container" style="max-height:360px; overflow-y:auto; background:#0d1117; padding:12px; border-radius:6px; border:1px solid #30363d;">
-        <p style="color:#8b949e; font-size:12px;">Click any 3D node or TOC heading to slice section.</p>
-      </div>
+    <!-- Agent Prompt Box -->
+    <div class="code-preview-header">
+      <span class="code-preview-title">🤖 Agent Surgical Payload</span>
     </div>
+    <textarea id="mcp-prompt-box" readonly style="width:100%; height:75px; background:#0d1117; border:1px solid #30363d; border-radius:6px; color:#58a6ff; font-family:monospace; font-size:11px; padding:8px; resize:none; outline:none; margin-bottom:8px;"></textarea>
+    <button class="mini-btn" style="width:100%; padding:8px; background:#1f6feb; color:#fff;" onclick="copyMcpPayload()">
+      📋 Copy Payload for AI Agent
+    </button>
 
-    <!-- AI Agent Payload -->
-    <div class="intel-card">
-      <h4>🤖 Agent Payload (for Cursor / Claude / Antigravity)</h4>
-      <textarea id="mcp-prompt-box" readonly placeholder="Click any section to generate instant surgical prompt..."></textarea>
-      <button class="mini-btn" style="width:100%; padding:8px; background:#1f6feb; color:#fff;" onclick="copyMcpPayload()">
-        📋 Copy Prompt for AI Agent
-      </button>
-    </div>
+    <!-- Relations -->
+    <div class="drawer-section-title" style="margin-top:16px;">Connected Links (<span id="d-rel-count">0</span>)</div>
+    <div class="rel-list" id="d-relations"></div>
   </div>
 </div>
 
-<!-- Modal: Repository Management (Identical to Galaxy) -->
+<!-- Modal: Repositories (100% CodeGraph Galaxy Standard) -->
 <div id="path-modal">
   <div class="modal-card">
     <div class="modal-header">
       <span style="font-weight:600; font-size:14px; color:#58a6ff;" id="lbl-modal-title">Documentation Repositories</span>
-      <button class="mini-btn" onclick="closePathModal()">×</button>
+      <button class="drawer-close" onclick="closePathModal()">×</button>
     </div>
     <div class="modal-body">
       <p style="font-size:12px; color:#8b949e;" id="lbl-modal-sub">
@@ -205,6 +213,6 @@
 
 <div id="toast"></div>
 
-<script src="/static/docgraph.js?v=1.0.1"></script>
+<script src="/static/docgraph.js?v=1.0.5"></script>
 </body>
 </html>

@@ -1,139 +1,912 @@
-// DocGraph Flagship 3D Knowledge Topology & Surgical Slicer Controller
+// DocGraph 3D - Flagship Knowledge Topology & AST Slicer
+// 100% Faithful to CodeGraph Galaxy Architecture & UX
+
 let Graph = null;
-let graphData = { nodes: [], links: [] };
-let currentRepoPath = '';
-let currentFilePath = '';
-let currentFileContent = '';
-let currentToc = [];
-let currentActiveNode = null;
-let isSliceMode = true;
-let isDrawerOpen = true;
+let rawData = { nodes: [], links: [] };
+let filteredData = { nodes: [], links: [] };
+let allProjectsList = [];
+const selectedProjects = new Set();
+
+const highlightNodes = new Set();
+const highlightLinks = new Set();
+let activeNode = null;
+let selectedTreeNodeEl = null;
 let isTreeOpen = true;
 let isRotating = false;
 let currentLanguage = 'en';
 
+// Mode & Filter States
+let currentLOD = 'all'; // 'arch', 'standard', 'all', 'custom'
+const hiddenKinds = new Set();
+const hiddenEdgeKinds = new Set();
+
+const KIND_COLORS = {
+  file: '#f0883e',       // Orange (Document)
+  heading_1: '#58a6ff',  // Blue (H1 Primary)
+  heading_2: '#3fb950',  // Green (H2 Major)
+  heading_3: '#bc8cff',  // Purple (H3 Subsection)
+  heading_4: '#d29922',  // Gold (H4 Detail)
+  heading_5: '#79c0ff',
+  heading_6: '#a5d6ff'
+};
+
+const KIND_SIZES = {
+  file: 6.5,
+  heading_1: 4.5,
+  heading_2: 3.2,
+  heading_3: 2.2,
+  heading_4: 1.5,
+  heading_5: 1.0,
+  heading_6: 0.8
+};
+
+const EDGE_COLORS = {
+  parent_child: '#388bfd',
+  doc_link: '#00ffaa'
+};
+
 document.addEventListener('DOMContentLoaded', () => {
   init3DGraph();
+  initAutoRotate();
   initResizers();
+  initDraggableLegend();
   initSearch();
-  loadRepositories();
+  loadProjects();
   checkElectronNative();
 });
 
+// ─── 1. 3D WebGL Scene & Node Rendering ───────────────────────────
 function init3DGraph() {
   const elem = document.getElementById('3d-graph');
+  if (!elem) return;
+
   Graph = ForceGraph3D()(elem)
     .backgroundColor('#090d13')
     .nodeId('id')
-    .nodeLabel(node => `[${node.kind}] ${node.name} (L${node.line})`)
-    .nodeVal('val')
-    .nodeColor('color')
+    // Clean tooltip without ugly [file] or [Lxxx] tags
+    .nodeLabel(n => {
+      const typeLabel = n.kind === 'file' ? 'Document' : `H${n.level || 1} Section`;
+      const fileName = (n.file || '').split(/[\\/]/).pop();
+      return `<div class="scene-tooltip"><div class="tooltip-title">${escapeHtml(n.name)}</div><div class="tooltip-sub">${typeLabel} · ${escapeHtml(fileName)} · Line ${n.line || 1}</div></div>`;
+    })
+    .nodeColor(n => {
+      if (highlightNodes.size > 0) {
+        return highlightNodes.has(n.id) ? (KIND_COLORS[n.kind] || '#58a6ff') : '#1c212888';
+      }
+      return KIND_COLORS[n.kind] || '#58a6ff';
+    })
+    // Hierarchical sizing: File > H1 > H2 > H3 > H4
+    .nodeVal(n => {
+      let base = KIND_SIZES[n.kind] || 2.0;
+      if (highlightNodes.has(n.id)) return base * 1.8;
+      return base;
+    })
+    .nodeRelSize(5)
     .nodeResolution(16)
-    .linkOpacity(0.35)
-    .linkWidth(1.2)
-    .linkColor(link => link.color || 'rgba(88, 166, 255, 0.4)')
+    .linkOpacity(l => {
+      if (highlightNodes.size > 0) {
+        return highlightLinks.has(l) ? 0.9 : 0.08;
+      }
+      return 0.35;
+    })
+    .linkColor(l => {
+      if (highlightNodes.size > 0) {
+        return highlightLinks.has(l) ? '#58a6ff' : '#21262d22';
+      }
+      return EDGE_COLORS[l.kind] || '#58a6ff';
+    })
+    .linkWidth(l => {
+      if (highlightNodes.size > 0) {
+        return highlightLinks.has(l) ? 2.2 : 0.4;
+      }
+      return l.kind === 'doc_link' ? 1.5 : 0.8;
+    })
+    .linkDirectionalParticles(l => {
+      if (highlightNodes.size > 0) {
+        return highlightLinks.has(l) ? 4 : 0;
+      }
+      return l.kind === 'doc_link' ? 2 : 1;
+    })
+    .linkDirectionalParticleWidth(l => highlightLinks.has(l) ? 2.2 : 1.2)
+    .linkDirectionalParticleSpeed(l => highlightLinks.has(l) ? 0.008 : 0.004)
+    .d3AlphaDecay(0.02)
+    .d3VelocityDecay(0.3)
     .onNodeClick(node => {
+      highlightScope('node', node);
       focusOnNode(node);
+      openDrawer(node);
+      syncExplorerSelection(node);
     })
     .onBackgroundClick(() => {
-      // unhighlight if needed
+      clearHighlight();
     });
 
-  // Window resize handler
   window.addEventListener('resize', () => {
     if (Graph) Graph.width(window.innerWidth).height(window.innerHeight);
   });
 }
 
 function focusOnNode(node) {
-  currentActiveNode = node;
-  
-  // Aim camera at node
-  const distance = 120;
-  const distRatio = 1 + distance / Math.hypot(node.x || 0, node.y || 0, node.z || 0);
-  Graph.cameraPosition(
-    { x: (node.x || 0) * distRatio, y: (node.y || 0) * distRatio, z: (node.z || 0) * distRatio },
-    node,
-    2000
-  );
-
-  // Sync with file and section reader
-  if (node.file) {
-    currentFilePath = node.file;
-    if (node.kind === 'file') {
-      openMarkdownFile(node.file);
-    } else {
-      openMarkdownFile(node.file, node.name);
-    }
+  if (!node || node.x === undefined) return;
+  activeNode = node;
+  const distance = 90;
+  const distRatio = 1 + distance / Math.hypot(node.x || 1, node.y || 1, node.z || 1);
+  if (Graph) {
+    Graph.cameraPosition(
+      { x: (node.x || 0) * distRatio, y: (node.y || 0) * distRatio, z: (node.z || 0) * distRatio },
+      { x: node.x || 0, y: node.y || 0, z: node.z || 0 },
+      1200
+    );
   }
-
-  // Open drawer if closed
-  if (!isDrawerOpen) toggleDrawer();
 }
 
-function toggleRotate() {
-  isRotating = !isRotating;
-  const btn = document.getElementById('btn-rotate');
-  btn.classList.toggle('active', isRotating);
-  if (Graph) {
-    Graph.controls().autoRotate = isRotating;
-    Graph.controls().autoRotateSpeed = 0.8;
+function highlightScope(scopeType, targetObj) {
+  highlightNodes.clear();
+  highlightLinks.clear();
+
+  const rawLinks = rawData.links || [];
+
+  if (scopeType === 'node') {
+    const node = targetObj;
+    highlightNodes.add(node.id);
+
+    rawLinks.forEach(l => {
+      const sId = typeof l.source === 'object' ? l.source.id : l.source;
+      const tId = typeof l.target === 'object' ? l.target.id : l.target;
+      if (sId === node.id) {
+        highlightLinks.add(l);
+        highlightNodes.add(tId);
+      } else if (tId === node.id) {
+        highlightLinks.add(l);
+        highlightNodes.add(sId);
+      }
+    });
+  } else if (scopeType === 'file') {
+    const fileNode = targetObj.node;
+    if (fileNode) highlightNodes.add(fileNode.id);
+    (targetObj.headings || []).forEach(h => highlightNodes.add(h.id));
+
+    rawLinks.forEach(l => {
+      const sId = typeof l.source === 'object' ? l.source.id : l.source;
+      const tId = typeof l.target === 'object' ? l.target.id : l.target;
+      if (highlightNodes.has(sId) || highlightNodes.has(tId)) {
+        highlightLinks.add(l);
+        highlightNodes.add(sId);
+        highlightNodes.add(tId);
+      }
+    });
+
+    if (fileNode && fileNode.x !== undefined) focusOnNode(fileNode);
   }
+
+  // Refresh 3D Graph elements
+  if (Graph) {
+    Graph.nodeColor(Graph.nodeColor())
+      .linkColor(Graph.linkColor())
+      .linkWidth(Graph.linkWidth())
+      .linkDirectionalParticles(Graph.linkDirectionalParticles());
+  }
+}
+
+function clearHighlight() {
+  highlightNodes.clear();
+  highlightLinks.clear();
+  activeNode = null;
+  if (selectedTreeNodeEl) {
+    selectedTreeNodeEl.classList.remove('selected');
+    selectedTreeNodeEl = null;
+  }
+  if (Graph) {
+    Graph.nodeColor(Graph.nodeColor())
+      .linkColor(Graph.linkColor())
+      .linkWidth(Graph.linkWidth())
+      .linkDirectionalParticles(Graph.linkDirectionalParticles());
+  }
+}
+
+// ─── 2. Auto Rotate ───────────────────────────────────────────────
+function initAutoRotate() {
+  const btn = document.getElementById('btn-rotate');
+  if (!btn) return;
+  btn.addEventListener('click', () => {
+    isRotating = !isRotating;
+    btn.classList.toggle('active', isRotating);
+    btn.style.color = isRotating ? '#3fb950' : '';
+    btn.style.borderColor = isRotating ? '#238636' : '';
+
+    if (isRotating) {
+      let angle = 0;
+      const distance = 360;
+      window._rotateTimer = setInterval(() => {
+        if (!isRotating) { clearInterval(window._rotateTimer); return; }
+        angle += Math.PI / 800;
+        if (Graph) {
+          Graph.cameraPosition({
+            x: distance * Math.sin(angle),
+            z: distance * Math.cos(angle)
+          });
+        }
+      }, 20);
+    } else {
+      clearInterval(window._rotateTimer);
+    }
+  });
 }
 
 function resetCamera() {
-  if (Graph) Graph.cameraPosition({ x: 0, y: 0, z: 280 }, { x: 0, y: 0, z: 0 }, 1500);
+  clearHighlight();
+  if (Graph) Graph.cameraPosition({ x: 0, y: 0, z: 320 }, { x: 0, y: 0, z: 0 }, 1200);
 }
 
-function loadRepositories() {
+// ─── 3. Project & Graph Data Loading ──────────────────────────────
+function loadProjects() {
   fetch('/api/projects')
     .then(res => res.json())
     .then(projects => {
-      renderRepoTable(projects);
-      if (projects.length > 0) {
-        currentRepoPath = projects[0].path;
-        loadRepoGraph(currentRepoPath);
-        loadRepoFileTree(currentRepoPath);
+      allProjectsList = projects || [];
+      renderRepoTable(allProjectsList);
+
+      // Default select all projects
+      selectedProjects.clear();
+      allProjectsList.forEach(p => {
+        if (p.status === 'ready') selectedProjects.add(p.name);
+      });
+
+      if (allProjectsList.length > 0) {
+        loadGraphForSelectedProjects();
       }
-    });
+    })
+    .catch(err => console.error('Failed to load projects:', err));
 }
 
-function loadRepoGraph(repoPath) {
-  currentRepoPath = repoPath;
-  fetch(`/api/graph?path=${encodeURIComponent(repoPath)}`)
+function loadGraphForSelectedProjects() {
+  if (allProjectsList.length === 0) return;
+  const firstProj = allProjectsList.find(p => selectedProjects.has(p.name)) || allProjectsList[0];
+  
+  fetch(`/api/graph?path=${encodeURIComponent(firstProj.path)}`)
     .then(res => res.json())
     .then(data => {
-      graphData = data;
-      if (Graph) {
-        Graph.graphData(data);
-      }
-      document.getElementById('stats-nodes').textContent = `${data.nodes.length} nodes`;
-      document.getElementById('stats-edges').textContent = `${data.links.length} links`;
-    });
+      rawData = data || { nodes: [], links: [] };
+      applyLODAndFilter();
+      buildProjectTree();
+      buildLegends();
+    })
+    .catch(err => console.error('Failed to load graph:', err));
 }
 
-function loadRepoFileTree(repoPath) {
-  fetch(`/api/tree?path=${encodeURIComponent(repoPath)}`)
+// ─── 4. Explorer Tree (Exact CodeGraph Galaxy Architecture) ───────
+function buildProjectTree() {
+  const container = document.getElementById('tree-container');
+  if (!container) return;
+
+  // Snapshot currently open folders
+  const openDirs = new Set();
+  container.querySelectorAll('.tree-children.open').forEach(el => {
+    const prev = el.previousElementSibling;
+    if (prev && prev.getAttribute('data-tree-dir')) {
+      openDirs.add(prev.getAttribute('data-tree-dir'));
+    }
+    if (prev && prev.getAttribute('data-tree-file')) {
+      openDirs.add(prev.getAttribute('data-tree-file'));
+    }
+  });
+
+  container.innerHTML = '';
+  const summaryEl = document.getElementById('lbl-proj-summary');
+  if (summaryEl) summaryEl.innerText = `${selectedProjects.size} Active`;
+
+  // Build recursive directory structure from rawData.nodes
+  // dir -> { name, path, files: { fileName: { name, path, headings: [] } }, subdirs: {} }
+  const rootTree = {};
+
+  (rawData.nodes || []).forEach(n => {
+    const filePath = (n.file || '').replace(/\\/g, '/');
+    if (!filePath) return;
+
+    const parts = filePath.split('/');
+    const fileName = parts.pop();
+    const dirPath = parts.join('/');
+
+    if (!rootTree[dirPath]) {
+      rootTree[dirPath] = { name: parts[parts.length - 1] || 'Root', path: dirPath, files: {}, subdirs: {} };
+    }
+    if (!rootTree[dirPath].files[fileName]) {
+      rootTree[dirPath].files[fileName] = { name: fileName, path: filePath, node: null, headings: [] };
+    }
+
+    if (n.kind === 'file') {
+      rootTree[dirPath].files[fileName].node = n;
+    } else {
+      rootTree[dirPath].files[fileName].headings.push(n);
+    }
+  });
+
+  // Render Projects / Root Folders with Checkbox (Galaxy standard: Checkbox at Project level!)
+  allProjectsList.forEach(proj => {
+    const projName = proj.name;
+    const isSelected = selectedProjects.has(projName);
+
+    const projNodeEl = document.createElement('div');
+    projNodeEl.className = 'tree-node';
+    projNodeEl.setAttribute('data-tree-proj', projName);
+
+    projNodeEl.innerHTML = `
+      <span class="tree-arrow open">▸</span>
+      <input type="checkbox" ${isSelected ? 'checked' : ''} title="Toggle project inclusion" />
+      <span style="font-weight:600; color:#58a6ff;">📦 ${escapeHtml(projName)}</span>
+      <span class="node-kind-tag" style="margin-left:auto;">${proj.files} files</span>
+    `;
+
+    const projChildrenEl = document.createElement('div');
+    projChildrenEl.className = 'tree-children open';
+
+    // Project Checkbox click
+    const cb = projNodeEl.querySelector('input[type="checkbox"]');
+    cb.onclick = (e) => {
+      e.stopPropagation();
+      if (cb.checked) selectedProjects.add(projName);
+      else selectedProjects.delete(projName);
+      loadGraphForSelectedProjects();
+    };
+
+    // Project Arrow toggle
+    const arrow = projNodeEl.querySelector('.tree-arrow');
+    arrow.onclick = (e) => {
+      e.stopPropagation();
+      projChildrenEl.classList.toggle('open');
+      arrow.classList.toggle('open');
+    };
+
+    // Render Directories & Files inside project
+    renderProjectFiles(rootTree, projChildrenEl, openDirs);
+
+    container.appendChild(projNodeEl);
+    container.appendChild(projChildrenEl);
+  });
+}
+
+function renderProjectFiles(fileTree, container, openDirs) {
+  for (const [dirKey, dirData] of Object.entries(fileTree)) {
+    // Render Files under this dir (NO checkboxes on files! Only arrow + icon + badge)
+    for (const [fName, fileData] of Object.entries(dirData.files)) {
+      const fileNodeEl = document.createElement('div');
+      fileNodeEl.className = 'tree-node';
+      fileNodeEl.setAttribute('data-tree-file', fileData.path);
+      fileNodeEl.style.paddingLeft = '20px';
+
+      const isFileOpen = openDirs.has(fileData.path);
+
+      fileNodeEl.innerHTML = `
+        <span class="tree-arrow ${isFileOpen ? 'open' : ''}">▸</span>
+        <span style="color:#c9d1d9;">📄 ${escapeHtml(fName)}</span>
+        <span class="node-kind-tag">${fileData.headings.length}h</span>
+      `;
+
+      const fileChildrenEl = document.createElement('div');
+      fileChildrenEl.className = `tree-children ${isFileOpen ? 'open' : ''}`;
+
+      // Arrow toggle for Headings (TOC)
+      const fArrow = fileNodeEl.querySelector('.tree-arrow');
+      fArrow.onclick = (e) => {
+        e.stopPropagation();
+        fileChildrenEl.classList.toggle('open');
+        fArrow.classList.toggle('open');
+      };
+
+      // File Click: Highlight scope, Focus 3D Node & Open Drawer
+      fileNodeEl.onclick = () => {
+        selectTreeNode(fileNodeEl);
+        highlightScope('file', fileData);
+        if (fileData.node) {
+          focusOnNode(fileData.node);
+          openDrawer(fileData.node);
+        }
+      };
+
+      // Render Headings under this file (Issue 5: TOC fully populated in Explorer!)
+      fileData.headings.forEach(h => {
+        const hNodeEl = document.createElement('div');
+        hNodeEl.className = 'tree-node';
+        hNodeEl.setAttribute('data-tree-node-id', h.id);
+        hNodeEl.style.paddingLeft = `${(h.level || 1) * 12 + 28}px`;
+
+        hNodeEl.innerHTML = `
+          <span style="color:${KIND_COLORS[h.kind] || '#58a6ff'}; margin-right:4px;">${'#'.repeat(h.level || 1)}</span>
+          <span style="color:#8b949e; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${escapeHtml(h.name)}</span>
+          <span class="tree-line-badge" style="margin-left:auto; font-size:10px; color:#6e7681;">L${h.line || 1}</span>
+        `;
+
+        // Heading Click: Focus 3D AST Node, Highlight & Open Drawer
+        hNodeEl.onclick = (e) => {
+          e.stopPropagation();
+          selectTreeNode(hNodeEl);
+          highlightScope('node', h);
+          focusOnNode(h);
+          openDrawer(h);
+        };
+
+        fileChildrenEl.appendChild(hNodeEl);
+      });
+
+      container.appendChild(fileNodeEl);
+      container.appendChild(fileChildrenEl);
+    }
+  }
+}
+
+function selectTreeNode(el) {
+  if (selectedTreeNodeEl) selectedTreeNodeEl.classList.remove('selected');
+  selectedTreeNodeEl = el;
+  if (el) el.classList.add('selected');
+}
+
+function syncExplorerSelection(node) {
+  if (!node) return;
+  let targetEl = null;
+  if (node.kind === 'file') {
+    targetEl = document.querySelector(`[data-tree-file="${node.file}"]`);
+  } else {
+    targetEl = document.querySelector(`[data-tree-node-id="${node.id}"]`);
+  }
+
+  if (targetEl) {
+    selectTreeNode(targetEl);
+    targetEl.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+
+    // Open parents
+    let p = targetEl.parentElement;
+    while (p && p.id !== 'tree-container') {
+      if (p.classList.contains('tree-children')) {
+        p.classList.add('open');
+        const prev = p.previousElementSibling;
+        if (prev) {
+          const arr = prev.querySelector('.tree-arrow');
+          if (arr) arr.classList.add('open');
+        }
+      }
+      p = p.parentElement;
+    }
+  }
+}
+
+function filterTree(q) {
+  const query = (q || '').trim().toLowerCase();
+  document.querySelectorAll('#tree-container .tree-node').forEach(el => {
+    if (!query) {
+      el.style.display = 'flex';
+      return;
+    }
+    const text = el.innerText.toLowerCase();
+    el.style.display = text.includes(query) ? 'flex' : 'none';
+  });
+}
+
+function selectAllProjects(val) {
+  allProjectsList.forEach(p => {
+    if (val) selectedProjects.add(p.name);
+    else selectedProjects.delete(p.name);
+  });
+  document.querySelectorAll('#tree-container input[type="checkbox"]').forEach(cb => cb.checked = val);
+  loadGraphForSelectedProjects();
+}
+
+// ─── 5. Mode / LOD & Legend Control (Issue 3 Fixed) ───────────────
+function changeLOD(mode) {
+  currentLOD = mode;
+  document.querySelectorAll('.lod-btn').forEach(b => {
+    b.classList.toggle('active', b.dataset.lod === mode);
+  });
+
+  hiddenKinds.clear();
+  if (mode === 'arch') {
+    // Documents only
+    ['heading_1', 'heading_2', 'heading_3', 'heading_4', 'heading_5', 'heading_6'].forEach(k => hiddenKinds.add(k));
+  } else if (mode === 'standard') {
+    // Document + H1 + H2
+    ['heading_3', 'heading_4', 'heading_5', 'heading_6'].forEach(k => hiddenKinds.add(k));
+  } else if (mode === 'all') {
+    // All
+  }
+
+  applyLODAndFilter();
+  updateLegendUI();
+}
+
+function applyLODAndFilter() {
+  const activeNodes = (rawData.nodes || []).filter(n => {
+    if (hiddenKinds.has(n.kind)) return false;
+    return true;
+  });
+
+  const nodeSet = new Set(activeNodes.map(n => n.id));
+  const activeLinks = (rawData.links || []).filter(l => {
+    const src = typeof l.source === 'object' ? l.source.id : l.source;
+    const tgt = typeof l.target === 'object' ? l.target.id : l.target;
+    return nodeSet.has(src) && nodeSet.has(tgt) && !hiddenEdgeKinds.has(l.kind);
+  });
+
+  filteredData = { nodes: activeNodes, links: activeLinks };
+  if (Graph) {
+    Graph.graphData(filteredData);
+  }
+
+  const nBadge = document.getElementById('stats-nodes');
+  const eBadge = document.getElementById('stats-edges');
+  if (nBadge) nBadge.textContent = `${activeNodes.length} nodes`;
+  if (eBadge) eBadge.textContent = `${activeLinks.length} links`;
+}
+
+function buildLegends() {
+  const nodesList = document.getElementById('legend-nodes-list');
+  if (!nodesList) return;
+  nodesList.innerHTML = '';
+  
+  const kinds = [
+    { kind: 'file', label: 'Document' },
+    { kind: 'heading_1', label: 'H1 Section' },
+    { kind: 'heading_2', label: 'H2 Section' },
+    { kind: 'heading_3', label: 'H3 Subsection' },
+    { kind: 'heading_4', label: 'H4 Detail' },
+  ];
+
+  kinds.forEach(item => {
+    const count = (rawData.nodes || []).filter(n => n.kind === item.kind).length;
+    const el = document.createElement('div');
+    el.className = 'legend-item';
+    el.classList.toggle('dimmed', hiddenKinds.has(item.kind));
+    el.innerHTML = `
+      <div class="legend-dot" style="background:${KIND_COLORS[item.kind] || '#58a6ff'};"></div>
+      <span>${item.label}</span>
+      <span class="legend-count-badge">${count}</span>
+    `;
+    el.onclick = () => {
+      if (hiddenKinds.has(item.kind)) {
+        hiddenKinds.delete(item.kind);
+      } else {
+        hiddenKinds.add(item.kind);
+      }
+      currentLOD = 'custom';
+      document.querySelectorAll('.lod-btn').forEach(b => b.classList.toggle('active', b.dataset.lod === 'custom'));
+      updateLegendUI();
+      applyLODAndFilter();
+    };
+    nodesList.appendChild(el);
+  });
+
+  const edgesList = document.getElementById('legend-edges-list');
+  if (!edgesList) return;
+  edgesList.innerHTML = '';
+  const edgeKinds = [
+    { kind: 'parent_child', label: 'AST Contains' },
+    { kind: 'doc_link', label: 'Cross-Doc Reference' }
+  ];
+
+  edgeKinds.forEach(item => {
+    const count = (rawData.links || []).filter(l => l.kind === item.kind).length;
+    const el = document.createElement('div');
+    el.className = 'legend-item';
+    el.classList.toggle('dimmed', hiddenEdgeKinds.has(item.kind));
+    el.innerHTML = `
+      <div class="legend-dot" style="background:${item.kind === 'doc_link' ? '#00ffaa' : '#58a6ff'};"></div>
+      <span>${item.label}</span>
+      <span class="legend-count-badge">${count}</span>
+    `;
+    el.onclick = () => {
+      if (hiddenEdgeKinds.has(item.kind)) hiddenEdgeKinds.delete(item.kind);
+      else hiddenEdgeKinds.add(item.kind);
+      el.classList.toggle('dimmed', hiddenEdgeKinds.has(item.kind));
+      applyLODAndFilter();
+    };
+    edgesList.appendChild(el);
+  });
+}
+
+function updateLegendUI() {
+  document.querySelectorAll('#legend-nodes-list .legend-item').forEach(el => {
+    const text = el.innerText;
+    let matchKind = null;
+    if (text.includes('Document')) matchKind = 'file';
+    else if (text.includes('H1')) matchKind = 'heading_1';
+    else if (text.includes('H2')) matchKind = 'heading_2';
+    else if (text.includes('H3')) matchKind = 'heading_3';
+    else if (text.includes('H4')) matchKind = 'heading_4';
+
+    if (matchKind) el.classList.toggle('dimmed', hiddenKinds.has(matchKind));
+  });
+}
+
+function switchLegendTab(tab) {
+  const tNodes = document.getElementById('tab-btn-nodes');
+  const tEdges = document.getElementById('tab-btn-edges');
+  const lNodes = document.getElementById('legend-nodes-list');
+  const lEdges = document.getElementById('legend-edges-list');
+  if (tNodes) tNodes.classList.toggle('active', tab === 'nodes');
+  if (tEdges) tEdges.classList.toggle('active', tab === 'edges');
+  if (lNodes) lNodes.style.display = tab === 'nodes' ? 'flex' : 'none';
+  if (lEdges) lEdges.style.display = tab === 'edges' ? 'flex' : 'none';
+}
+
+function resetFilters() {
+  hiddenKinds.clear();
+  hiddenEdgeKinds.clear();
+  changeLOD('all');
+}
+
+function initDraggableLegend() {
+  const panel = document.getElementById('legend-panel');
+  const handle = document.getElementById('legend-drag-handle');
+  if (!panel || !handle) return;
+  let isDragging = false;
+  let startX = 0, startY = 0, initialLeft = 0, initialTop = 0;
+
+  handle.addEventListener('mousedown', (e) => {
+    isDragging = true;
+    startX = e.clientX;
+    startY = e.clientY;
+    const rect = panel.getBoundingClientRect();
+    initialLeft = rect.left;
+    initialTop = rect.top;
+    panel.style.bottom = 'auto';
+    panel.style.right = 'auto';
+    panel.style.left = initialLeft + 'px';
+    panel.style.top = initialTop + 'px';
+    document.body.style.cursor = 'move';
+  });
+
+  window.addEventListener('mousemove', (e) => {
+    if (!isDragging) return;
+    const dx = e.clientX - startX;
+    const dy = e.clientY - startY;
+    panel.style.left = `${Math.max(10, Math.min(window.innerWidth - 300, initialLeft + dx))}px`;
+    panel.style.top = `${Math.max(60, Math.min(window.innerHeight - 250, initialTop + dy))}px`;
+  });
+
+  window.addEventListener('mouseup', () => {
+    isDragging = false;
+    document.body.style.cursor = 'default';
+  });
+}
+
+// ─── 6. Inspector Drawer & Reader (Issue 2 Fixed) ──────────────────
+function openDrawer(node) {
+  if (!node) return;
+  activeNode = node;
+  const drawer = document.getElementById('drawer');
+  if (!drawer) return;
+  drawer.classList.add('open');
+
+  const dName = document.getElementById('d-name');
+  const dSub = document.getElementById('d-sub');
+  if (dName) dName.innerText = node.name || 'Unnamed';
+  if (dSub) dSub.innerText = `${node.file || ''} · Line ${node.line || 1}`;
+
+  const badge = document.getElementById('d-kind-badge');
+  if (badge) {
+    badge.innerText = (node.kind || 'NODE').toUpperCase();
+    badge.style.background = KIND_COLORS[node.kind] || '#1f6feb';
+  }
+
+  // IDE Launchers
+  const encodedPath = encodeURIComponent((node.file || '').replace(/\\/g, '/'));
+  const startLine = node.line || 1;
+  const vsc = document.getElementById('ide-vscode');
+  const cur = document.getElementById('ide-cursor');
+  const agy = document.getElementById('ide-antigravity');
+  if (vsc) vsc.href = `vscode://file/${encodedPath}:${startLine}`;
+  if (cur) cur.href = `cursor://file/${encodedPath}:${startLine}`;
+  if (agy) agy.href = `vscode://file/${encodedPath}:${startLine}`;
+
+  // Fetch Section / Full Content
+  const headingParam = node.kind === 'file' ? '' : `&heading=${encodeURIComponent(node.name)}`;
+  fetch(`/api/doc/section?file=${encodeURIComponent(node.file)}${headingParam}&sub=1`)
     .then(res => res.json())
-    .then(tree => {
-      const container = document.getElementById('tree-files-content');
-      container.innerHTML = '';
-      renderDirectoryNode(tree, container);
+    .then(data => {
+      const content = data.content || '';
+      renderMarkdown(content);
+
+      // Token Intelligence
+      const fullTokens = node.tokens || Math.ceil(content.length / 3.8);
+      const slicedTokens = Math.ceil(content.length / 3.8);
+      const savings = node.kind === 'file' ? '0.0%' : `${Math.max(0, ((fullTokens - slicedTokens) / (fullTokens || 1)) * 100).toFixed(1)}%`;
+
+      const savBadge = document.getElementById('stat-savings-badge');
+      const savFill = document.getElementById('stat-savings-fill');
+      const fTokens = document.getElementById('stat-full-tokens');
+      const sTokens = document.getElementById('stat-sliced-tokens');
+      const mcpBox = document.getElementById('mcp-prompt-box');
+
+      if (savBadge) savBadge.textContent = savings;
+      if (savFill) savFill.style.width = savings;
+      if (fTokens) fTokens.textContent = `${fullTokens.toLocaleString()} tokens`;
+      if (sTokens) sTokens.textContent = `${slicedTokens.toLocaleString()} tokens`;
+      if (mcpBox) mcpBox.value = `[DocGraph Sliced Context: ${node.name}]\n${content}`;
+    })
+    .catch(err => console.error('Section read error:', err));
+
+  // Connected Relations
+  const rawLinks = rawData.links || [];
+  const outLinks = rawLinks.filter(l => {
+    const src = typeof l.source === 'object' ? l.source.id : l.source;
+    return src === node.id;
+  });
+
+  const relList = document.getElementById('d-relations');
+  if (relList) {
+    relList.innerHTML = '';
+    outLinks.forEach(l => {
+      const tgtId = typeof l.target === 'object' ? l.target.id : l.target;
+      const tgtNode = rawData.nodes.find(n => n.id === tgtId);
+      if (!tgtNode) return;
+
+      const row = document.createElement('div');
+      row.className = 'rel-row';
+      row.innerHTML = `
+        <span class="rel-kind">${l.kind === 'parent_child' ? 'contains' : 'links_to'}</span>
+        <span class="rel-target">${escapeHtml(tgtNode.name)}</span>
+      `;
+      row.onclick = () => {
+        highlightScope('node', tgtNode);
+        focusOnNode(tgtNode);
+        openDrawer(tgtNode);
+        syncExplorerSelection(tgtNode);
+      };
+      relList.appendChild(row);
     });
+  }
+}
+
+function closeDrawer() {
+  const d = document.getElementById('drawer');
+  if (d) d.classList.remove('open');
+}
+
+function renderMarkdown(mdText) {
+  const container = document.getElementById('d-code-markdown');
+  if (!container) return;
+  if (window.marked) {
+    container.innerHTML = marked.parse(mdText || '');
+    container.querySelectorAll('pre code').forEach((block) => {
+      if (window.hljs) hljs.highlightElement(block);
+    });
+  } else {
+    container.innerText = mdText || '';
+  }
+}
+
+function copyCurrentSection() {
+  const el = document.getElementById('d-code-markdown');
+  if (!el) return;
+  navigator.clipboard.writeText(el.innerText);
+  showToast('✅ Sliced section copied!');
+}
+
+function copyMcpPayload() {
+  const el = document.getElementById('mcp-prompt-box');
+  if (!el || !el.value) return;
+  navigator.clipboard.writeText(el.value);
+  showToast('✅ AI Prompt payload copied!');
+}
+
+// ─── 7. Header & Toolbar Controls ─────────────────────────────────
+function toggleTreePanel() {
+  isTreeOpen = !isTreeOpen;
+  const p = document.getElementById('tree-panel');
+  const b = document.getElementById('btn-toggle-tree');
+  if (p) p.classList.toggle('hidden', !isTreeOpen);
+  if (b) b.classList.toggle('active', isTreeOpen);
+}
+
+function initResizers() {
+  const treeResizer = document.getElementById('tree-resizer');
+  const treePanel = document.getElementById('tree-panel');
+  if (treeResizer && treePanel) {
+    let isDraggingLeft = false;
+    treeResizer.addEventListener('mousedown', () => {
+      isDraggingLeft = true;
+      document.body.style.cursor = 'col-resize';
+    });
+    window.addEventListener('mousemove', (e) => {
+      if (isDraggingLeft) {
+        const newWidth = Math.max(200, Math.min(600, e.clientX));
+        treePanel.style.width = newWidth + 'px';
+      }
+    });
+    window.addEventListener('mouseup', () => {
+      isDraggingLeft = false;
+      document.body.style.cursor = 'default';
+    });
+  }
+
+  const drawerResizer = document.getElementById('drawer-resizer');
+  const drawer = document.getElementById('drawer');
+  if (drawerResizer && drawer) {
+    let isDraggingRight = false;
+    drawerResizer.addEventListener('mousedown', () => {
+      isDraggingRight = true;
+      document.body.style.cursor = 'col-resize';
+    });
+    window.addEventListener('mousemove', (e) => {
+      if (isDraggingRight) {
+        const newWidth = Math.max(300, Math.min(800, window.innerWidth - e.clientX));
+        drawer.style.width = newWidth + 'px';
+      }
+    });
+    window.addEventListener('mouseup', () => {
+      isDraggingRight = false;
+      document.body.style.cursor = 'default';
+    });
+  }
+}
+
+function initSearch() {
+  const searchBox = document.getElementById('search-box');
+  if (!searchBox) return;
+  searchBox.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') {
+      const q = searchBox.value.trim().toLowerCase();
+      if (!q) return;
+
+      const found = (filteredData.nodes || []).find(n => n.name.toLowerCase().includes(q));
+      if (found) {
+        highlightScope('node', found);
+        focusOnNode(found);
+        openDrawer(found);
+        syncExplorerSelection(found);
+        showToast(`🎯 Focused: ${found.name}`);
+      } else {
+        showToast(`❌ Not found: ${q}`);
+      }
+    }
+  });
+}
+
+function openPathModal() {
+  const m = document.getElementById('path-modal');
+  if (m) m.classList.add('show');
+  loadProjects();
+}
+
+function closePathModal() {
+  const m = document.getElementById('path-modal');
+  if (m) m.classList.remove('show');
+}
+
+function submitAddPath() {
+  const input = document.getElementById('custom-path-input');
+  if (!input) return;
+  const path = input.value.trim();
+  if (!path) return;
+
+  fetch('/api/paths/add', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ path })
+  })
+  .then(res => res.json())
+  .then(res => {
+    if (res.success) {
+      input.value = '';
+      loadProjects();
+      showToast('✅ Directory added & indexed!');
+    } else {
+      alert('Error: ' + res.error);
+    }
+  });
 }
 
 function renderRepoTable(projects) {
   const tbody = document.getElementById('manager-table-body');
+  if (!tbody) return;
   tbody.innerHTML = '';
-  projects.forEach(p => {
+  (projects || []).forEach(p => {
     const tr = document.createElement('tr');
     tr.innerHTML = `
-      <td style="font-weight:600; color:#58a6ff;">${p.name}</td>
-      <td style="font-family:monospace; font-size:11px; color:#8b949e; max-width:260px; overflow:hidden; text-overflow:ellipsis;" title="${p.path}">${p.path}</td>
+      <td style="font-weight:600; color:#58a6ff;">${escapeHtml(p.name)}</td>
+      <td style="font-family:monospace; font-size:11px; color:#8b949e; max-width:260px; overflow:hidden; text-overflow:ellipsis;" title="${p.path}">${escapeHtml(p.path)}</td>
       <td>${p.files}</td>
       <td>
         <span style="color:${p.has_db ? '#00ffaa' : '#e3b341'}; font-weight:600;">
-          ${p.has_db ? 'Indexed (.db)' : 'Not Indexed'}
+          ${p.has_db ? 'Indexed (.docgraph/docgraph.db)' : 'Not Indexed'}
         </span>
       </td>
       <td>
@@ -147,8 +920,14 @@ function renderRepoTable(projects) {
 
 function selectRepo(path) {
   closePathModal();
-  loadRepoGraph(path);
-  loadRepoFileTree(path);
+  fetch(`/api/graph?path=${encodeURIComponent(path)}`)
+    .then(res => res.json())
+    .then(data => {
+      rawData = data || { nodes: [], links: [] };
+      applyLODAndFilter();
+      buildProjectTree();
+      buildLegends();
+    });
 }
 
 function reindexRepo(path) {
@@ -162,288 +941,10 @@ function reindexRepo(path) {
   .then(res => {
     if (res.success) {
       showToast(`✅ Indexed ${res.files} files, ${res.nodes} nodes, ${res.edges} edges!`);
-      loadRepositories();
-      loadRepoGraph(path);
+      loadProjects();
     } else {
       alert('Index failed: ' + res.error);
     }
-  });
-}
-
-function renderDirectoryNode(node, container, level = 0) {
-  if (node.type === 'dir') {
-    const dirEl = document.createElement('div');
-    dirEl.className = 'tree-item';
-    dirEl.style.paddingLeft = `${level * 14 + 8}px`;
-    dirEl.innerHTML = `<span>📁 ${escapeHtml(node.name)}</span>`;
-    container.appendChild(dirEl);
-
-    if (node.children) {
-      node.children.forEach(child => renderDirectoryNode(child, container, level + 1));
-    }
-  } else if (node.type === 'file') {
-    const fileEl = document.createElement('div');
-    fileEl.className = 'tree-item';
-    fileEl.style.paddingLeft = `${level * 14 + 8}px`;
-    fileEl.innerHTML = `
-      <span>📄 ${escapeHtml(node.name)}</span>
-      <span class="tree-line-badge">${node.headings}h</span>
-    `;
-    fileEl.addEventListener('click', () => {
-      document.querySelectorAll('.tree-item').forEach(i => i.classList.remove('active'));
-      fileEl.classList.add('active');
-      openMarkdownFile(node.path);
-    });
-    container.appendChild(fileEl);
-  }
-}
-
-function openMarkdownFile(filePath, targetHeading = null) {
-  currentFilePath = filePath;
-  document.getElementById('current-breadcrumb').textContent = filePath;
-
-  // 1. Fetch TOC
-  fetch(`/api/doc/toc?file=${encodeURIComponent(filePath)}&format=json`)
-    .then(res => res.json())
-    .then(headings => {
-      currentToc = headings;
-      renderTocList(headings);
-    });
-
-  // 2. Fetch Content
-  fetch(`/api/doc/section?file=${encodeURIComponent(filePath)}`)
-    .then(res => res.json())
-    .then(data => {
-      currentFileContent = data.content;
-      switchTab('toc');
-
-      if (targetHeading) {
-        selectHeadingByTitle(targetHeading);
-      } else if (currentToc.length > 0) {
-        selectHeading(currentToc[0]);
-      } else {
-        renderMarkdown(currentFileContent);
-      }
-    });
-}
-
-function renderTocList(headings) {
-  const container = document.getElementById('tree-toc-content');
-  container.innerHTML = '';
-  if (!headings || headings.length === 0) {
-    container.innerHTML = '<div style="padding:16px; color:#8b949e; text-align:center;">No headings found.</div>';
-    return;
-  }
-
-  headings.forEach(h => {
-    const el = document.createElement('div');
-    el.className = `tree-item toc-item`;
-    el.style.paddingLeft = `${(h.level - 1) * 14 + 8}px`;
-    el.innerHTML = `
-      <span style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${'#'.repeat(h.level)} ${escapeHtml(h.title)}</span>
-      <span class="tree-line-badge">L${h.line}</span>
-    `;
-    el.addEventListener('click', () => {
-      document.querySelectorAll('.toc-item').forEach(i => i.classList.remove('active'));
-      el.classList.add('active');
-      selectHeading(h);
-
-      // Find 3D node and focus
-      const matchedNode = graphData.nodes.find(n => n.name === h.title);
-      if (matchedNode) focusOnNode(matchedNode);
-    });
-    container.appendChild(el);
-  });
-}
-
-function selectHeading(heading) {
-  fetch(`/api/doc/section?file=${encodeURIComponent(currentFilePath)}&heading=${encodeURIComponent(heading.title)}&sub=1`)
-    .then(res => res.json())
-    .then(data => {
-      const slicedText = data.content;
-      updateStatsAndIntelligence(currentFileContent, slicedText, heading);
-      renderMarkdown(isSliceMode ? slicedText : currentFileContent);
-    });
-}
-
-function selectHeadingByTitle(title) {
-  const found = currentToc.find(h => h.title.toLowerCase().includes(title.toLowerCase()));
-  if (found) {
-    selectHeading(found);
-  } else {
-    renderMarkdown(currentFileContent);
-  }
-}
-
-function renderMarkdown(mdText) {
-  const container = document.getElementById('markdown-render-area');
-  if (window.marked) {
-    container.innerHTML = marked.parse(mdText);
-    document.querySelectorAll('pre code').forEach((block) => {
-      if (window.hljs) hljs.highlightElement(block);
-    });
-  } else {
-    container.innerText = mdText;
-  }
-}
-
-function updateStatsAndIntelligence(fullText, slicedText, heading) {
-  const fullTokens = Math.ceil(fullText.length / 3.8);
-  const slicedTokens = Math.ceil(slicedText.length / 3.8);
-  const savings = Math.max(0, ((fullTokens - slicedTokens) / (fullTokens || 1)) * 100).toFixed(1);
-
-  document.getElementById('stat-savings-badge').textContent = `${savings}%`;
-  document.getElementById('stat-savings-fill').style.width = `${savings}%`;
-  document.getElementById('stat-full-tokens').textContent = `${fullTokens.toLocaleString()} tokens`;
-  document.getElementById('stat-sliced-tokens').textContent = `${slicedTokens.toLocaleString()} tokens`;
-
-  document.getElementById('active-sec-title').textContent = heading.title;
-  document.getElementById('active-sec-kind').textContent = `H${heading.level || 1} Heading`;
-  document.getElementById('active-sec-line').textContent = `Line ${heading.line || 1}`;
-  document.getElementById('active-sec-chars').textContent = slicedText.length.toLocaleString();
-
-  document.getElementById('mcp-prompt-box').value = `[DocGraph Sliced Context: ${heading.title}]\n${slicedText}`;
-}
-
-function copyCurrentSection() {
-  const text = document.getElementById('markdown-render-area').innerText;
-  navigator.clipboard.writeText(text);
-  showToast('✅ Sliced section copied!');
-}
-
-function copyMcpPayload() {
-  const text = document.getElementById('mcp-prompt-box').value;
-  if (!text) return;
-  navigator.clipboard.writeText(text);
-  showToast('✅ AI Prompt payload copied!');
-}
-
-function toggleTreePanel() {
-  isTreeOpen = !isTreeOpen;
-  const treePanel = document.getElementById('tree-panel');
-  const btn = document.getElementById('btn-toggle-tree');
-  treePanel.classList.toggle('hidden', !isTreeOpen);
-  btn.classList.toggle('active', isTreeOpen);
-}
-
-function toggleDrawer() {
-  isDrawerOpen = !isDrawerOpen;
-  const drawer = document.getElementById('drawer');
-  const btn = document.getElementById('btn-toggle-drawer');
-  drawer.classList.toggle('hidden', !isDrawerOpen);
-  btn.classList.toggle('active', isDrawerOpen);
-}
-
-function toggleSliceMode() {
-  isSliceMode = !isSliceMode;
-  const btn = document.getElementById('btn-toggle-slice');
-  btn.classList.toggle('active', isSliceMode);
-  btn.textContent = isSliceMode ? '🗡️ Section Focus' : '📖 Full Doc View';
-}
-
-function switchTab(tab) {
-  const tocBtn = document.getElementById('tab-toc-btn');
-  const filesBtn = document.getElementById('tab-files-btn');
-  const tocContent = document.getElementById('tree-toc-content');
-  const filesContent = document.getElementById('tree-files-content');
-
-  if (tab === 'toc') {
-    tocBtn.classList.add('active');
-    filesBtn.classList.remove('active');
-    tocContent.style.display = 'block';
-    filesContent.style.display = 'none';
-  } else {
-    filesBtn.classList.add('active');
-    tocBtn.classList.remove('active');
-    filesContent.style.display = 'block';
-    tocContent.style.display = 'none';
-  }
-}
-
-function openPathModal() {
-  document.getElementById('path-modal').classList.add('show');
-  loadRepositories();
-}
-
-function closePathModal() {
-  document.getElementById('path-modal').classList.remove('show');
-}
-
-function submitAddPath() {
-  const input = document.getElementById('custom-path-input');
-  const path = input.value.trim();
-  if (!path) return;
-
-  fetch('/api/paths/add', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ path })
-  })
-  .then(res => res.json())
-  .then(res => {
-    if (res.success) {
-      input.value = '';
-      loadRepositories();
-      showToast('✅ Directory added successfully!');
-    } else {
-      alert('Error: ' + res.error);
-    }
-  });
-}
-
-function initSearch() {
-  const searchBox = document.getElementById('search-box');
-  searchBox.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter') {
-      const q = searchBox.value.trim().toLowerCase();
-      if (!q) return;
-
-      // Find in 3D graph
-      const found = graphData.nodes.find(n => n.name.toLowerCase().includes(q));
-      if (found) {
-        focusOnNode(found);
-        showToast(`🎯 Focused on node: ${found.name}`);
-      } else {
-        showToast(`❌ Node not found in 3D topology: ${q}`);
-      }
-    }
-  });
-}
-
-function initResizers() {
-  const treeResizer = document.getElementById('tree-resizer');
-  const treePanel = document.getElementById('tree-panel');
-  let isDraggingLeft = false;
-
-  treeResizer.addEventListener('mousedown', () => {
-    isDraggingLeft = true;
-    document.body.style.cursor = 'col-resize';
-  });
-
-  const drawerResizer = document.getElementById('drawer-resizer');
-  const drawer = document.getElementById('drawer');
-  let isDraggingRight = false;
-
-  drawerResizer.addEventListener('mousedown', () => {
-    isDraggingRight = true;
-    document.body.style.cursor = 'col-resize';
-  });
-
-  window.addEventListener('mousemove', (e) => {
-    if (isDraggingLeft) {
-      const newWidth = Math.max(200, Math.min(600, e.clientX));
-      treePanel.style.width = newWidth + 'px';
-    }
-    if (isDraggingRight) {
-      const newWidth = Math.max(280, Math.min(700, window.innerWidth - e.clientX));
-      drawer.style.width = newWidth + 'px';
-    }
-  });
-
-  window.addEventListener('mouseup', () => {
-    isDraggingLeft = false;
-    isDraggingRight = false;
-    document.body.style.cursor = 'default';
   });
 }
 
@@ -458,13 +959,15 @@ async function browseDirectoryNative() {
   if (window.electronAPI && typeof window.electronAPI.openDirectoryDialog === 'function') {
     const selected = await window.electronAPI.openDirectoryDialog();
     if (selected) {
-      document.getElementById('custom-path-input').value = selected;
+      const inp = document.getElementById('custom-path-input');
+      if (inp) inp.value = selected;
     }
   }
 }
 
 function showToast(msg) {
   const toast = document.getElementById('toast');
+  if (!toast) return;
   toast.textContent = msg;
   toast.style.display = 'block';
   setTimeout(() => { toast.style.display = 'none'; }, 2500);
@@ -472,13 +975,9 @@ function showToast(msg) {
 
 function toggleLanguage() {
   currentLanguage = currentLanguage === 'en' ? 'zh' : 'en';
-  document.getElementById('btn-lang').textContent = `Language: ${currentLanguage.toUpperCase()}`;
+  const b = document.getElementById('btn-lang');
+  if (b) b.textContent = `Language: ${currentLanguage.toUpperCase()}`;
   showToast(`Language: ${currentLanguage.toUpperCase()}`);
-}
-
-function resetToWelcome() {
-  resetCamera();
-  showToast('Reset camera view to center');
 }
 
 function escapeHtml(str) {

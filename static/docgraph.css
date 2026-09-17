@@ -1,3 +1,13 @@
+/* 3D WebGL Canvas */
+#3d-graph {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100vw;
+  height: 100vh;
+  z-index: 1;
+}
+
 /* DocGraph - Flagship Galaxy-Fidelity Glassmorphism Stylesheet */
 * { margin: 0; padding: 0; box-sizing: border-box; }
 html, body {
@@ -541,4 +551,211 @@ html, body {
   box-shadow: 0 8px 24px rgba(0,0,0,0.5);
   display: none;
   z-index: 2000;
+}
+
+/* Mode / Legend Draggable Panel (CodeGraph Galaxy standard) */
+#legend-panel {
+  position: absolute;
+  bottom: 24px;
+  right: 380px;
+  width: 280px;
+  background: rgba(13, 17, 23, 0.92);
+  backdrop-filter: blur(12px);
+  border: 1px solid #30363d;
+  border-radius: 8px;
+  z-index: 45;
+  box-shadow: 0 8px 24px rgba(0,0,0,0.5);
+  display: flex;
+  flex-direction: column;
+  user-select: none;
+  transition: opacity 0.2s ease;
+}
+
+.legend-mode-header {
+  padding: 10px 14px;
+  border-bottom: 1px solid #30363d;
+  cursor: move;
+  background: rgba(22, 27, 34, 0.85);
+  border-top-left-radius: 8px;
+  border-top-right-radius: 8px;
+}
+
+.legend-mode-title-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 8px;
+}
+
+.legend-mode-title {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  color: #8b949e;
+}
+
+.legend-drag-hint {
+  font-size: 11px;
+  color: #6e7681;
+}
+
+.lod-group {
+  display: flex;
+  gap: 4px;
+  background: #0d1117;
+  padding: 3px;
+  border-radius: 6px;
+  border: 1px solid #21262d;
+}
+
+.lod-btn {
+  flex: 1;
+  background: transparent;
+  border: none;
+  color: #8b949e;
+  font-size: 11px;
+  font-weight: 500;
+  padding: 4px 6px;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  white-space: nowrap;
+}
+
+.lod-btn:hover {
+  color: #c9d1d9;
+}
+
+.lod-btn.active {
+  background: #1f6feb;
+  color: #fff;
+  font-weight: 600;
+}
+
+.legend-tab-header {
+  display: flex;
+  align-items: center;
+  padding: 6px 12px;
+  border-bottom: 1px solid #21262d;
+  background: #121820;
+}
+
+.legend-tab-btn {
+  background: transparent;
+  border: none;
+  font-size: 11px;
+  font-weight: 600;
+  color: #8b949e;
+  padding: 4px 8px;
+  cursor: pointer;
+}
+
+.legend-tab-btn.active {
+  color: #58a6ff;
+  border-bottom: 2px solid #58a6ff;
+}
+
+.legend-list {
+  padding: 8px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 200px;
+  overflow-y: auto;
+}
+
+.legend-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 11px;
+  color: #c9d1d9;
+  cursor: pointer;
+  padding: 3px 6px;
+  border-radius: 4px;
+  transition: all 0.15s ease;
+}
+
+.legend-item:hover {
+  background: #21262d;
+}
+
+.legend-item.dimmed {
+  opacity: 0.35;
+}
+
+.legend-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.legend-count-badge {
+  margin-left: auto;
+  font-size: 10px;
+  color: #8b949e;
+  font-family: monospace;
+}
+
+/* Collapsible Tree Arrow & Checkbox Styles (Galaxy Standard) */
+.tree-arrow {
+  display: inline-block;
+  width: 14px;
+  font-size: 10px;
+  color: #8b949e;
+  cursor: pointer;
+  transition: transform 0.15s ease;
+  user-select: none;
+}
+
+.tree-arrow.open {
+  transform: rotate(90deg);
+}
+
+.tree-checkbox {
+  margin-right: 6px;
+  accent-color: #1f6feb;
+  cursor: pointer;
+}
+
+.tree-children {
+  display: none;
+}
+
+.tree-children.open {
+  display: block;
+}
+
+/* Custom 3D Tooltip */
+.scene-tooltip {
+  background: rgba(13, 17, 23, 0.95) !important;
+  border: 1px solid #30363d !important;
+  border-radius: 6px !important;
+  padding: 6px 10px !important;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif !important;
+  box-shadow: 0 4px 16px rgba(0,0,0,0.6) !important;
+  color: #e6edf3 !important;
+  font-size: 12px !important;
+  line-height: 1.4 !important;
+}
+
+.tooltip-title {
+  font-weight: 600;
+  color: #58a6ff;
+  font-size: 12px;
+}
+
+.tooltip-sub {
+  font-size: 10px;
+  color: #8b949e;
+  font-family: monospace;
+}
+
+/* Active Highlight on Toolbar Auto Rotate */
+.tool-btn.highlight {
+  background: #238636 !important;
+  border-color: #2ea043 !important;
+  color: #fff !important;
 }

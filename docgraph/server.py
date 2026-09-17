@@ -7,10 +7,32 @@ from .scanner import scan_doc_repositories, get_dir_file_tree, get_repo_doc_metr
 from .parser import extract_toc, extract_section, search_doc, parse_headings
 from .db import index_repository, fetch_graph_data, get_db_path
 
+
+
+
 def create_app(initial_paths: Optional[List[str]] = None, search_roots: Optional[List[str]] = None) -> Flask:
     """Create and configure the DocGraph Flask application."""
     if initial_paths and not search_roots:
         search_roots = initial_paths
+
+    def resolve_file(file_path: str) -> Optional[str]:
+        if not file_path:
+            return None
+        if os.path.isfile(file_path):
+            return os.path.abspath(file_path)
+        roots = get_search_roots(search_roots)
+        for r in roots:
+            cand = os.path.normpath(os.path.join(r, file_path))
+            if os.path.isfile(cand):
+                return cand
+            for dirpath, _, filenames in os.walk(r):
+                if ".git" in dirpath or "node_modules" in dirpath or ".docgraph" in dirpath:
+                    continue
+                for fn in filenames:
+                    full = os.path.join(dirpath, fn)
+                    if fn == file_path or full.replace('\\', '/').endswith(file_path.replace('\\', '/')):
+                        return full
+        return None
 
     app_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     template_dir = os.path.join(app_root, "templates")
@@ -86,8 +108,10 @@ def create_app(initial_paths: Optional[List[str]] = None, search_roots: Optional
     def get_doc_toc():
         file_path = request.args.get("file", "").strip()
         format_type = request.args.get("format", "json").strip()
-        if not file_path or not os.path.isfile(file_path):
-            return jsonify({"error": "File not found"}), 404
+        real_path = resolve_file(file_path)
+        if not real_path:
+            return jsonify({"error": "File not found: " + file_path}), 404
+        file_path = real_path
         toc_output = extract_toc(file_path, format_type=format_type)
         if format_type == "json":
             import json
@@ -102,8 +126,10 @@ def create_app(initial_paths: Optional[List[str]] = None, search_roots: Optional
         file_path = request.args.get("file", "").strip()
         heading = request.args.get("heading", "").strip()
         include_sub = request.args.get("sub", "1") == "1"
-        if not file_path or not os.path.isfile(file_path):
-            return jsonify({"error": "File not found"}), 404
+        real_path = resolve_file(file_path)
+        if not real_path:
+            return jsonify({"error": "File not found: " + file_path}), 404
+        file_path = real_path
         if not heading:
             with open(file_path, "r", encoding="utf-8", errors="replace") as f:
                 content = f.read()

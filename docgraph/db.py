@@ -53,13 +53,11 @@ CREATE VIRTUAL TABLE IF NOT EXISTS nodes_fts USING fts5(
 """
 
 def get_db_path(repo_path: str) -> str:
-    """Return the path to .docgraph/docgraph.db inside the project directory."""
     dot_dir = os.path.join(os.path.abspath(repo_path), ".docgraph")
     os.makedirs(dot_dir, exist_ok=True)
     return os.path.join(dot_dir, "docgraph.db")
 
 def init_db(db_path: str) -> sqlite3.Connection:
-    """Initialize DocGraph SQLite schema."""
     conn = sqlite3.connect(db_path)
     conn.execute("PRAGMA journal_mode=WAL;")
     conn.execute("PRAGMA foreign_keys=ON;")
@@ -71,15 +69,11 @@ def compute_hash(content: str) -> str:
     return hashlib.sha256(content.encode("utf-8", errors="replace")).hexdigest()
 
 def index_repository(repo_path: str) -> Tuple[int, int, int]:
-    """Scan and index all markdown files in repo_path into .docgraph/docgraph.db.
-    Returns: (files_indexed, nodes_created, edges_created)
-    """
     repo_path = os.path.abspath(repo_path)
     db_path = get_db_path(repo_path)
     conn = init_db(db_path)
     cur = conn.cursor()
 
-    # Discover all Markdown files
     md_files: List[str] = []
     for root, dirs, files in os.walk(repo_path):
         dirs[:] = [d for d in dirs if d not in IGNORE_DIRS and not d.startswith(".")]
@@ -87,7 +81,6 @@ def index_repository(repo_path: str) -> Tuple[int, int, int]:
             if f.lower().endswith(DOC_EXTS):
                 md_files.append(os.path.join(root, f))
 
-    # Clear previous index
     cur.execute("DELETE FROM edges;")
     cur.execute("DELETE FROM nodes;")
     cur.execute("DELETE FROM files;")
@@ -98,7 +91,6 @@ def index_repository(repo_path: str) -> Tuple[int, int, int]:
 
     total_nodes = 0
     total_edges = 0
-    all_file_nodes: Dict[str, str] = {}
     pending_edges: List[Tuple[str, str, str, str, int]] = []
 
     for file_path in md_files:
@@ -112,21 +104,17 @@ def index_repository(repo_path: str) -> Tuple[int, int, int]:
             continue
 
         c_hash = compute_hash(content)
-
-        # 1. Insert file record FIRST to satisfy foreign key
         cur.execute(
             "INSERT INTO files VALUES (?, ?, ?, ?, ?)",
             (rel_path, c_hash, stat.st_size, stat.st_mtime, 0)
         )
 
         file_node_id = f"file::{rel_path}"
-        all_file_nodes[rel_path] = file_node_id
         file_tokens = math.ceil(len(content) / 3.8)
 
-        # 2. Insert File Node
         cur.execute(
             "INSERT INTO nodes VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            (file_node_id, rel_path, "file", os.path.basename(rel_path), 0, 1, len(lines), file_tokens, content[:500])
+            (file_node_id, rel_path, "file", os.path.basename(rel_path), 0, 1, len(lines), file_tokens, content)
         )
         total_nodes += 1
 
@@ -146,9 +134,15 @@ def index_repository(repo_path: str) -> Tuple[int, int, int]:
                 node_id = f"heading::{rel_path}::L{idx}::{title[:30]}"
                 headings_in_file += 1
 
+                # Extract section preview snippet
+                sec_lines = [line]
+                for nxt in range(idx, min(len(lines), idx + 20)):
+                    sec_lines.append(lines[nxt])
+                sec_content = "".join(sec_lines)
+
                 cur.execute(
                     "INSERT INTO nodes VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                    (node_id, rel_path, f"heading_{level}", title, level, idx, idx, 0, line)
+                    (node_id, rel_path, f"heading_{level}", title, level, idx, idx, math.ceil(len(sec_content)/3.8), sec_content)
                 )
                 total_nodes += 1
 
@@ -164,11 +158,19 @@ def index_repository(repo_path: str) -> Tuple[int, int, int]:
 
         cur.execute("UPDATE files SET node_count = ? WHERE path = ?", (headings_in_file + 1, rel_path))
 
-    # Insert pending parent-child edges
+        # Check for cross-file links
+        link_matches = re.finditer(r"\[([^\]]+)\]\(([^)]+\.(?:md|markdown|mdown))(?:\#([^)]+))?\)", content)
+        for lm in link_matches:
+            target_link = lm.group(2).strip().replace("\\", "/")
+            current_dir = os.path.dirname(rel_path)
+            target_rel = os.path.normpath(os.path.join(current_dir, target_link)).replace("\\", "/")
+            link_edge_id = f"link::{file_node_id}->{target_rel}::{lm.start()}"
+            pending_edges.append((link_edge_id, file_node_id, f"file::{target_rel}", "doc_link", 0))
+            total_edges += 1
+
     for e in pending_edges:
         cur.execute("INSERT OR IGNORE INTO edges VALUES (?, ?, ?, ?, ?)", e)
 
-    # Sync FTS
     try:
         cur.execute("INSERT INTO nodes_fts(id, name, content) SELECT id, name, content FROM nodes;")
     except Exception:
@@ -179,7 +181,6 @@ def index_repository(repo_path: str) -> Tuple[int, int, int]:
     return len(md_files), total_nodes, total_edges
 
 def fetch_graph_data(repo_path: str) -> Dict[str, Any]:
-    """Fetch nodes and edges formatted for 3d-force-graph."""
     repo_path = os.path.abspath(repo_path)
     db_path = get_db_path(repo_path)
     if not os.path.exists(db_path):
@@ -188,23 +189,34 @@ def fetch_graph_data(repo_path: str) -> Dict[str, Any]:
     conn = sqlite3.connect(db_path)
     cur = conn.cursor()
 
-    cur.execute("SELECT id, name, kind, level, start_line, end_line, token_estimate, file_path FROM nodes;")
+    cur.execute("SELECT id, name, kind, level, start_line, end_line, token_estimate, file_path, content FROM nodes;")
     rows = cur.fetchall()
 
     nodes = []
     KIND_COLORS = {
-        "file": "#f0883e",       # Orange (Document root)
-        "heading_1": "#58a6ff",  # Blue (H1 Primary)
-        "heading_2": "#3fb950",  # Green (H2 Major)
-        "heading_3": "#bc8cff",  # Purple (H3 Subsection)
-        "heading_4": "#d29922",  # Gold (H4 Detail)
+        "file": "#f0883e",       # File Orange (Galaxy Mode 1)
+        "heading_1": "#58a6ff",  # H1 Function Blue (Galaxy Mode 2)
+        "heading_2": "#3fb950",  # H2 Class Green (Galaxy Mode 3)
+        "heading_3": "#bc8cff",  # H3 Import Purple (Galaxy Mode 4)
+        "heading_4": "#d29922",  # H4 Variable Gold (Galaxy Mode 5)
         "heading_5": "#79c0ff",
         "heading_6": "#a5d6ff",
     }
 
+    # Hierarchy-based gradual sizing: File(12) -> H1(8.5) -> H2(6.0) -> H3(4.2) -> H4(3.0) -> H5/6(2.2)
+    KIND_VALS = {
+        "file": 12.0,
+        "heading_1": 8.5,
+        "heading_2": 6.0,
+        "heading_3": 4.2,
+        "heading_4": 3.0,
+        "heading_5": 2.2,
+        "heading_6": 1.8
+    }
+
     for r in rows:
-        nid, name, kind, level, start_l, end_l, tokens, fpath = r
-        val = 16 if kind == "file" else max(4, 14 - level * 2)
+        nid, name, kind, level, start_l, end_l, tokens, fpath, content = r
+        val = KIND_VALS.get(kind, 3.0)
         nodes.append({
             "id": nid,
             "name": name,
@@ -212,9 +224,11 @@ def fetch_graph_data(repo_path: str) -> Dict[str, Any]:
             "level": level,
             "line": start_l,
             "file": fpath,
+            "abs_path": os.path.normpath(os.path.join(repo_path, fpath)) if not os.path.isabs(fpath) else fpath,
             "tokens": tokens,
             "val": val,
-            "color": KIND_COLORS.get(kind, "#8b949e")
+            "color": KIND_COLORS.get(kind, "#8b949e"),
+            "content": content
         })
 
     cur.execute("SELECT id, source, target, kind FROM edges;")
@@ -226,7 +240,7 @@ def fetch_graph_data(repo_path: str) -> Dict[str, Any]:
             "source": src,
             "target": tgt,
             "kind": kind,
-            "color": "rgba(88, 166, 255, 0.4)" if kind == "parent_child" else "rgba(0, 255, 170, 0.6)"
+            "color": "rgba(88, 166, 255, 0.45)" if kind == "parent_child" else "rgba(0, 255, 170, 0.75)"
         })
 
     conn.close()
