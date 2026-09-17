@@ -1,0 +1,210 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>DocGraph - Markdown AST & 3D Knowledge Topology</title>
+<script src="/static/3d-force-graph.min.js"></script>
+<link rel="stylesheet" href="/static/docgraph.css?v=1.0.1">
+<script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark-dimmed.min.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+</head>
+<body>
+
+<!-- 3D WebGL Canvas (Identical to CodeGraph Galaxy) -->
+<div id="3d-graph"></div>
+
+<!-- Top Toolbar -->
+<div id="toolbar">
+  <div class="brand-badge" onclick="resetToWelcome()">
+    <div class="brand-dot"></div>
+    <span id="app-logo">DocGraph 3D</span>
+  </div>
+
+  <button class="tool-btn active" id="btn-toggle-tree" onclick="toggleTreePanel()" title="Toggle Explorer">
+    📁 Explorer
+  </button>
+
+  <button class="tool-btn" id="btn-open-folder" onclick="openPathModal()" title="Manage & Scan Documentation Repos">
+    📂 Repositories
+  </button>
+
+  <div id="search-wrapper">
+    <input type="text" id="search-box" placeholder="Search headings, specs or keywords... (Enter to focus)" />
+    <div id="search-results"></div>
+  </div>
+
+  <button class="tool-btn" id="btn-rotate" onclick="toggleRotate()">Auto Rotate</button>
+  <button class="tool-btn" id="btn-reset-cam" onclick="resetCamera()">Reset View</button>
+
+  <button class="tool-btn emerald active" id="btn-toggle-slice" onclick="toggleSliceMode()">
+    🗡️ Section Focus
+  </button>
+
+  <button class="tool-btn" id="btn-toggle-drawer" onclick="toggleDrawer()">
+    ⚡ Intelligence
+  </button>
+
+  <div class="toolbar-right">
+    <button class="tool-btn" id="btn-lang" onclick="toggleLanguage()">Language: EN</button>
+    <div class="stats-badge">
+      <span id="stats-nodes">0 nodes</span>
+      <span id="stats-edges">0 links</span>
+    </div>
+  </div>
+</div>
+
+<!-- Left Explorer Tree Panel -->
+<div id="tree-panel">
+  <div class="panel-resizer-right" id="tree-resizer"></div>
+  <div class="tree-header">
+    <span class="tree-title" id="lbl-tree-title">📁 Documentation Explorer</span>
+    <div style="display:flex; gap:4px; align-items:center;">
+      <button onclick="openPathModal()" class="mini-btn" id="btn-manage-repos" title="Manage Directories">⚙️</button>
+    </div>
+  </div>
+
+  <div class="tree-tabs">
+    <button class="tree-tab-btn active" id="tab-toc-btn" onclick="switchTab('toc')">📑 Outline (TOC)</button>
+    <button class="tree-tab-btn" id="tab-files-btn" onclick="switchTab('files')">📁 Files</button>
+  </div>
+
+  <!-- TOC Outline View -->
+  <div id="tree-toc-content" class="tree-content">
+    <div style="padding:16px; color:#8b949e; font-size:12px; text-align:center;">
+      Select a Markdown file to view TOC outline.
+    </div>
+  </div>
+
+  <!-- Files Explorer View -->
+  <div id="tree-files-content" class="tree-content" style="display:none;">
+    <div style="padding:16px; color:#8b949e; font-size:12px; text-align:center;">
+      Loading repositories...
+    </div>
+  </div>
+</div>
+
+<!-- Right Inspector & Section Reader Drawer -->
+<div id="drawer">
+  <div class="panel-resizer-left" id="drawer-resizer"></div>
+  <div class="drawer-header">
+    <span class="drawer-title" id="lbl-intel-title">⚡ Intelligence Analysis & Reader</span>
+    <button class="mini-btn" onclick="toggleDrawer()">×</button>
+  </div>
+  <div class="drawer-body">
+    <!-- Token Savings Card -->
+    <div class="intel-card">
+      <div style="display:flex; justify-content:space-between; align-items:center;">
+        <h4>Token Savings</h4>
+        <span style="font-weight:700; color:#00ffaa; font-size:16px;" id="stat-savings-badge">97.2%</span>
+      </div>
+      <div class="token-stat-bar">
+        <div class="token-stat-fill" id="stat-savings-fill" style="width: 97.2%;"></div>
+      </div>
+      <div class="key-val-row">
+        <span class="k">Full Document:</span>
+        <span class="v" id="stat-full-tokens">0 tokens</span>
+      </div>
+      <div class="key-val-row">
+        <span class="k">Sliced Section:</span>
+        <span class="v" id="stat-sliced-tokens" style="color:#00ffaa;">0 tokens</span>
+      </div>
+    </div>
+
+    <!-- Active Section Details -->
+    <div class="intel-card">
+      <h4>Active Section</h4>
+      <div class="key-val-row">
+        <span class="k">Heading:</span>
+        <span class="v" id="active-sec-title">-</span>
+      </div>
+      <div class="key-val-row">
+        <span class="k">Kind:</span>
+        <span class="v" id="active-sec-kind">-</span>
+      </div>
+      <div class="key-val-row">
+        <span class="k">Line Anchor:</span>
+        <span class="v" id="active-sec-line">-</span>
+      </div>
+      <div class="key-val-row">
+        <span class="k">Characters:</span>
+        <span class="v" id="active-sec-chars">0</span>
+      </div>
+    </div>
+
+    <!-- Markdown Rendered Section -->
+    <div class="intel-card">
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+        <h4>🗡️ Sliced Section Content</h4>
+        <div style="display:flex; gap:6px;">
+          <button class="mini-btn" onclick="copyCurrentSection()">📋 Copy</button>
+          <button class="mini-btn" onclick="copyMcpPayload()">🤖 AI Payload</button>
+        </div>
+      </div>
+      <div id="markdown-render-area" class="markdown-container" style="max-height:360px; overflow-y:auto; background:#0d1117; padding:12px; border-radius:6px; border:1px solid #30363d;">
+        <p style="color:#8b949e; font-size:12px;">Click any 3D node or TOC heading to slice section.</p>
+      </div>
+    </div>
+
+    <!-- AI Agent Payload -->
+    <div class="intel-card">
+      <h4>🤖 Agent Payload (for Cursor / Claude / Antigravity)</h4>
+      <textarea id="mcp-prompt-box" readonly placeholder="Click any section to generate instant surgical prompt..."></textarea>
+      <button class="mini-btn" style="width:100%; padding:8px; background:#1f6feb; color:#fff;" onclick="copyMcpPayload()">
+        📋 Copy Prompt for AI Agent
+      </button>
+    </div>
+  </div>
+</div>
+
+<!-- Modal: Repository Management (Identical to Galaxy) -->
+<div id="path-modal">
+  <div class="modal-card">
+    <div class="modal-header">
+      <span style="font-weight:600; font-size:14px; color:#58a6ff;" id="lbl-modal-title">Documentation Repositories</span>
+      <button class="mini-btn" onclick="closePathModal()">×</button>
+    </div>
+    <div class="modal-body">
+      <p style="font-size:12px; color:#8b949e;" id="lbl-modal-sub">
+        Scan local markdown documentation repositories, build SQLite AST index (.docgraph/docgraph.db), and render 3D knowledge topology.
+      </p>
+
+      <div style="display:flex; flex-direction:column; gap:6px;">
+        <label style="font-size:12px; font-weight:500;" id="lbl-add-dir">Scan Documentation Directory:</label>
+        <div class="add-path-box">
+          <input type="text" id="custom-path-input" class="add-path-input" placeholder="Enter absolute directory path (e.g. D:\Projects\specs)" />
+          <button class="mini-btn" id="btn-browse-path" onclick="browseDirectoryNative()" style="padding:6px 12px; background:#21262d; border-color:#30363d; color:#c9d1d9; display:none;">📁 Browse...</button>
+          <button class="mini-btn" id="btn-add-path" onclick="submitAddPath()" style="padding:6px 12px; background:#1f6feb; border-color:#388bfd; color:#fff;">Add Path</button>
+        </div>
+      </div>
+
+      <div style="display:flex; flex-direction:column; gap:6px;">
+        <span style="font-size:12px; font-weight:500;" id="lbl-repo-list">Discovered Documentation Repos:</span>
+        <div class="table-container" style="max-height:280px; overflow-y:auto;">
+          <table class="repo-table">
+            <thead>
+              <tr>
+                <th>Project</th>
+                <th>Directory Path</th>
+                <th>Files</th>
+                <th>Index (.docgraph.db)</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody id="manager-table-body"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="mini-btn" onclick="closePathModal()" style="padding:6px 14px;">Close</button>
+    </div>
+  </div>
+</div>
+
+<div id="toast"></div>
+
+<script src="/static/docgraph.js?v=1.0.1"></script>
+</body>
+</html>

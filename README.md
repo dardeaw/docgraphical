@@ -64,25 +64,28 @@ docgraph search docs/ "compaction"
 
 ---
 
-## 🤖 MCP Server Setup (for Cursor / Claude Desktop / Antigravity)
+## 🤖 Model Context Protocol (MCP) Integration
 
-Add DocGraph to your MCP configuration (`mcp_config.json` or `claude_desktop_config.json`):
+DocGraph natively integrates with the **Model Context Protocol (MCP)**. Any AI Agent (Claude Code, Cursor, Windsurf, or Antigravity) can connect to it directly via standard stdio.
 
+### Add to MCP Config (`mcp_config.json`):
 ```json
 {
   "mcpServers": {
     "docgraph": {
-      "command": "docgraph",
-      "args": ["mcp"]
+      "command": "python",
+      "args": ["-m", "docgraph.cli", "mcp"]
     }
   }
 }
 ```
 
-### Available MCP Tools:
-- `docgraph_toc(filePath)`: Returns hierarchical table of contents with line numbers.
-- `docgraph_section(filePath, heading, includeSubsections)`: Surgically extracts section content.
-- `docgraph_search(filePath, query, limit)`: Fast keyword search across documentation.
+### 🛠️ 5 Native MCP Tools:
+1. `docgraph_toc(filePath, format)`: Extract hierarchical TOC outline and line anchors (~30 tokens).
+2. `docgraph_section(filePath, heading, includeSubsections)`: Surgically extract target section with code blocks intact.
+3. `docgraph_search(filePath, query, limit)`: Fast keyword search across documentation files.
+4. `docgraph_graph(repoPath)`: Query knowledge graph nodes, edges, and cross-document links from `.docgraph/docgraph.db`.
+5. `docgraph_index(repoPath)`: Scan and build/refresh the SQLite AST index for any repository.
 
 ---
 
