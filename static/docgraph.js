@@ -4,6 +4,7 @@
 let Graph = null;
 let rawData = { nodes: [], links: [] };
 let filteredData = { nodes: [], links: [] };
+let masterGraphData = { nodes: [], links: [] };
 let allProjectsList = [];
 const selectedProjects = new Set();
 
@@ -273,11 +274,54 @@ function initAutoRotate() {
   });
 }
 
+
+function autoFrameGraph() {
+  if (!Graph) return;
+  const nodes = (filteredData.nodes || []);
+  if (nodes.length === 0) return;
+
+  if (nodes.length === 1) {
+    const singleNode = nodes[0];
+    const tx = singleNode.x || 0;
+    const ty = singleNode.y || 0;
+    const tz = singleNode.z || 0;
+    // Exactly center single node at pleasant distance without giant sphere magnification
+    Graph.cameraPosition(
+      { x: tx, y: ty, z: tz + 110 },
+      { x: tx, y: ty, z: tz },
+      700
+    );
+  } else if (nodes.length <= 4) {
+    Graph.zoomToFit(600, 50);
+  } else {
+    Graph.zoomToFit(600, 20);
+  }
+}
+
 function resetCamera() {
   clearHighlight();
-  if (Graph) {
-    Graph.zoomToFit(800, 15);
+  autoFrameGraph();
+}
+
+
+function getNodeProject(n) {
+  if (n.project) return n.project;
+  const f = (n.file || n.abs_path || '').replace(/\\/g, '/').replace(/^\/+/, '');
+  for (const p of allProjectsList) {
+    if (p.name === 'PythonCode') continue;
+    if (f === p.name || f.startsWith(p.name + '/')) {
+      return p.name;
+    }
   }
+  return 'PythonCode';
+}
+
+function getNodeRelativePathInProject(n, projName) {
+  let f = (n.file || n.abs_path || '').replace(/\\/g, '/').replace(/^\/+/, '');
+  if (projName !== 'PythonCode' && f.startsWith(projName + '/')) {
+    f = f.substring(projName.length + 1);
+  }
+  return f;
 }
 
 // ─── 3. Project & Graph Data Loading ──────────────────────────────
@@ -295,32 +339,59 @@ function loadProjects() {
       });
 
       if (allProjectsList.length > 0) {
-        loadGraphForSelectedProjects();
+        loadMasterGraphAndFilter();
       }
     })
     .catch(err => console.error('Failed to load projects:', err));
 }
 
-function loadGraphForSelectedProjects() {
+function loadMasterGraphAndFilter() {
   if (allProjectsList.length === 0) return;
-  const firstProj = allProjectsList.find(p => selectedProjects.has(p.name)) || allProjectsList[0];
   
-  fetch(`/api/graph?path=${encodeURIComponent(firstProj.path)}`)
+  // The root project (e.g. PythonCode) contains the complete unified database
+  const rootProj = allProjectsList.find(p => p.name === 'PythonCode') || allProjectsList[0];
+  
+  fetch(`/api/graph?path=${encodeURIComponent(rootProj.path)}`)
     .then(res => res.json())
     .then(data => {
-      rawData = data || { nodes: [], links: [] };
-      applyLODAndFilter();
-      buildProjectTree();
-      buildLegends();
-
-      // Automatically select and render first file if nothing active
-      if (!activeNode && rawData.nodes && rawData.nodes.length > 0) {
-        const firstFile = rawData.nodes.find(n => n.kind === 'file') || rawData.nodes[0];
-        selectActiveNode(firstFile);
-        syncExplorerSelection(firstFile);
-      }
+      masterGraphData = data || { nodes: [], links: [] };
+      filterGraphBySelectedProjects(true);
     })
     .catch(err => console.error('Failed to load graph:', err));
+}
+
+function filterGraphBySelectedProjects(isInitial = false) {
+  if (!masterGraphData.nodes) return;
+
+  const activeNodes = masterGraphData.nodes.filter(n => {
+    const pName = getNodeProject(n);
+    return selectedProjects.has(pName);
+  });
+
+  const nodeSet = new Set(activeNodes.map(n => n.id));
+  const activeLinks = (masterGraphData.links || []).filter(l => {
+    const src = typeof l.source === 'object' ? l.source.id : l.source;
+    const tgt = typeof l.target === 'object' ? l.target.id : l.target;
+    return nodeSet.has(src) && nodeSet.has(tgt);
+  });
+
+  rawData = { nodes: activeNodes, links: activeLinks };
+
+  applyLODAndFilter();
+  buildProjectTree();
+  buildLegends();
+
+  // If currently active node is not in active set, re-select
+  if (activeNode && !nodeSet.has(activeNode.id)) {
+    activeNode = null;
+  }
+  if (!activeNode && activeNodes.length > 0) {
+    const firstFile = activeNodes.find(n => n.kind === 'file') || activeNodes[0];
+    selectActiveNode(firstFile);
+    syncExplorerSelection(firstFile);
+  } else if (activeNodes.length === 0) {
+    clearHighlight();
+  }
 }
 
 // ─── 4. Explorer Tree (Exact Hierarchical Tree Architecture) ──────
@@ -359,16 +430,18 @@ function buildProjectTree() {
   // Build recursive directory structure for projects
   const projRoots = {};
 
-  (rawData.nodes || []).forEach(n => {
-    const proj = n.project || (allProjectsList[0] ? allProjectsList[0].name : 'Project');
+  // Map from masterGraphData (or rawData if master not ready) so tree always has accurate structure
+  const sourceNodes = (masterGraphData.nodes && masterGraphData.nodes.length > 0) ? masterGraphData.nodes : (rawData.nodes || []);
+  sourceNodes.forEach(n => {
+    const proj = getNodeProject(n);
     if (!projRoots[proj]) {
       projRoots[proj] = { name: proj, dirs: {}, files: {} };
     }
 
-    const rawPath = (n.file || n.file_path || '').replace(/\\/g, '/').replace(/^\/+/, '');
-    if (!rawPath) return;
+    const relPath = getNodeRelativePathInProject(n, proj);
+    if (!relPath) return;
 
-    const parts = rawPath.split('/');
+    const parts = relPath.split('/');
     const fileName = parts.pop();
 
     let currentDir = projRoots[proj];
@@ -390,7 +463,7 @@ function buildProjectTree() {
     if (!currentDir.files[fileName]) {
       currentDir.files[fileName] = {
         name: fileName,
-        path: rawPath,
+        path: n.file || relPath,
         symbols: [],
         node: null
       };
@@ -429,7 +502,7 @@ function buildProjectTree() {
       e.stopPropagation();
       if (cb.checked) selectedProjects.add(projName);
       else selectedProjects.delete(projName);
-      loadGraphForSelectedProjects();
+      filterGraphBySelectedProjects(false);
     };
 
     const arrow = projNodeEl.querySelector('.tree-arrow');
@@ -685,7 +758,7 @@ function selectAllProjects(val) {
     else selectedProjects.delete(p.name);
   });
   document.querySelectorAll('#tree-container input[type="checkbox"]').forEach(cb => cb.checked = val);
-  loadGraphForSelectedProjects();
+  filterGraphBySelectedProjects(false);
 }
 
 // ─── 5. Center Doc Stage & Right Links Updates ────────────────────
@@ -855,7 +928,7 @@ function applyLODAndFilter() {
   if (Graph) {
     Graph.graphData(filteredData);
     setTimeout(() => {
-      if (Graph) Graph.zoomToFit(600, 15);
+      autoFrameGraph();
     }, 250);
   }
 
