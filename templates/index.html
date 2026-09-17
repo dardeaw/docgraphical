@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>DocGraph 3D - Markdown Knowledge Studio</title>
 <script src="/static/3d-force-graph.min.js"></script>
-<link rel="stylesheet" href="/static/galaxy.css?v=2.4.0">
+<link rel="stylesheet" href="/static/galaxy.css?v=2.5.0">
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark-dimmed.min.css">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
@@ -32,10 +32,9 @@
     <div id="search-results"></div>
   </div>
 
-  <button class="tool-btn" id="btn-rotate">Auto Rotate</button>
-  <button class="tool-btn" id="btn-reset-cam" onclick="resetCamera()">Reset 3D</button>
-
   <div class="toolbar-right">
+    <button class="tool-btn" id="btn-rotate" title="Toggle 3D Auto-Rotation">🔄 Auto Rotate</button>
+    <button class="tool-btn" id="btn-reset-cam" onclick="resetCamera()" title="Reset 3D View">🎯 Reset 3D</button>
     <button class="tool-btn" id="btn-lang" onclick="toggleLanguage()">Language: EN</button>
     <div class="stats-badge">
       <span id="stats-nodes">0 nodes</span>
@@ -125,10 +124,6 @@
         <span style="font-size:11px; font-weight:600; color:#58a6ff; display:flex; align-items:center; gap:5px;">
           <span>🪐</span> <span>3D Knowledge Topology</span>
         </span>
-        <div style="display:flex; gap:4px; margin-left:auto;">
-          <button class="mini-btn" id="btn-rotate" title="Toggle 3D Auto-Rotation" style="font-size:10px; padding:2px 7px;">🔄 Rotate</button>
-          <button class="mini-btn" onclick="resetCamera()" title="Reset 3D Camera" style="font-size:10px; padding:2px 7px;">🎯 Reset</button>
-        </div>
       </div>
       <div id="3d-graph"></div>
     </div>
@@ -229,6 +224,6 @@
 
 <div id="toast"></div>
 
-<script src="/static/docgraph.js?v=2.4.0"></script>
+<script src="/static/docgraph.js?v=2.5.0"></script>
 </body>
 </html>
