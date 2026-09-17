@@ -1060,3 +1060,322 @@ html, body {
   flex-direction: column;
   gap: 4px;
 }
+
+
+/* ─── 3-Column Studio Layout ─────────────────────────────────────── */
+#app-layout {
+  display: flex;
+  flex-direction: row;
+  width: 100vw;
+  height: calc(100vh - 52px);
+  overflow: hidden;
+  background: #090d13;
+  position: relative;
+}
+
+/* Column 1: Explorer Panel */
+#tree-panel {
+  position: static !important;
+  width: 270px;
+  min-width: 180px;
+  max-width: 480px;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  background: #0d1117;
+  flex-shrink: 0;
+  box-shadow: none;
+  border-right: 1px solid #30363d;
+  z-index: 10;
+}
+
+#tree-panel.hidden {
+  display: none !important;
+}
+
+/* Vertical Column Resizers */
+.column-resizer {
+  width: 6px;
+  cursor: col-resize;
+  background: #161b22;
+  transition: background 0.15s ease;
+  user-select: none;
+  flex-shrink: 0;
+  border-left: 1px solid #21262d;
+  border-right: 1px solid #21262d;
+  z-index: 20;
+}
+
+.column-resizer:hover, .column-resizer.dragging {
+  background: #58a6ff !important;
+  box-shadow: 0 0 8px rgba(88, 166, 255, 0.4);
+}
+
+/* Column 2: Center Markdown Reader (Main Stage) */
+#doc-panel {
+  flex: 1;
+  min-width: 360px;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  background: #0d1117;
+  overflow: hidden;
+  z-index: 10;
+}
+
+.doc-panel-header {
+  padding: 12px 20px 8px 20px;
+  border-bottom: 1px solid #30363d;
+  background: #161b2244;
+  backdrop-filter: blur(8px);
+  flex-shrink: 0;
+}
+
+.doc-title-text {
+  font-size: 16px;
+  font-weight: 600;
+  color: #f0f6fc;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.doc-sub-text {
+  font-size: 12px;
+  color: #8b949e;
+  margin-bottom: 8px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.doc-token-bar {
+  margin-bottom: 8px;
+}
+
+.token-fill-track {
+  height: 6px;
+  background: #21262d;
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.token-fill-bar {
+  height: 100%;
+  background: linear-gradient(90deg, #00ffaa, #58a6ff);
+  transition: width 0.3s ease;
+}
+
+.doc-action-bar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding-top: 4px;
+}
+
+/* Markdown Content Area */
+.doc-content-viewer {
+  flex: 1;
+  padding: 24px 28px;
+  overflow-y: auto;
+  line-height: 1.7;
+  font-size: 14px;
+  color: #c9d1d9;
+}
+
+.doc-content-viewer h1, .doc-content-viewer h2, .doc-content-viewer h3, .doc-content-viewer h4 {
+  color: #e6edf3;
+  margin-top: 24px;
+  margin-bottom: 12px;
+  font-weight: 600;
+  border-bottom: 1px solid #21262d;
+  padding-bottom: 6px;
+}
+
+.doc-content-viewer h1 { font-size: 22px; }
+.doc-content-viewer h2 { font-size: 18px; }
+.doc-content-viewer h3 { font-size: 15px; border-bottom: none; }
+.doc-content-viewer h4 { font-size: 13px; border-bottom: none; }
+
+.doc-content-viewer table {
+  border-collapse: collapse;
+  width: 100%;
+  margin: 16px 0;
+  border: 1px solid #30363d;
+}
+
+.doc-content-viewer th, .doc-content-viewer td {
+  border: 1px solid #30363d;
+  padding: 8px 12px;
+  font-size: 13px;
+}
+
+.doc-content-viewer th {
+  background: #161b22;
+  color: #58a6ff;
+  font-weight: 600;
+  text-align: left;
+}
+
+.doc-content-viewer tr:nth-child(even) {
+  background: #161b2233;
+}
+
+.doc-content-viewer pre code {
+  display: block;
+  background: #161b22;
+  border: 1px solid #30363d;
+  border-radius: 6px;
+  padding: 12px 14px;
+  overflow-x: auto;
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+  font-size: 12px;
+  line-height: 1.5;
+  color: #e6edf3;
+  margin: 14px 0;
+}
+
+.doc-content-viewer code:not(pre code) {
+  background: #21262d;
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-size: 12px;
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+  color: #58a6ff;
+}
+
+.doc-content-viewer blockquote {
+  border-left: 3px solid #58a6ff;
+  padding-left: 14px;
+  color: #8b949e;
+  margin: 14px 0;
+}
+
+.doc-content-viewer a {
+  color: #58a6ff;
+  text-decoration: none;
+}
+
+.doc-content-viewer a:hover {
+  text-decoration: underline;
+}
+
+.doc-placeholder-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  text-align: center;
+  padding: 40px;
+}
+
+/* Column 3: 3D Knowledge Galaxy & Links Hub */
+#graph-panel {
+  width: 440px;
+  min-width: 320px;
+  max-width: 750px;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  background: #090d13;
+  flex-shrink: 0;
+  z-index: 10;
+}
+
+#viewport-3d-pane {
+  height: 55%;
+  min-height: 180px;
+  position: relative;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  background: #090d13;
+}
+
+.graph-pane-header {
+  height: 30px;
+  background: #161b22;
+  border-bottom: 1px solid #30363d;
+  display: flex;
+  align-items: center;
+  padding: 0 10px;
+  flex-shrink: 0;
+  z-index: 10;
+}
+
+#3d-graph {
+  flex: 1;
+  width: 100%;
+  height: 100%;
+  position: relative;
+}
+
+/* Docked/Floating Legend inside 3D Pane */
+#viewport-3d-pane #legend-panel {
+  position: absolute;
+  bottom: 8px;
+  left: auto;
+  right: 8px;
+  width: 280px;
+  padding: 8px 10px;
+  z-index: 25;
+  max-height: calc(100% - 45px);
+  overflow-y: auto;
+}
+
+.pane-h-resizer {
+  height: 6px;
+  cursor: row-resize;
+  background: #161b22;
+  border-top: 1px solid #21262d;
+  border-bottom: 1px solid #21262d;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  user-select: none;
+  flex-shrink: 0;
+  z-index: 20;
+  transition: background 0.15s ease;
+}
+
+.pane-h-resizer:hover, .pane-h-resizer.dragging {
+  background: #58a6ff !important;
+}
+
+.pane-h-resizer::after {
+  content: '┄┄┄';
+  font-size: 8px;
+  color: #8b949e;
+  letter-spacing: 2px;
+  line-height: 6px;
+}
+
+#viewport-links-pane {
+  flex: 1;
+  min-height: 100px;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background: #0d1117;
+}
+
+.links-pane-header {
+  height: 30px;
+  background: #161b22;
+  border-bottom: 1px solid #30363d;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 10px;
+  flex-shrink: 0;
+}
+
+#viewport-links-pane .rel-list {
+  flex: 1;
+  overflow-y: auto;
+  padding: 8px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}

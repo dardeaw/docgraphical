@@ -3,16 +3,16 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>DocGraph 3D - Markdown Knowledge Galaxy</title>
+<title>DocGraph 3D - Markdown Knowledge Studio</title>
 <script src="/static/3d-force-graph.min.js"></script>
-<link rel="stylesheet" href="/static/galaxy.css?v=1.1.0">
+<link rel="stylesheet" href="/static/galaxy.css?v=2.0.0">
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark-dimmed.min.css">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
 </head>
 <body>
 
-<!-- Top Toolbar (100% CodeGraph Galaxy Layout) -->
+<!-- Top Toolbar -->
 <div id="toolbar">
   <div class="brand-badge">
     <div class="brand-dot" style="background:#00ffaa; box-shadow:0 0 10px #00ffaa;"></div>
@@ -33,7 +33,7 @@
   </div>
 
   <button class="tool-btn" id="btn-rotate">Auto Rotate</button>
-  <button class="tool-btn" id="btn-reset-cam" onclick="resetCamera()">Reset View</button>
+  <button class="tool-btn" id="btn-reset-cam" onclick="resetCamera()">Reset 3D</button>
 
   <div class="toolbar-right">
     <button class="tool-btn" id="btn-lang" onclick="toggleLanguage()">Language: EN</button>
@@ -44,125 +44,134 @@
   </div>
 </div>
 
-<!-- Left Explorer Tree Panel (100% CodeGraph Galaxy Layout) -->
-<div id="tree-panel">
-  <div class="panel-resizer-right" id="tree-resizer"></div>
-  <div class="tree-header">
-    <span class="tree-title" id="lbl-tree-title">📁 Explorer</span>
-    <div style="display:flex; gap:4px; align-items:center;">
-      <button onclick="openPathModal()" class="mini-btn" id="btn-repo-mgr" title="Manage Repositories">⚙ Repositories</button>
-      <button onclick="clearHighlight()" class="mini-btn" id="btn-clear-hl" style="font-size:10px;">Clear</button>
-    </div>
-  </div>
-  
-  <div class="tree-actions-bar">
-    <button class="mini-btn" id="btn-sel-all" onclick="selectAllProjects(true)">Select All</button>
-    <button class="mini-btn" id="btn-sel-none" onclick="selectAllProjects(false)">Clear</button>
-    <span id="lbl-proj-summary" style="margin-left:auto; font-size:10px; color:#8b949e;">0 Active</span>
-  </div>
+<!-- Main 3-Column Workstation Layout -->
+<div id="app-layout">
 
-  <div class="tree-search-box">
-    <input type="text" id="tree-search" class="tree-input" placeholder="Filter documentation tree..." oninput="filterTree(this.value)" />
-  </div>
-
-  <div class="tree-body" id="tree-container">
-    <!-- Tree rendered dynamically -->
-  </div>
-</div>
-
-<!-- Breadcrumb -->
-<div id="breadcrumb">
-  <span class="bc-item" onclick="resetCamera()" id="bc-root">Overview</span>
-</div>
-
-<!-- 3D WebGL Canvas -->
-<div id="3d-graph"></div>
-
-<!-- Draggable Mode / Legend Panel (100% CodeGraph Galaxy Standard) -->
-<div id="legend-panel">
-  <div class="legend-mode-header" id="legend-drag-handle" title="Drag to move panel">
-    <div class="legend-mode-title-row">
-      <span class="legend-mode-title" id="lbl-mode-title">Mode</span>
-      <span class="legend-drag-hint">⋮⋮ Drag</span>
-    </div>
-    <div class="lod-group">
-      <button class="lod-btn" data-lod="arch" id="lod-arch" onclick="changeLOD('arch')">Documents</button>
-      <button class="lod-btn" data-lod="standard" id="lod-standard" onclick="changeLOD('standard')">Standard</button>
-      <button class="lod-btn active" data-lod="all" id="lod-all" onclick="changeLOD('all')">Detailed</button>
-      <button class="lod-btn" data-lod="custom" id="lod-custom" onclick="changeLOD('custom')">Customized</button>
-    </div>
-  </div>
-  <div class="legend-tab-header">
-    <button class="legend-tab-btn active" id="tab-btn-nodes" onclick="switchLegendTab('nodes')">AST Layers</button>
-    <button class="legend-tab-btn" id="tab-btn-edges" onclick="switchLegendTab('edges')">Relationships</button>
-    <button onclick="resetFilters()" id="btn-legend-all" style="margin-left:auto; background:none; border:none; color:#58a6ff; font-size:11px; cursor:pointer;">Reset</button>
-  </div>
-  <div id="legend-nodes-list" class="legend-list"></div>
-  <div id="legend-edges-list" class="legend-list" style="display:none;"></div>
-</div>
-
-<!-- Inspector Drawer (100% CodeGraph Galaxy Standard) -->
-<div id="drawer">
-  <div class="panel-resizer-left" id="drawer-resizer"></div>
-  
-  <div class="drawer-header">
-    <div class="drawer-header-top">
-      <div class="drawer-panel-badge">
-        <span id="lbl-drawer-panel-title">🔍 Inspector</span>
-        <span class="node-kind-tag" id="d-kind-badge" style="background:#1f6feb;">NODE</span>
+  <!-- Column 1: Explorer Panel -->
+  <div id="tree-panel">
+    <div class="tree-header">
+      <span class="tree-title" id="lbl-tree-title">📁 Explorer</span>
+      <div style="display:flex; gap:4px; align-items:center;">
+        <button onclick="openPathModal()" class="mini-btn" id="btn-repo-mgr" title="Manage Repositories">⚙ Repos</button>
+        <button onclick="clearHighlight()" class="mini-btn" id="btn-clear-hl" style="font-size:10px;">Clear</button>
       </div>
-      <button class="drawer-close" onclick="closeDrawer()">✕</button>
     </div>
-    <div class="drawer-node-name" id="d-name">Node Name</div>
-    <div class="drawer-node-sub" id="d-sub">Path or identifier</div>
+    <div class="tree-actions-bar">
+      <button class="mini-btn" id="btn-sel-all" onclick="selectAllProjects(true)">Select All</button>
+      <button class="mini-btn" id="btn-sel-none" onclick="selectAllProjects(false)">Clear</button>
+      <span id="lbl-proj-summary" style="margin-left:auto; font-size:10px; color:#8b949e;">0 Active</span>
+    </div>
+    <div class="tree-search-box">
+      <input type="text" id="tree-search" class="tree-input" placeholder="Filter documentation tree..." oninput="filterTree(this.value)" />
+    </div>
+    <div class="tree-body" id="tree-container"></div>
   </div>
 
-  <div class="drawer-body">
-    <!-- Top Pane: Sliced Markdown & Agent Payload (Resizable Height) -->
-    <div class="drawer-top-pane" id="drawer-top-pane">
+  <!-- Resizer 1: Between Tree and Doc -->
+  <div class="column-resizer" id="resizer-tree-doc"></div>
+
+  <!-- Column 2: Center Markdown Reader & Slicer (Primary Main Stage) -->
+  <div id="doc-panel">
+    <!-- Doc Header -->
+    <div class="doc-panel-header">
+      <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:4px;">
+        <div style="display:flex; align-items:center; gap:8px; flex:1; min-width:0;">
+          <span class="node-kind-tag" id="d-kind-badge" style="background:#f0883e;">DOC</span>
+          <span class="doc-title-text" id="d-name">Select a document or section</span>
+        </div>
+      </div>
+      <div class="doc-sub-text" id="d-sub">Select an item from the left Explorer or the right 3D topology</div>
+
       <!-- Token Intelligence Metric -->
-      <div class="code-preview-header" style="flex-shrink:0;">
-        <span class="code-preview-title">⚡ Token Savings</span>
-        <span style="color:#00ffaa; font-weight:700; font-size:13px;" id="stat-savings-badge">0.0%</span>
-      </div>
-      <div style="height:6px; background:#21262d; border-radius:3px; overflow:hidden; flex-shrink:0;">
-        <div id="stat-savings-fill" style="width:0%; height:100%; background:linear-gradient(90deg, #00ffaa, #58a6ff);"></div>
-      </div>
-      <div style="display:flex; justify-content:space-between; font-size:11px; color:#8b949e; flex-shrink:0; margin-bottom:4px;">
-        <span>Full: <b id="stat-full-tokens" style="color:#c9d1d9;">0</b> tokens</span>
-        <span>Sliced: <b id="stat-sliced-tokens" style="color:#00ffaa;">0</b> tokens</span>
-      </div>
-
-      <!-- Sliced Section Markdown Header & Action Buttons -->
-      <div class="code-preview-header" style="flex-shrink:0;">
-        <span class="code-preview-title" id="d-code-title">🗡️ Sliced Section Markdown</span>
-        <div style="display:flex; gap:6px;">
-          <button class="mini-btn" onclick="copyCurrentSection()" title="Copy raw markdown text">📋 Copy Markdown</button>
-          <button class="mini-btn" style="background:#238636; color:#fff; border-color:#2ea043;" onclick="copyMcpPayload()" title="Copy structured payload with metadata for AI Agent">🤖 Copy for Agent</button>
+      <div class="doc-token-bar">
+        <div style="display:flex; justify-content:space-between; font-size:11px; margin-bottom:3px;">
+          <span>⚡ Token Efficiency: <b id="stat-savings-badge" style="color:#00ffaa;">0.0%</b> saved</span>
+          <span>Full: <b id="stat-full-tokens" style="color:#c9d1d9;">0</b> · Sliced: <b id="stat-sliced-tokens" style="color:#00ffaa;">0</b> tokens</span>
+        </div>
+        <div class="token-fill-track">
+          <div id="stat-savings-fill" class="token-fill-bar" style="width:0%;"></div>
         </div>
       </div>
 
-      <!-- Full-height Scrollable Markdown Preview -->
-      <div id="d-code-markdown" style="flex:1; min-height:120px; overflow-y:auto;">
-        <p style="color:#8b949e;">Click any node to preview section.</p>
+      <!-- Action Bar -->
+      <div class="doc-action-bar">
+        <span style="font-size:11px; font-weight:600; color:#8b949e;" id="d-code-title">🗡️ Sliced Section Markdown</span>
+        <div style="display:flex; gap:6px;">
+          <button class="mini-btn" onclick="copyCurrentSection()" title="Copy Markdown text">📋 Copy Markdown</button>
+          <button class="mini-btn" style="background:#238636; color:#fff; border-color:#2ea043;" onclick="copyMcpPayload()" title="Copy structured payload for AI Agent">🤖 Copy for Agent</button>
+        </div>
       </div>
     </div>
 
-    <!-- Draggable Horizontal Resizer Divider between Markdown and Connected Links -->
-    <div class="drawer-h-resizer" id="drawer-h-resizer" title="Drag up/down to adjust heights"></div>
-
-    <!-- Bottom Pane: Connected Relations & Links (Independent Scrollbar) -->
-    <div class="drawer-bottom-pane" id="drawer-bottom-pane">
-      <div class="drawer-section-title" style="flex-shrink:0; display:flex; justify-content:space-between; align-items:center;">
-        <span>Connected Links (<span id="d-rel-count" style="color:#00ffaa;">0</span>)</span>
-        <span style="font-size:10px; color:#8b949e;">Scrollable & Clickable</span>
+    <!-- Scrollable Markdown Reader -->
+    <div id="d-code-markdown" class="doc-content-viewer">
+      <div class="doc-placeholder-state">
+        <div style="font-size:28px; margin-bottom:8px;">📄</div>
+        <div style="font-size:14px; font-weight:600; color:#e6edf3; margin-bottom:4px;">DocGraph Markdown Intelligence Studio</div>
+        <div style="font-size:12px; color:#8b949e;">Select any document or heading from the Explorer on the left, or click a 3D sphere node on the right to read.</div>
       </div>
-      <div class="rel-list" id="d-relations"></div>
     </div>
   </div>
+
+  <!-- Resizer 2: Between Doc and 3D Hub -->
+  <div class="column-resizer" id="resizer-doc-3d"></div>
+
+  <!-- Column 3: Right 3D Knowledge Galaxy & Connected Links Hub -->
+  <div id="graph-panel">
+
+    <!-- Upper Pane: 3D Force-Graph Canvas -->
+    <div id="viewport-3d-pane">
+      <div class="graph-pane-header">
+        <span style="font-size:11px; font-weight:600; color:#58a6ff;">🪐 3D Knowledge Topology</span>
+        <div style="display:flex; gap:4px; margin-left:auto;">
+          <button class="mini-btn" onclick="resetCamera()" style="font-size:10px; padding:2px 6px;">Reset</button>
+        </div>
+      </div>
+      <div id="3d-graph"></div>
+
+      <!-- Mode & LOD Floating Controls (Docked inside 3D Pane) -->
+      <div id="legend-panel">
+        <div class="legend-mode-header" id="legend-drag-handle" title="Drag to move panel">
+          <div class="legend-mode-title-row">
+            <span class="legend-mode-title" id="lbl-mode-title">Mode</span>
+            <span class="legend-drag-hint">⋮⋮ Drag</span>
+          </div>
+          <div class="lod-group">
+            <button class="lod-btn" data-lod="arch" id="lod-arch" onclick="changeLOD('arch')">Documents</button>
+            <button class="lod-btn" data-lod="standard" id="lod-standard" onclick="changeLOD('standard')">Standard</button>
+            <button class="lod-btn active" data-lod="all" id="lod-all" onclick="changeLOD('all')">Detailed</button>
+            <button class="lod-btn" data-lod="custom" id="lod-custom" onclick="changeLOD('custom')">Custom</button>
+          </div>
+        </div>
+        <div class="legend-tab-header">
+          <button class="legend-tab-btn active" id="tab-btn-nodes" onclick="switchLegendTab('nodes')">AST Layers</button>
+          <button class="legend-tab-btn" id="tab-btn-edges" onclick="switchLegendTab('edges')">Relationships</button>
+          <button onclick="resetFilters()" id="btn-legend-all" style="margin-left:auto; background:none; border:none; color:#58a6ff; font-size:11px; cursor:pointer;">Reset</button>
+        </div>
+        <div id="legend-nodes-list" class="legend-list"></div>
+        <div id="legend-edges-list" class="legend-list" style="display:none;"></div>
+      </div>
+    </div>
+
+    <!-- Horizontal Resizer: Between 3D Canvas and Links -->
+    <div class="pane-h-resizer" id="resizer-3d-links" title="Drag up/down to adjust 3D vs Links height"></div>
+
+    <!-- Lower Pane: Connected Links & References -->
+    <div id="viewport-links-pane">
+      <div class="links-pane-header">
+        <span style="font-size:11px; font-weight:600; color:#e6edf3;">🔗 Connected Links (<span id="d-rel-count" style="color:#00ffaa;">0</span>)</span>
+        <span style="font-size:10px; color:#8b949e;">Interactive Nav</span>
+      </div>
+      <div class="rel-list" id="d-relations">
+        <div style="font-size:11px; color:#8b949e; padding:8px;">Select a node to view relationships</div>
+      </div>
+    </div>
+
+  </div>
+
 </div>
 
-<!-- Modal: Repositories (100% CodeGraph Galaxy Standard) -->
+<!-- Modal: Repositories -->
 <div id="path-modal">
   <div class="modal-card">
     <div class="modal-header">
@@ -209,6 +218,6 @@
 
 <div id="toast"></div>
 
-<script src="/static/docgraph.js?v=1.1.0"></script>
+<script src="/static/docgraph.js?v=2.0.0"></script>
 </body>
 </html>

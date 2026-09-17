@@ -1,5 +1,5 @@
-// DocGraph 3D - Flagship Knowledge Topology & AST Slicer
-// 100% Faithful to CodeGraph Galaxy Architecture & UX with Hierarchical Directory Tree
+// DocGraph 3D - Option 1: 3-Column Knowledge Studio Layout
+// Left: Explorer | Center: Markdown Content | Right: 3D Galaxy & Connected Links
 
 let Graph = null;
 let rawData = { nodes: [], links: [] };
@@ -25,7 +25,7 @@ const KIND_COLORS = {
   heading_1: '#58a6ff',  // H1 Primary (Electric Blue)
   heading_2: '#3fb950',  // H2 Major (Emerald Green)
   heading_3: '#bc8cff',  // H3 Subsection (Vivid Purple)
-  heading_4: '#ff7bba',  // H4 Detail (Vibrant Rose Pink - 100% distinct from Document Orange!)
+  heading_4: '#ff7bba',  // H4 Detail (Vibrant Rose Pink)
   heading_5: '#00d2d3',  // H5 Fine (Cyan / Turquoise)
   heading_6: '#ffd700'   // H6 Micro (Bright Gold)
 };
@@ -48,8 +48,7 @@ const EDGE_COLORS = {
 document.addEventListener('DOMContentLoaded', () => {
   init3DGraph();
   initAutoRotate();
-  initResizers();
-  initDrawerHorizontalResizer();
+  initColumnResizers();
   initDraggableLegend();
   initSearch();
   loadProjects();
@@ -61,10 +60,14 @@ function init3DGraph() {
   const elem = document.getElementById('3d-graph');
   if (!elem) return;
 
+  const width = elem.clientWidth || 400;
+  const height = elem.clientHeight || 300;
+
   Graph = ForceGraph3D()(elem)
+    .width(width)
+    .height(height)
     .backgroundColor('#090d13')
     .nodeId('id')
-    // Clean tooltip without ugly [file] or [Lxxx] tags
     .nodeLabel(n => {
       const typeLabel = n.kind === 'file' ? 'Document' : `H${n.level || 1} Section`;
       const fileName = (n.file || '').split(/[\\/]/).pop();
@@ -76,7 +79,6 @@ function init3DGraph() {
       }
       return KIND_COLORS[n.kind] || '#58a6ff';
     })
-    // Hierarchical sizing: File > H1 > H2 > H3 > H4
     .nodeVal(n => {
       let base = KIND_SIZES[n.kind] || 2.0;
       if (highlightNodes.has(n.id)) return base * 1.8;
@@ -86,45 +88,52 @@ function init3DGraph() {
     .nodeResolution(16)
     .linkOpacity(l => {
       if (highlightNodes.size > 0) {
-        return highlightLinks.has(l) ? 0.9 : 0.08;
+        return highlightLinks.has(l) ? 0.95 : 0.08;
       }
-      return 0.35;
+      return l.kind === 'doc_link' ? 0.6 : 0.35;
     })
     .linkColor(l => {
       if (highlightNodes.size > 0) {
-        return highlightLinks.has(l) ? '#58a6ff' : '#21262d22';
+        return highlightLinks.has(l) ? (l.kind === 'doc_link' ? '#00ffaa' : '#58a6ff') : '#21262d22';
       }
       return EDGE_COLORS[l.kind] || '#58a6ff';
     })
     .linkWidth(l => {
       if (highlightNodes.size > 0) {
-        return highlightLinks.has(l) ? 2.2 : 0.4;
+        return highlightLinks.has(l) ? 2.4 : 0.4;
       }
-      return l.kind === 'doc_link' ? 1.5 : 0.8;
+      return l.kind === 'doc_link' ? 1.6 : 0.8;
     })
     .linkDirectionalParticles(l => {
       if (highlightNodes.size > 0) {
         return highlightLinks.has(l) ? 4 : 0;
       }
-      return l.kind === 'doc_link' ? 2 : 1;
+      return l.kind === 'doc_link' ? 2 : 0;
     })
-    .linkDirectionalParticleWidth(l => highlightLinks.has(l) ? 2.2 : 1.2)
+    .linkDirectionalParticleWidth(l => highlightLinks.has(l) ? 2.4 : 1.4)
     .linkDirectionalParticleSpeed(l => highlightLinks.has(l) ? 0.008 : 0.004)
     .d3AlphaDecay(0.02)
     .d3VelocityDecay(0.3)
     .onNodeClick(node => {
       highlightScope('node', node);
       focusOnNode(node);
-      openDrawer(node);
+      selectActiveNode(node);
       syncExplorerSelection(node);
     })
     .onBackgroundClick(() => {
       clearHighlight();
     });
 
-  window.addEventListener('resize', () => {
-    if (Graph) Graph.width(window.innerWidth).height(window.innerHeight);
-  });
+  // Dynamic ResizeObserver ensures 3D canvas always matches container exactly
+  const pane3D = document.getElementById('viewport-3d-pane');
+  if (pane3D && window.ResizeObserver) {
+    const ro = new ResizeObserver(() => {
+      if (Graph && elem && elem.clientWidth > 0 && elem.clientHeight > 0) {
+        Graph.width(elem.clientWidth).height(elem.clientHeight);
+      }
+    });
+    ro.observe(pane3D);
+  }
 }
 
 function focusOnNode(node) {
@@ -148,7 +157,6 @@ function highlightScope(scopeType, targetObj) {
   const rawLinks = rawData.links || [];
 
   if (scopeType === 'project') {
-    const projName = targetObj.name;
     rawData.nodes.forEach(n => highlightNodes.add(n.id));
     rawLinks.forEach(l => highlightLinks.add(l));
     if (Graph) Graph.zoomToFit(600, 40);
@@ -291,11 +299,18 @@ function loadGraphForSelectedProjects() {
       applyLODAndFilter();
       buildProjectTree();
       buildLegends();
+
+      // Automatically select and render first file if nothing active
+      if (!activeNode && rawData.nodes && rawData.nodes.length > 0) {
+        const firstFile = rawData.nodes.find(n => n.kind === 'file') || rawData.nodes[0];
+        selectActiveNode(firstFile);
+        syncExplorerSelection(firstFile);
+      }
     })
     .catch(err => console.error('Failed to load graph:', err));
 }
 
-// ─── 4. Explorer Tree (Exact CodeGraph Galaxy Architecture) ───────
+// ─── 4. Explorer Tree (Exact Hierarchical Tree Architecture) ──────
 function buildProjectTree() {
   const container = document.getElementById('tree-container');
   if (!container) return;
@@ -329,7 +344,6 @@ function buildProjectTree() {
   if (summaryEl) summaryEl.innerText = `${selectedProjects.size} Active`;
 
   // Build recursive directory structure for projects
-  // projRoots[projName] = { name, dirs: {}, files: {} }
   const projRoots = {};
 
   (rawData.nodes || []).forEach(n => {
@@ -421,7 +435,6 @@ function buildProjectTree() {
       selectTreeNode(projNodeEl);
     }
 
-    // Recursively render directories and files inside project
     renderDirContents(projName, projData, projChildrenEl, openDirs, openFiles, selectedKey);
 
     container.appendChild(projNodeEl);
@@ -429,7 +442,7 @@ function buildProjectTree() {
   });
 }
 
-// Recursive directory & file renderer (100% CodeGraph Galaxy architecture)
+// Recursive directory & file renderer
 function renderDirContents(projName, dirObj, parentEl, openDirs, openFiles, selectedKey) {
   if (!dirObj) return;
 
@@ -469,7 +482,6 @@ function renderDirContents(projName, dirObj, parentEl, openDirs, openFiles, sele
       selectTreeNode(dirNodeEl);
     }
 
-    // Recursively render subdirectory contents
     renderDirContents(projName, subDir, dirChildrenEl, openDirs, openFiles, selectedKey);
 
     parentEl.appendChild(dirNodeEl);
@@ -485,7 +497,6 @@ function renderDirContents(projName, dirObj, parentEl, openDirs, openFiles, sele
     const fileKey = `${projName}:${cleanFilePath}`;
     const isFileOpen = openFiles ? openFiles.has(fileKey) : false;
 
-    // Find or create file node
     const fileNode = fileData.node || {
       id: `file::${cleanFilePath}`,
       name: fName,
@@ -520,7 +531,7 @@ function renderDirContents(projName, dirObj, parentEl, openDirs, openFiles, sele
     fileNodeEl.onclick = () => {
       selectTreeNode(fileNodeEl);
       highlightScope('file', { project: projName, file: cleanFilePath, node: fileNode, symbols: symList });
-      openDrawer(fileNode);
+      selectActiveNode(fileNode);
       if (fileNode.x !== undefined) focusOnNode(fileNode);
     };
 
@@ -535,6 +546,74 @@ function renderDirContents(projName, dirObj, parentEl, openDirs, openFiles, sele
 
     parentEl.appendChild(fileNodeEl);
     parentEl.appendChild(fileChildrenEl);
+  });
+}
+
+// Build hierarchical AST tree from flat headings list
+function buildHeadingTree(flatHeadings) {
+  const root = [];
+  const stack = [{ level: 0, children: root }];
+
+  flatHeadings.forEach(h => {
+    const node = { ...h, children: [] };
+    while (stack.length > 1 && stack[stack.length - 1].level >= (h.level || 1)) {
+      stack.pop();
+    }
+    stack[stack.length - 1].children.push(node);
+    stack.push(node);
+  });
+
+  return root;
+}
+
+// Render nested heading AST tree with collapsible levels
+function renderNestedHeadingTree(headingNodes, parentEl, openDirs, selectedKey) {
+  if (!headingNodes || headingNodes.length === 0) return;
+
+  headingNodes.forEach(h => {
+    const hasChildren = h.children && h.children.length > 0;
+    const isHeadingOpen = openDirs ? openDirs.has(h.id) : false;
+
+    const hNodeEl = document.createElement('div');
+    hNodeEl.className = 'tree-node';
+    hNodeEl.setAttribute('data-tree-node-id', h.id);
+
+    hNodeEl.innerHTML = `
+      <span class="tree-arrow ${isHeadingOpen ? 'open' : ''}" style="${hasChildren ? '' : 'visibility:hidden;'}">▸</span>
+      <span style="color:${KIND_COLORS[h.kind] || '#58a6ff'}; margin-right:4px; font-weight:700; font-size:11px;">${'#'.repeat(h.level || 1)}</span>
+      <span style="color:#e6edf3; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:12px;">${escapeHtml(h.name)}</span>
+      <span class="tree-line-badge" style="margin-left:auto; font-size:10px; color:#6e7681;">L${h.line || 1}</span>
+    `;
+
+    const hChildrenEl = document.createElement('div');
+    hChildrenEl.className = `tree-children ${isHeadingOpen ? 'open' : ''}`;
+
+    const arrow = hNodeEl.querySelector('.tree-arrow');
+    if (arrow && hasChildren) {
+      arrow.onclick = (e) => {
+        e.stopPropagation();
+        hChildrenEl.classList.toggle('open');
+        arrow.classList.toggle('open');
+      };
+    }
+
+    hNodeEl.onclick = (e) => {
+      e.stopPropagation();
+      selectTreeNode(hNodeEl);
+      highlightScope('node', h);
+      focusOnNode(h);
+      selectActiveNode(h);
+    };
+
+    if (selectedKey === h.id) {
+      selectTreeNode(hNodeEl);
+    }
+
+    parentEl.appendChild(hNodeEl);
+    if (hasChildren) {
+      renderNestedHeadingTree(h.children, hChildrenEl, openDirs, selectedKey);
+      parentEl.appendChild(hChildrenEl);
+    }
   });
 }
 
@@ -596,7 +675,135 @@ function selectAllProjects(val) {
   loadGraphForSelectedProjects();
 }
 
-// ─── 5. Mode / LOD & Legend Control (Galaxy Standard) ─────────────
+// ─── 5. Center Doc Stage & Right Links Updates ────────────────────
+function selectActiveNode(node) {
+  if (!node) return;
+  activeNode = node;
+
+  const dName = document.getElementById('d-name');
+  const dSub = document.getElementById('d-sub');
+  if (dName) dName.innerText = node.name || 'Unnamed';
+  if (dSub) dSub.innerText = `${node.file || ''} · Line ${node.line || 1}`;
+
+  const badge = document.getElementById('d-kind-badge');
+  if (badge) {
+    badge.innerText = (node.kind || 'NODE').toUpperCase();
+    badge.style.background = KIND_COLORS[node.kind] || '#1f6feb';
+  }
+
+  // Fetch Section / Full Content for Center Markdown Viewer
+  const queryFile = node.abs_path || node.file || '';
+  const headingParam = node.kind === 'file' ? '' : `&heading=${encodeURIComponent(node.name)}`;
+  fetch(`/api/doc/section?file=${encodeURIComponent(queryFile)}${headingParam}&sub=1`)
+    .then(res => res.json())
+    .then(data => {
+      const content = data.content || node.content || '';
+      renderMarkdown(content);
+
+      // Token Intelligence Metrics
+      const fullTokens = node.tokens || Math.ceil(content.length / 3.8);
+      const slicedTokens = Math.ceil(content.length / 3.8);
+      const savings = node.kind === 'file' ? '0.0%' : `${Math.max(0, ((fullTokens - slicedTokens) / (fullTokens || 1)) * 100).toFixed(1)}%`;
+
+      const savBadge = document.getElementById('stat-savings-badge');
+      const savFill = document.getElementById('stat-savings-fill');
+      const fTokens = document.getElementById('stat-full-tokens');
+      const sTokens = document.getElementById('stat-sliced-tokens');
+
+      if (savBadge) savBadge.textContent = savings;
+      if (savFill) savFill.style.width = savings;
+      if (fTokens) fTokens.textContent = `${fullTokens.toLocaleString()} tokens`;
+      if (sTokens) sTokens.textContent = `${slicedTokens.toLocaleString()} tokens`;
+
+      // Store in memory for 1-click Agent Copy
+      window._activeSurgicalPayload = `[DocGraph Sliced Context: ${node.name} | ${node.file || ''} | Line ${node.line || 1}]\n${content}`;
+    })
+    .catch(err => {
+      console.error('Section read error, falling back to cached content:', err);
+      if (node.content) {
+        renderMarkdown(node.content);
+      }
+    });
+
+  // Update Right Column Lower Pane: Connected Relations & Links
+  const rawLinks = rawData.links || [];
+  const connectedLinks = rawLinks.filter(l => {
+    const src = typeof l.source === 'object' ? l.source.id : l.source;
+    const tgt = typeof l.target === 'object' ? l.target.id : l.target;
+    return src === node.id || tgt === node.id;
+  });
+
+  const relList = document.getElementById('d-relations');
+  const relCountEl = document.getElementById('d-rel-count');
+  if (relCountEl) relCountEl.textContent = connectedLinks.length;
+
+  if (relList) {
+    relList.innerHTML = '';
+    if (connectedLinks.length === 0) {
+      relList.innerHTML = '<div style="font-size:11px; color:#8b949e; padding:8px;">No connected links for this node</div>';
+    } else {
+      connectedLinks.forEach(l => {
+        const srcId = typeof l.source === 'object' ? l.source.id : l.source;
+        const tgtId = typeof l.target === 'object' ? l.target.id : l.target;
+        const otherId = (srcId === node.id) ? tgtId : srcId;
+        const otherNode = rawData.nodes.find(n => n.id === otherId);
+        if (!otherNode) return;
+
+        const isDocLink = l.kind === 'doc_link';
+        const isOut = (srcId === node.id);
+        const relLabel = isDocLink ? (isOut ? '🔗 References' : '↩ Referenced By') : (isOut ? '▾ Contains' : '▴ Parent');
+
+        const row = document.createElement('div');
+        row.className = 'rel-row';
+        row.style.cursor = 'pointer';
+        row.innerHTML = `
+          <span class="rel-kind" style="background:${isDocLink ? '#23863644' : '#1f6feb33'}; color:${isDocLink ? '#00ffaa' : '#58a6ff'}; border:1px solid ${isDocLink ? '#238636aa' : '#1f6feb88'};">${relLabel}</span>
+          <span class="rel-target" style="color:#e6edf3; font-weight:500;">${escapeHtml(otherNode.name)}</span>
+          <span class="node-kind-tag" style="margin-left:auto; font-size:10px;">${otherNode.kind === 'file' ? 'DOC' : 'H' + (otherNode.level || 1)}</span>
+        `;
+        row.onclick = () => {
+          highlightScope('node', otherNode);
+          focusOnNode(otherNode);
+          selectActiveNode(otherNode);
+          syncExplorerSelection(otherNode);
+        };
+        relList.appendChild(row);
+      });
+    }
+  }
+}
+
+function renderMarkdown(mdText) {
+  const container = document.getElementById('d-code-markdown');
+  if (!container) return;
+  if (window.marked) {
+    container.innerHTML = marked.parse(mdText || '');
+    container.querySelectorAll('pre code').forEach((block) => {
+      if (window.hljs) hljs.highlightElement(block);
+    });
+  } else {
+    container.innerText = mdText || '';
+  }
+}
+
+function copyCurrentSection() {
+  const el = document.getElementById('d-code-markdown');
+  if (!el) return;
+  navigator.clipboard.writeText(el.innerText);
+  showToast('📋 Sliced section markdown copied!');
+}
+
+function copyMcpPayload() {
+  const payload = window._activeSurgicalPayload;
+  if (!payload) {
+    showToast('⚠️ No section selected yet');
+    return;
+  }
+  navigator.clipboard.writeText(payload);
+  showToast('🤖 AI Agent Sliced Payload copied to clipboard!');
+}
+
+// ─── 6. Mode / LOD & Legend Control ───────────────────────────────
 function changeLOD(mode) {
   currentLOD = mode;
   document.querySelectorAll('.lod-btn').forEach(b => {
@@ -757,14 +964,15 @@ function initDraggableLegend() {
     panel.style.left = initialLeft + 'px';
     panel.style.top = initialTop + 'px';
     document.body.style.cursor = 'move';
+    e.stopPropagation();
   });
 
   window.addEventListener('mousemove', (e) => {
     if (!isDragging) return;
     const dx = e.clientX - startX;
     const dy = e.clientY - startY;
-    panel.style.left = `${Math.max(10, Math.min(window.innerWidth - 300, initialLeft + dx))}px`;
-    panel.style.top = `${Math.max(60, Math.min(window.innerHeight - 250, initialTop + dy))}px`;
+    panel.style.left = `${initialLeft + dx}px`;
+    panel.style.top = `${initialTop + dy}px`;
   });
 
   window.addEventListener('mouseup', () => {
@@ -773,187 +981,104 @@ function initDraggableLegend() {
   });
 }
 
-// ─── 6. Inspector Drawer & Reader (Markdown Slicing) ──────────────
-function openDrawer(node) {
-  if (!node) return;
-  activeNode = node;
-  const drawer = document.getElementById('drawer');
-  if (!drawer) return;
-  drawer.classList.add('open');
+// ─── 7. Resizers (Tree, Doc, 3D and Links) ─────────────────────────
+function initColumnResizers() {
+  // Resizer 1: Tree vs Doc
+  const resizerTreeDoc = document.getElementById('resizer-tree-doc');
+  const treePanel = document.getElementById('tree-panel');
+  if (resizerTreeDoc && treePanel) {
+    let isDragging = false;
+    resizerTreeDoc.addEventListener('mousedown', (e) => {
+      isDragging = true;
+      resizerTreeDoc.classList.add('dragging');
+      document.body.style.cursor = 'col-resize';
+      e.preventDefault();
+    });
 
-  const dName = document.getElementById('d-name');
-  const dSub = document.getElementById('d-sub');
-  if (dName) dName.innerText = node.name || 'Unnamed';
-  if (dSub) dSub.innerText = `${node.file || ''} · Line ${node.line || 1}`;
+    window.addEventListener('mousemove', (e) => {
+      if (!isDragging) return;
+      const newWidth = Math.max(180, Math.min(500, e.clientX));
+      treePanel.style.width = `${newWidth}px`;
+    });
 
-  const badge = document.getElementById('d-kind-badge');
-  if (badge) {
-    badge.innerText = (node.kind || 'NODE').toUpperCase();
-    badge.style.background = KIND_COLORS[node.kind] || '#1f6feb';
-  }
-
-  // IDE Launchers removed per specification
-
-  // Fetch Section / Full Content
-  const queryFile = node.abs_path || node.file || '';
-  const headingParam = node.kind === 'file' ? '' : `&heading=${encodeURIComponent(node.name)}`;
-  fetch(`/api/doc/section?file=${encodeURIComponent(queryFile)}${headingParam}&sub=1`)
-    .then(res => res.json())
-    .then(data => {
-      const content = data.content || node.content || '';
-      renderMarkdown(content);
-
-      // Token Intelligence
-      const fullTokens = node.tokens || Math.ceil(content.length / 3.8);
-      const slicedTokens = Math.ceil(content.length / 3.8);
-      const savings = node.kind === 'file' ? '0.0%' : `${Math.max(0, ((fullTokens - slicedTokens) / (fullTokens || 1)) * 100).toFixed(1)}%`;
-
-      const savBadge = document.getElementById('stat-savings-badge');
-      const savFill = document.getElementById('stat-savings-fill');
-      const fTokens = document.getElementById('stat-full-tokens');
-      const sTokens = document.getElementById('stat-sliced-tokens');
-      const mcpBox = document.getElementById('mcp-prompt-box');
-
-      if (savBadge) savBadge.textContent = savings;
-      if (savFill) savFill.style.width = savings;
-      if (fTokens) fTokens.textContent = `${fullTokens.toLocaleString()} tokens`;
-      if (sTokens) sTokens.textContent = `${slicedTokens.toLocaleString()} tokens`;
-      window._activeSurgicalPayload = `[DocGraph Sliced Context: ${node.name} | ${node.file || ''} | Line ${node.line || 1}]\n${content}`;
-    })
-    .catch(err => {
-      console.error('Section read error, falling back to cached content:', err);
-      if (node.content) {
-        renderMarkdown(node.content);
+    window.addEventListener('mouseup', () => {
+      if (isDragging) {
+        isDragging = false;
+        resizerTreeDoc.classList.remove('dragging');
+        document.body.style.cursor = 'default';
       }
     });
+  }
 
-  // Connected Relations (Cross-doc links & AST hierarchy)
-  const rawLinks = rawData.links || [];
-  const connectedLinks = rawLinks.filter(l => {
-    const src = typeof l.source === 'object' ? l.source.id : l.source;
-    const tgt = typeof l.target === 'object' ? l.target.id : l.target;
-    return src === node.id || tgt === node.id;
-  });
+  // Resizer 2: Doc vs Graph Panel
+  const resizerDoc3D = document.getElementById('resizer-doc-3d');
+  const graphPanel = document.getElementById('graph-panel');
+  if (resizerDoc3D && graphPanel) {
+    let isDragging = false;
+    resizerDoc3D.addEventListener('mousedown', (e) => {
+      isDragging = true;
+      resizerDoc3D.classList.add('dragging');
+      document.body.style.cursor = 'col-resize';
+      e.preventDefault();
+    });
 
-    const relList = document.getElementById('d-relations');
-  const relCountEl = document.getElementById('d-rel-count');
-  if (relCountEl) relCountEl.textContent = connectedLinks.length;
-  if (relList) {
-    relList.innerHTML = '';
-    connectedLinks.forEach(l => {
-      const srcId = typeof l.source === 'object' ? l.source.id : l.source;
-      const tgtId = typeof l.target === 'object' ? l.target.id : l.target;
-      const otherId = (srcId === node.id) ? tgtId : srcId;
-      const otherNode = rawData.nodes.find(n => n.id === otherId);
-      if (!otherNode) return;
+    window.addEventListener('mousemove', (e) => {
+      if (!isDragging) return;
+      const newWidth = Math.max(300, Math.min(800, window.innerWidth - e.clientX));
+      graphPanel.style.width = `${newWidth}px`;
+    });
 
-      const isDocLink = l.kind === 'doc_link';
-      const isOut = (srcId === node.id);
-      const relLabel = isDocLink ? (isOut ? '🔗 References' : '↩ Referenced By') : (isOut ? '▾ Contains' : '▴ Parent');
+    window.addEventListener('mouseup', () => {
+      if (isDragging) {
+        isDragging = false;
+        resizerDoc3D.classList.remove('dragging');
+        document.body.style.cursor = 'default';
+      }
+    });
+  }
 
-      const row = document.createElement('div');
-      row.className = 'rel-row';
-      row.style.cursor = 'pointer';
-      row.innerHTML = `
-        <span class="rel-kind" style="background:${isDocLink ? '#23863644' : '#1f6feb33'}; color:${isDocLink ? '#00ffaa' : '#58a6ff'}; border:1px solid ${isDocLink ? '#238636aa' : '#1f6feb88'};">${relLabel}</span>
-        <span class="rel-target" style="color:#e6edf3; font-weight:500;">${escapeHtml(otherNode.name)}</span>
-        <span class="node-kind-tag" style="margin-left:auto; font-size:10px;">${otherNode.kind === 'file' ? 'DOC' : 'H' + (otherNode.level || 1)}</span>
-      `;
-      row.onclick = () => {
-        highlightScope('node', otherNode);
-        focusOnNode(otherNode);
-        openDrawer(otherNode);
-        syncExplorerSelection(otherNode);
-      };
-      relList.appendChild(row);
+  // Resizer 3: 3D Canvas vs Links (Vertical)
+  const resizer3DLinks = document.getElementById('resizer-3d-links');
+  const pane3D = document.getElementById('viewport-3d-pane');
+  const graphContainer = document.getElementById('graph-panel');
+  if (resizer3DLinks && pane3D && graphContainer) {
+    let isDragging = false;
+    let startY = 0;
+    let startHeight = 0;
+
+    resizer3DLinks.addEventListener('mousedown', (e) => {
+      isDragging = true;
+      startY = e.clientY;
+      startHeight = pane3D.offsetHeight;
+      resizer3DLinks.classList.add('dragging');
+      document.body.style.cursor = 'row-resize';
+      e.preventDefault();
+    });
+
+    window.addEventListener('mousemove', (e) => {
+      if (!isDragging) return;
+      const dy = e.clientY - startY;
+      const totalH = graphContainer.offsetHeight;
+      const newH = Math.max(140, Math.min(totalH - 100, startHeight + dy));
+      pane3D.style.height = `${newH}px`;
+    });
+
+    window.addEventListener('mouseup', () => {
+      if (isDragging) {
+        isDragging = false;
+        resizer3DLinks.classList.remove('dragging');
+        document.body.style.cursor = 'default';
+      }
     });
   }
 }
 
-function closeDrawer() {
-  const d = document.getElementById('drawer');
-  if (d) d.classList.remove('open');
-}
-
-function renderMarkdown(mdText) {
-  const container = document.getElementById('d-code-markdown');
-  if (!container) return;
-  if (window.marked) {
-    container.innerHTML = marked.parse(mdText || '');
-    container.querySelectorAll('pre code').forEach((block) => {
-      if (window.hljs) hljs.highlightElement(block);
-    });
-  } else {
-    container.innerText = mdText || '';
-  }
-}
-
-function copyCurrentSection() {
-  const el = document.getElementById('d-code-markdown');
-  if (!el) return;
-  navigator.clipboard.writeText(el.innerText);
-  showToast('✅ Sliced section copied!');
-}
-
-function copyMcpPayload() {
-  const payload = window._activeSurgicalPayload;
-  if (!payload) {
-    showToast('⚠️ No section selected yet');
-    return;
-  }
-  navigator.clipboard.writeText(payload);
-  showToast('🤖 AI Agent Sliced Payload copied to clipboard!');
-}
-
-// ─── 7. Header & Toolbar Controls ─────────────────────────────────
 function toggleTreePanel() {
   isTreeOpen = !isTreeOpen;
   const p = document.getElementById('tree-panel');
   const b = document.getElementById('btn-toggle-tree');
   if (p) p.classList.toggle('hidden', !isTreeOpen);
   if (b) b.classList.toggle('active', isTreeOpen);
-}
-
-function initResizers() {
-  const treeResizer = document.getElementById('tree-resizer');
-  const treePanel = document.getElementById('tree-panel');
-  if (treeResizer && treePanel) {
-    let isDraggingLeft = false;
-    treeResizer.addEventListener('mousedown', () => {
-      isDraggingLeft = true;
-      document.body.style.cursor = 'col-resize';
-    });
-    window.addEventListener('mousemove', (e) => {
-      if (isDraggingLeft) {
-        const newWidth = Math.max(200, Math.min(600, e.clientX));
-        treePanel.style.width = newWidth + 'px';
-      }
-    });
-    window.addEventListener('mouseup', () => {
-      isDraggingLeft = false;
-      document.body.style.cursor = 'default';
-    });
-  }
-
-  const drawerResizer = document.getElementById('drawer-resizer');
-  const drawer = document.getElementById('drawer');
-  if (drawerResizer && drawer) {
-    let isDraggingRight = false;
-    drawerResizer.addEventListener('mousedown', () => {
-      isDraggingRight = true;
-      document.body.style.cursor = 'col-resize';
-    });
-    window.addEventListener('mousemove', (e) => {
-      if (isDraggingRight) {
-        const newWidth = Math.max(300, Math.min(800, window.innerWidth - e.clientX));
-        drawer.style.width = newWidth + 'px';
-      }
-    });
-    window.addEventListener('mouseup', () => {
-      isDraggingRight = false;
-      document.body.style.cursor = 'default';
-    });
-  }
 }
 
 function initSearch() {
@@ -968,7 +1093,7 @@ function initSearch() {
       if (found) {
         highlightScope('node', found);
         focusOnNode(found);
-        openDrawer(found);
+        selectActiveNode(found);
         syncExplorerSelection(found);
         showToast(`🎯 Focused: ${found.name}`);
       } else {
@@ -1100,108 +1225,4 @@ function toggleLanguage() {
 
 function escapeHtml(str) {
   return (str || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-}
-
-function initDrawerHorizontalResizer() {
-  const resizer = document.getElementById('drawer-h-resizer');
-  const topPane = document.getElementById('drawer-top-pane');
-  const drawerBody = document.querySelector('.drawer-body');
-  if (!resizer || !topPane || !drawerBody) return;
-
-  let isDragging = false;
-  let startY = 0;
-  let startHeight = 0;
-
-  resizer.addEventListener('mousedown', (e) => {
-    isDragging = true;
-    startY = e.clientY;
-    startHeight = topPane.offsetHeight;
-    resizer.classList.add('dragging');
-    document.body.style.cursor = 'row-resize';
-    e.preventDefault();
-  });
-
-  window.addEventListener('mousemove', (e) => {
-    if (!isDragging) return;
-    const dy = e.clientY - startY;
-    const bodyHeight = drawerBody.offsetHeight;
-    const newHeight = Math.max(120, Math.min(bodyHeight - 100, startHeight + dy));
-    topPane.style.height = `${newHeight}px`;
-  });
-
-  window.addEventListener('mouseup', () => {
-    if (isDragging) {
-      isDragging = false;
-      resizer.classList.remove('dragging');
-      document.body.style.cursor = 'default';
-    }
-  });
-}
-
-// Build hierarchical AST tree from flat headings list
-function buildHeadingTree(flatHeadings) {
-  const root = [];
-  const stack = [{ level: 0, children: root }];
-
-  flatHeadings.forEach(h => {
-    const node = { ...h, children: [] };
-    while (stack.length > 1 && stack[stack.length - 1].level >= (h.level || 1)) {
-      stack.pop();
-    }
-    stack[stack.length - 1].children.push(node);
-    stack.push(node);
-  });
-
-  return root;
-}
-
-// Render nested heading AST tree with collapsible levels
-function renderNestedHeadingTree(headingNodes, parentEl, openDirs, selectedKey) {
-  if (!headingNodes || headingNodes.length === 0) return;
-
-  headingNodes.forEach(h => {
-    const hasChildren = h.children && h.children.length > 0;
-    const isHeadingOpen = openDirs ? openDirs.has(h.id) : false;
-
-    const hNodeEl = document.createElement('div');
-    hNodeEl.className = 'tree-node';
-    hNodeEl.setAttribute('data-tree-node-id', h.id);
-
-    hNodeEl.innerHTML = `
-      <span class="tree-arrow ${isHeadingOpen ? 'open' : ''}" style="${hasChildren ? '' : 'visibility:hidden;'}">▸</span>
-      <span style="color:${KIND_COLORS[h.kind] || '#58a6ff'}; margin-right:4px; font-weight:700; font-size:11px;">${'#'.repeat(h.level || 1)}</span>
-      <span style="color:#e6edf3; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:12px;">${escapeHtml(h.name)}</span>
-      <span class="tree-line-badge" style="margin-left:auto; font-size:10px; color:#6e7681;">L${h.line || 1}</span>
-    `;
-
-    const hChildrenEl = document.createElement('div');
-    hChildrenEl.className = `tree-children ${isHeadingOpen ? 'open' : ''}`;
-
-    const arrow = hNodeEl.querySelector('.tree-arrow');
-    if (arrow && hasChildren) {
-      arrow.onclick = (e) => {
-        e.stopPropagation();
-        hChildrenEl.classList.toggle('open');
-        arrow.classList.toggle('open');
-      };
-    }
-
-    hNodeEl.onclick = (e) => {
-      e.stopPropagation();
-      selectTreeNode(hNodeEl);
-      highlightScope('node', h);
-      focusOnNode(h);
-      openDrawer(h);
-    };
-
-    if (selectedKey === h.id) {
-      selectTreeNode(hNodeEl);
-    }
-
-    parentEl.appendChild(hNodeEl);
-    if (hasChildren) {
-      renderNestedHeadingTree(h.children, hChildrenEl, openDirs, selectedKey);
-      parentEl.appendChild(hChildrenEl);
-    }
-  });
 }
