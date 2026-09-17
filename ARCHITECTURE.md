@@ -1,6 +1,6 @@
-# DocGraph Architecture & Design Specification
+# DocGraphical Architecture & Design Specification
 
-This document outlines the internal architecture, algorithmic design, and data structures of DocGraph.
+This document outlines the internal architecture, algorithmic design, and data structures of DocGraphical.
 
 ---
 
@@ -8,7 +8,7 @@ This document outlines the internal architecture, algorithmic design, and data s
 
 ```text
 +-----------------------------------------------------------------------------+
-|                               DocGraph Engine                               |
+|                             DocGraphical Engine                             |
 +-----------------------------------------------------------------------------+
                                        |
     +----------------------------------+----------------------------------+
@@ -16,17 +16,17 @@ This document outlines the internal architecture, algorithmic design, and data s
     v                                  v                                  v
 +---------------------+      +---------------------+      +---------------------+
 |   Core AST Parser   |      |  Graph Persistence  |      |   Interface Layer   |
-|   (docgraph.parser) |      |   (docgraph.db)     |      |  (CLI / MCP / Web)  |
+| (docgraphical.parser)|     |  (docgraphical.db)   |     |  (CLI / MCP / Web)  |
 +---------------------+      +---------------------+      +---------------------+
     |                                  |                                  |
     |-- State Machine Parsing          |-- SQLite Schema (B-Tree)         |-- Stdio MCP Protocol
-    |-- Fenced Code Protection         |-- Node & Edge Topology           |-- CLI Subcommands
+    |-- Fenced Code Protection         |-- Node & Edge Topology           |-- CLI (docgraphical / docg)
     |-- Surgical Slicing Algorithm     |-- Bidirectional Link Map         |-- 3D Web Studio
 ```
 
 ---
 
-## 1. Core AST Parser (`docgraph.parser`)
+## 1. Core AST Parser (`docgraphical.parser`)
 
 The parser operates as a deterministic line-by-line streaming state machine.
 
@@ -56,9 +56,9 @@ Given `target_heading` and `include_subsections`:
 
 ---
 
-## 2. Graph Persistence & Schema (`docgraph.db`)
+## 2. Graph Persistence & Schema (`docgraphical.db`)
 
-DocGraph indexes documentation into a local SQLite database (`.docgraph/docgraph.db`).
+DocGraphical indexes documentation into a local SQLite database (`.docgraphical/docgraphical.db`).
 
 ### 2.1 Nodes Table
 
@@ -96,14 +96,14 @@ CREATE INDEX IF NOT EXISTS idx_edges_target ON edges(target);
 ## 3. Model Context Protocol (MCP) Server
 
 The MCP server implements the official JSON-RPC protocol over `stdio`:
-- Handles `tools/list` to register `docgraph_toc`, `docgraph_section`, `docgraph_search`, `docgraph_graph`, and `docgraph_index`.
+- Handles `tools/list` to register `docgraphical_toc`, `docgraphical_section`, `docgraphical_search`, `docgraphical_graph`, and `docgraphical_index`.
 - Handles `tools/call` with strict validation and formatted responses.
 
 ---
 
 ## 4. Visual 3D Web Studio
 
-The dual-pane visual interface (`templates/index.html`, `static/docgraph.js`, `static/galaxy.css`) combines:
+The dual-pane visual interface combines:
 - **Left Explorer Tree**: Hierarchical project and folder tree with collapsible file headings.
 - **Center Document Viewer**: Synchronized Markdown and raw source viewer with bidirectional jump.
 - **Right 3D Force Graph**: WebGL 3D graph visualizer with AST layer filtering and real-time relationship tracking.

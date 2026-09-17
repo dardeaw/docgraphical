@@ -1,7 +1,7 @@
 const assert = require('assert');
 const fs = require('fs');
 const path = require('path');
-const { parseHeadings, extractToc, extractSection, searchDoc } = require('./lib/docgraph');
+const { parseHeadings, extractToc, extractSection, searchDoc } = require('./lib/docgraphical');
 
 const samplePath = path.join(__dirname, 'test_sample.md');
 const sampleContent = `# Sample Spec
@@ -20,13 +20,13 @@ x = 1
 \`\`\`
 
 ## 2. Quickstart
-Run \`npm install -g docgraph\`
+Run \`npm install -g docgraphical\`
 `;
 
 fs.writeFileSync(samplePath, sampleContent, 'utf-8');
 
 try {
-  console.log('Testing Node.js DocGraph engine...');
+  console.log('Testing Node.js DocGraphical engine...');
 
   // 1. parseHeadings
   const headings = parseHeadings(samplePath);
@@ -37,7 +37,7 @@ try {
 
   // 2. extractToc
   const toc = extractToc(samplePath);
-  assert.ok(toc.includes('[DocGraph TOC]'), 'TOC header must exist');
+  assert.ok(toc.includes('[DocGraphical TOC]'), 'TOC header must exist');
   assert.ok(toc.includes('## 1. Architecture'), 'TOC item must exist');
   console.log('  ✔ extractToc text format');
 

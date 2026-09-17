@@ -1,4 +1,4 @@
-# DocGraph
+# DocGraphical
 
 專為 AI 程式代理（LLM Coding Agents）、RAG 檢索增強管線與工程規格文檔設計的確定性 Markdown 抽象語法樹（AST）解析與章節切片引擎。
 
@@ -14,19 +14,19 @@
 2. **注意力稀釋（Lost in the Middle）**：上下文充斥大量非目標章節，稀釋模型對關鍵邏輯的注意力，顯著提高幻覺率。
 3. **傳統切分破壞結構**：純字數或字元切分機制（Naive Splitters）經常截斷程式碼區塊（Code Fences）、數學公式與標題階層。
 
-**DocGraph** 透過語法樹分析提供精準切片方案：
+**DocGraphical** 透過語法樹分析提供精準切片方案：
 
 - **大綱優先（TOC 提取）**：先提取帶有行號錨點的階層大綱（約 30～50 Tokens），讓代理在閱讀前鎖定目標段落。
 - **精準章節切片（Section Slicing）**：精確截取指定標題段落及其子章節與程式碼區塊，絕不載入前後無關章節（約 100～300 Tokens）。
 - **程式碼區塊保護**：確保程式碼內的註解符號（如 Python 或 Bash 的 `#`）不會被誤判為 Markdown 標題。
-- **知識圖譜與跨文檔關聯**：自動解析文件間的 Markdown 引用連結，並持久化存儲於輕量級 SQLite 圖資料庫（`.docgraph/docgraph.db`）。
+- **知識圖譜與跨文檔關聯**：自動解析文件間的 Markdown 引用連結，並持久化存儲於輕量級 SQLite 圖資料庫（`.docgraphical/docgraphical.db`）。
 - **原生支援 Model Context Protocol (MCP)**：提供標準化的 Stdio JSON-RPC 介面，無縫對接各類主流 AI 代理環境。
 
 ---
 
 ## Token 消耗效益評估
 
-| 操作情境 | 傳統全檔讀取 | 向量切分檢索 | DocGraph 語法切片 |
+| 操作情境 | 傳統全檔讀取 | 向量切分檢索 | DocGraphical 語法切片 |
 | :--- | :--- | :--- | :--- |
 | **讀取 1,500 行規格書** | ~18,000 Tokens | ~2,500 Tokens (失真) | **~150 Tokens** |
 | **階層語意完整度** | 完整（消耗極高） | 碎片化 | **完整保留 AST 階層** |
@@ -42,21 +42,21 @@
 
 ```bash
 # 基本安裝
-pip install docgraph
+pip install docgraphical
 
 # 包含 MCP 伺服器支援
-pip install "docgraph[mcp]"
+pip install "docgraphical[mcp]"
 ```
 
 ### Node.js / 桌面應用程式
 
 ```bash
 # 全域 CLI
-npm install -g docgraph
+npm install -g docgraphical
 
 # 本地運行桌面應用程式
-git clone https://github.com/dardeaw/docgraph.git
-cd docgraph
+git clone https://github.com/dardeaw/docgraphical.git
+cd docgraphical
 npm install
 npm start
 ```
@@ -65,17 +65,19 @@ npm start
 
 ## 快速上手（CLI）
 
+完整指令 `docgraphical` 與簡短別名 `docg` 皆可直接使用：
+
 ### 1. 提取目錄大綱（TOC）
 
 快速輸出精確行號階層：
 
 ```bash
-docgraph toc docs/architecture.md
+docg toc docs/architecture.md
 ```
 
 輸出範例：
 ```text
-=== [DocGraph TOC] architecture.md ===
+=== [DocGraphical TOC] architecture.md ===
 [Line    1] # 系統架構總覽
 [Line   24]   ## 1. 儲存子系統
 [Line   58]     ### 1.1 WAL 預寫日誌
@@ -86,7 +88,7 @@ docgraph toc docs/architecture.md
 
 支援輸出 JSON 格式供程式解析：
 ```bash
-docgraph toc docs/architecture.md --format json
+docg toc docs/architecture.md --format json
 ```
 
 ### 2. 精準切片指定章節
@@ -94,12 +96,12 @@ docgraph toc docs/architecture.md --format json
 僅提取目標章節，於同級或更高級標題處精確截斷：
 
 ```bash
-docgraph section docs/architecture.md "1. 儲存子系統"
+docg section docs/architecture.md "1. 儲存子系統"
 ```
 
 若僅需該標題正文、不含子章節：
 ```bash
-docgraph section docs/architecture.md "1. 儲存子系統" --no-subsections
+docg section docs/architecture.md "1. 儲存子系統" --no-subsections
 ```
 
 ### 3. 跨文檔關鍵字檢索
@@ -107,37 +109,37 @@ docgraph section docs/architecture.md "1. 儲存子系統" --no-subsections
 輸出精確行號與上下文片段：
 
 ```bash
-docgraph search docs/ "LSM-Tree"
+docg search docs/ "LSM-Tree"
 ```
 
 ### 4. 建立專案知識圖譜
 
-掃描目錄、解析 Markdown AST 節點與跨文檔連結，寫入 `.docgraph/docgraph.db`：
+掃描目錄、解析 Markdown AST 節點與跨文檔連結，寫入 `.docgraphical/docgraphical.db`：
 
 ```bash
-docgraph index .
+docg index .
 ```
 
 ### 5. 啟動視覺化工作站（Web Studio）
 
 ```bash
-docgraph serve --port 5002
+docg serve --port 5002
 ```
 
 ---
 
 ## Model Context Protocol (MCP) 設定
 
-DocGraph 原生支援 MCP 協定，可透過標準 Stdio 與 AI 代理通訊。
+DocGraphical 原生支援 MCP 協定，可透過標準 Stdio 與 AI 代理通訊。
 
 ### 設定檔範例 (`mcp_config.json` / Claude Desktop / Cursor / Antigravity)
 
 ```json
 {
   "mcpServers": {
-    "docgraph": {
+    "docgraphical": {
       "command": "python",
-      "args": ["-m", "docgraph.cli", "mcp"]
+      "args": ["-m", "docgraphical.cli", "mcp"]
     }
   }
 }
@@ -147,18 +149,18 @@ DocGraph 原生支援 MCP 協定，可透過標準 Stdio 與 AI 代理通訊。
 
 | 工具名稱 | 參數 | 說明 |
 | :--- | :--- | :--- |
-| `docgraph_toc` | `filePath` (string), `format` (text/json) | 提取標題階層大綱與行號錨點（約 30 Tokens）。 |
-| `docgraph_section` | `filePath` (string), `heading` (string), `includeSubsections` (bool) | 精確提取指定段落原文（約 100 Tokens）。 |
-| `docgraph_search` | `filePath` (string), `query` (string), `limit` (int) | 快速搜尋指定檔案或目錄內之關鍵字。 |
-| `docgraph_graph` | `repoPath` (string) | 查詢知識圖譜節點與跨文檔連結關聯。 |
-| `docgraph_index` | `repoPath` (string) | 重建並更新指定專案之 SQLite AST 索引。 |
+| `docgraphical_toc` | `filePath` (string), `format` (text/json) | 提取標題階層大綱與行號錨點（約 30 Tokens）。 |
+| `docgraphical_section` | `filePath` (string), `heading` (string), `includeSubsections` (bool) | 精確提取指定段落原文（約 100 Tokens）。 |
+| `docgraphical_search` | `filePath` (string), `query` (string), `limit` (int) | 快速搜尋指定檔案或目錄內之關鍵字。 |
+| `docgraphical_graph` | `repoPath` (string) | 查詢知識圖譜節點與跨文檔連結關聯。 |
+| `docgraphical_index` | `repoPath` (string) | 重建並更新指定專案之 SQLite AST 索引。 |
 
 ---
 
 ## Python API 使用範例
 
 ```python
-from docgraph.parser import parse_headings, extract_toc, extract_section, search_file
+from docgraphical.parser import parse_headings, extract_toc, extract_section, search_file
 
 # 1. 解析 AST 標題清單
 headings = parse_headings("docs/spec.md")
@@ -187,4 +189,4 @@ print(content)
 
 ## 授權條款
 
-DocGraph 基於 [MIT License](LICENSE) 授權開源。
+DocGraphical 基於 [MIT License](LICENSE) 授權開源。

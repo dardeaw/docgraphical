@@ -1,6 +1,6 @@
-# Contributing to DocGraph
+# Contributing to DocGraphical
 
-Thank you for your interest in contributing to DocGraph! We welcome bug fixes, documentation improvements, and architectural enhancements.
+Thank you for your interest in contributing to DocGraphical! We welcome bug fixes, documentation improvements, and architectural enhancements.
 
 ---
 
@@ -15,8 +15,8 @@ We are committed to providing a welcoming, constructive, and collaborative envir
 ### 1. Clone Repository & Setup Environment
 
 ```bash
-git clone https://github.com/dardeaw/docgraph.git
-cd docgraph
+git clone https://github.com/dardeaw/docgraphical.git
+cd docgraphical
 python -m venv .venv
 source .venv/bin/activate  # Or .venv\Scripts\activate on Windows
 pip install -e ".[dev,mcp]"
@@ -34,7 +34,7 @@ pytest
 node test.js
 
 # Check code formatting & linting
-flake8 docgraph tests --max-line-length=127
+flake8 docgraphical tests --max-line-length=127
 ```
 
 ---
@@ -42,7 +42,7 @@ flake8 docgraph tests --max-line-length=127
 ## Pull Request Guidelines
 
 1. **Focused Scope**: Keep PRs focused on a single bug fix or feature.
-2. **Test Coverage**: Add test cases in `tests/test_docgraph.py` for any new parser or slicing behavior.
+2. **Test Coverage**: Add test cases in `tests/test_docgraphical.py` for any new parser or slicing behavior.
 3. **Commit Messages**: Use concise, conventional commit prefixes (`feat:`, `fix:`, `docs:`, `test:`, `refactor:`).
 4. **Documentation**: Update documentation and docstrings if public API behavior changes.
 

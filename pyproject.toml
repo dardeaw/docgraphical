@@ -3,16 +3,16 @@ requires = ["setuptools>=61.0"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "docgraph"
+name = "docgraphical"
 version = "1.0.0"
 authors = [
   { name="Chunghsing Tech / CodeGraph Team", email="a1081@chenbro.com" },
 ]
-description = "Surgical precision Markdown AST, TOC outline & section slicer for AI Coding Agents. Save 97% tokens."
+description = "Deterministic Markdown AST analyzer, TOC outline & surgical section slicer for AI Agents. Save 97% tokens."
 readme = "README.md"
 requires-python = ">=3.9"
 license = { text = "MIT" }
-keywords = ["docgraph", "markdown", "ast", "toc", "ai-agent", "mcp", "llm-tokens", "rag"]
+keywords = ["docgraphical", "docgraph", "markdown", "ast", "toc", "ai-agent", "mcp", "llm-tokens", "rag"]
 classifiers = [
     "Development Status :: 5 - Production/Stable",
     "Intended Audience :: Developers",
@@ -33,8 +33,10 @@ mcp = ["mcp>=1.0.0"]
 dev = ["pytest>=7.0.0", "flake8>=6.0.0"]
 
 [project.urls]
-"Homepage" = "https://github.com/dardeaw/docgraph"
-"Bug Tracker" = "https://github.com/dardeaw/docgraph/issues"
+"Homepage" = "https://github.com/dardeaw/docgraphical"
+"Bug Tracker" = "https://github.com/dardeaw/docgraphical/issues"
 
 [project.scripts]
-docgraph = "docgraph.cli:main"
+docgraphical = "docgraphical.cli:main"
+docg = "docgraphical.cli:main"
+docgraph = "docgraphical.cli:main"
