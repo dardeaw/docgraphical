@@ -230,19 +230,54 @@ function init3DGraph() {
 }
 
 function focusOnNode(node) {
-  if (!node || node.x === undefined) return;
-  activeNode = node;
-  const distance = 32; // Tightly scaled focus distance
-  const distRatio = 1 + distance / Math.hypot(node.x || 1, node.y || 1, node.z || 1);
+  if (!node) return;
+
+  // Always resolve to the live simulated node in Graph or rawData that possesses valid x,y,z coordinates
+  let liveNode = node;
+  if (liveNode.x === undefined || liveNode.y === undefined || liveNode.z === undefined) {
+    if (Graph && Graph.graphData) {
+      const gNodes = Graph.graphData().nodes || [];
+      liveNode = gNodes.find(n => n.id === node.id) || (rawData.nodes || []).find(n => n.id === node.id) || node;
+    }
+  }
+
+  if (!liveNode || liveNode.x === undefined) {
+    console.warn('focusOnNode: live node coordinates not available for', node.id);
+    return;
+  }
+
+  activeNode = liveNode;
+
   if (Graph) {
-    Graph.cameraPosition(
-      { x: (node.x || 0) * distRatio, y: (node.y || 0) * distRatio, z: (node.z || 0) * distRatio },
-      { x: node.x || 0, y: node.y || 0, z: node.z || 0 },
-      1200
-    );
+    const targetPos = { x: Number(liveNode.x) || 0, y: Number(liveNode.y) || 0, z: Number(liveNode.z) || 0 };
+    const camera = Graph.camera();
+    const controls = Graph.controls();
+
+    let camPos;
+    if (camera && controls && typeof THREE !== 'undefined') {
+      // Glide camera smoothly to center dead-on targetPos while preserving natural perspective
+      const dir = new THREE.Vector3().subVectors(camera.position, controls.target);
+      if (dir.lengthSq() < 0.001) dir.set(0, 0, 1);
+      const focusDist = 42; // optimal comfortable zoom distance
+      dir.normalize().multiplyScalar(focusDist);
+      camPos = {
+        x: targetPos.x + dir.x,
+        y: targetPos.y + dir.y,
+        z: targetPos.z + dir.z
+      };
+    } else {
+      const distance = 42;
+      const distRatio = 1 + distance / Math.hypot(targetPos.x || 1, targetPos.y || 1, targetPos.z || 1);
+      camPos = {
+        x: targetPos.x * distRatio,
+        y: targetPos.y * distRatio,
+        z: targetPos.z * distRatio
+      };
+    }
+
+    Graph.cameraPosition(camPos, targetPos, 1000);
   }
 }
-
 
 function updateLabelsVisibility() {
   const nodes = (rawData && rawData.nodes) ? rawData.nodes : [];
@@ -764,7 +799,7 @@ function renderDirContents(projName, dirObj, parentEl, openDirs, openFiles, sele
       selectTreeNode(fileNodeEl);
       highlightScope('file', { project: projName, file: cleanFilePath, node: fileNode, symbols: symList });
       selectActiveNode(fileNode);
-      if (fileNode.x !== undefined) focusOnNode(fileNode);
+      focusOnNode(fileNode);
     };
 
     if (selectedKey === fileKey) {
