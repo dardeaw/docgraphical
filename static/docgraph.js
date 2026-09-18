@@ -670,6 +670,9 @@ function renderDirContents(projName, dirObj, parentEl, openDirs, openFiles, sele
     const fileNodeEl = document.createElement('div');
     fileNodeEl.className = 'tree-node';
     fileNodeEl.setAttribute('data-tree-file', fileKey);
+    fileNodeEl.setAttribute('data-tree-node-id', fileNode.id || `file::${cleanFilePath}`);
+    fileNodeEl.setAttribute('data-tree-proj', projName);
+    fileNodeEl.setAttribute('data-tree-file-path', cleanFilePath);
 
     fileNodeEl.innerHTML = `
       <span class="tree-arrow ${isFileOpen ? 'open' : ''}">▸</span>
@@ -901,7 +904,7 @@ function selectActiveNode(node) {
   if (relList) {
     relList.innerHTML = '';
     if (connectedLinks.length === 0) {
-      relList.innerHTML = '<div style="font-size:11px; color:#8b949e; padding:8px;">No connected links for this node</div>';
+      relList.innerHTML = `<div style="font-size:11px; color:#8b949e; padding:8px;">${currentLanguage === 'zh' ? '此節點無關聯連結' : 'No connected links for this node'}</div>`;
     } else {
       connectedLinks.forEach(l => {
         const srcId = typeof l.source === 'object' ? l.source.id : l.source;
@@ -912,15 +915,25 @@ function selectActiveNode(node) {
 
         const isDocLink = l.kind === 'doc_link';
         const isOut = (srcId === node.id);
-        const relLabel = isDocLink ? (isOut ? '🔗 References' : '↩ Referenced By') : (isOut ? '▾ Contains' : '▴ Parent');
+
+        let relLabel = '';
+        if (currentLanguage === 'zh') {
+          relLabel = isDocLink ? (isOut ? '參考引用' : '被引用') : (isOut ? '包含' : '上層');
+        } else {
+          relLabel = isDocLink ? (isOut ? 'References' : 'Referenced By') : (isOut ? 'Contains' : 'Parent');
+        }
+
+        // Color badge dynamically matching the target node's AST kind/level
+        const targetColor = KIND_COLORS[otherNode.kind] || (isDocLink ? '#00ffaa' : '#58a6ff');
+        const kindTagText = otherNode.kind === 'file' ? 'DOC' : ('H' + (otherNode.level || 1));
 
         const row = document.createElement('div');
         row.className = 'rel-row';
         row.style.cursor = 'pointer';
         row.innerHTML = `
-          <span class="rel-kind" style="background:${isDocLink ? '#23863644' : '#1f6feb33'}; color:${isDocLink ? '#00ffaa' : '#58a6ff'}; border:1px solid ${isDocLink ? '#238636aa' : '#1f6feb88'};">${relLabel}</span>
+          <span class="rel-kind" style="background:${targetColor}22; color:${targetColor}; border:1px solid ${targetColor}66;">${relLabel}</span>
           <span class="rel-target" style="color:#e6edf3; font-weight:500;">${escapeHtml(otherNode.name)}</span>
-          <span class="node-kind-tag" style="margin-left:auto; font-size:10px;">${otherNode.kind === 'file' ? 'DOC' : 'H' + (otherNode.level || 1)}</span>
+          <span class="node-kind-tag" style="background:${targetColor}18; color:${targetColor}; border:1px solid ${targetColor}44; margin-left:auto; font-size:10px;">${kindTagText}</span>
         `;
         row.onclick = () => {
           highlightScope('node', otherNode);
@@ -1110,41 +1123,6 @@ function resetFilters() {
   buildLegends();
 }
 
-function initDraggableLegend() {
-  const panel = document.getElementById('legend-panel');
-  const handle = document.getElementById('legend-drag-handle');
-  if (!panel || !handle) return;
-  let isDragging = false;
-  let startX = 0, startY = 0, initialLeft = 0, initialTop = 0;
-
-  handle.addEventListener('mousedown', (e) => {
-    isDragging = true;
-    startX = e.clientX;
-    startY = e.clientY;
-    const rect = panel.getBoundingClientRect();
-    initialLeft = rect.left;
-    initialTop = rect.top;
-    panel.style.bottom = 'auto';
-    panel.style.right = 'auto';
-    panel.style.left = initialLeft + 'px';
-    panel.style.top = initialTop + 'px';
-    document.body.style.cursor = 'move';
-    e.stopPropagation();
-  });
-
-  window.addEventListener('mousemove', (e) => {
-    if (!isDragging) return;
-    const dx = e.clientX - startX;
-    const dy = e.clientY - startY;
-    panel.style.left = `${initialLeft + dx}px`;
-    panel.style.top = `${initialTop + dy}px`;
-  });
-
-  window.addEventListener('mouseup', () => {
-    isDragging = false;
-    document.body.style.cursor = 'default';
-  });
-}
 
 // ─── 7. Resizers (Tree, Doc, 3D and Links) ─────────────────────────
 
