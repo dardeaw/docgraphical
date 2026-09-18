@@ -1602,3 +1602,297 @@ html, body {
   left: auto;
   right: 14px;
 }
+
+
+/* ─── Cyberpunk 3D Navigation Controls & Telemetry HUD ─────────── */
+.floating-cyber-hud-btn {
+  position: absolute;
+  top: 36px;
+  right: 10px;
+  z-index: 25;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: rgba(13, 20, 32, 0.85);
+  border: 1px solid rgba(0, 240, 255, 0.4);
+  color: #00f0ff;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 4px 10px;
+  border-radius: 6px;
+  cursor: pointer;
+  backdrop-filter: blur(10px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4), 0 0 10px rgba(0, 240, 255, 0.15);
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+  letter-spacing: 0.5px;
+}
+
+.floating-cyber-hud-btn:hover {
+  background: rgba(0, 240, 255, 0.15);
+  border-color: #00f0ff;
+  color: #ffffff;
+  box-shadow: 0 4px 16px rgba(0, 240, 255, 0.35), 0 0 18px rgba(0, 240, 255, 0.25);
+  transform: translateY(-1px);
+}
+
+.floating-cyber-hud-btn kbd {
+  background: rgba(0, 240, 255, 0.15);
+  border: 1px solid rgba(0, 240, 255, 0.5);
+  color: #00f0ff;
+  border-radius: 3px;
+  padding: 1px 5px;
+  font-size: 9px;
+  font-family: 'Consolas', 'Courier New', monospace;
+  font-weight: bold;
+}
+
+/* Real-time Telemetry Bar */
+.cyber-telemetry-hud {
+  position: absolute;
+  bottom: 8px;
+  left: 10px;
+  z-index: 25;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  background: rgba(9, 13, 20, 0.8);
+  border: 1px solid rgba(56, 139, 253, 0.3);
+  backdrop-filter: blur(8px);
+  padding: 4px 10px;
+  border-radius: 6px;
+  font-family: 'Consolas', 'SF Mono', 'Courier New', monospace;
+  font-size: 10px;
+  pointer-events: none;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+}
+
+.cyber-telemetry-hud .telemetry-item {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.cyber-telemetry-hud .t-key {
+  color: #8b949e;
+  font-size: 9px;
+}
+
+.cyber-telemetry-hud .t-val {
+  color: #58a6ff;
+  font-weight: 600;
+}
+
+.cyber-telemetry-hud .t-val.t-turbo {
+  color: #ff7b72;
+  text-shadow: 0 0 8px rgba(255, 123, 114, 0.6);
+  font-weight: bold;
+}
+
+.cyber-telemetry-hud .t-val.t-node {
+  color: #00f0ff;
+  max-width: 140px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Hologram Keymap HUD Modal */
+.cyber-hud-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 70;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(5, 8, 14, 0.85);
+  backdrop-filter: blur(14px);
+  padding: 16px;
+  animation: cyberFadeIn 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.cyber-hud-overlay.hidden {
+  display: none !important;
+}
+
+@keyframes cyberFadeIn {
+  from { opacity: 0; transform: scale(0.97); }
+  to { opacity: 1; transform: scale(1); }
+}
+
+.cyber-hud-glass {
+  max-width: 620px;
+  width: 100%;
+  max-height: 92%;
+  overflow-y: auto;
+  background: rgba(13, 18, 28, 0.95);
+  border: 1px solid rgba(0, 240, 255, 0.35);
+  border-radius: 12px;
+  box-shadow: 0 20px 50px rgba(0, 0, 0, 0.85), 0 0 30px rgba(0, 240, 255, 0.15);
+  padding: 18px 22px;
+  color: #c9d1d9;
+}
+
+.cyber-hud-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  border-bottom: 1px solid rgba(0, 240, 255, 0.2);
+  padding-bottom: 10px;
+  margin-bottom: 14px;
+}
+
+.cyber-hud-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  font-weight: 700;
+  color: #00f0ff;
+  letter-spacing: 1px;
+}
+
+.cyber-glow-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #00f0ff;
+  box-shadow: 0 0 10px #00f0ff;
+  animation: pulseDot 1.5s infinite;
+}
+
+@keyframes pulseDot {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.4; transform: scale(0.8); }
+}
+
+.cyber-hud-close {
+  background: transparent;
+  border: 1px solid #30363d;
+  color: #8b949e;
+  width: 26px;
+  height: 26px;
+  border-radius: 6px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  transition: all 0.15s ease;
+}
+
+.cyber-hud-close:hover {
+  background: rgba(255, 123, 114, 0.2);
+  border-color: #ff7b72;
+  color: #ff7b72;
+}
+
+.cyber-hud-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 14px;
+}
+
+.cyber-hud-section {
+  background: rgba(22, 27, 34, 0.65);
+  border: 1px solid rgba(48, 54, 61, 0.7);
+  border-radius: 8px;
+  padding: 12px;
+}
+
+.cyber-hud-section.full-width {
+  grid-column: 1 / -1;
+}
+
+.section-badge {
+  font-size: 10px;
+  font-weight: 700;
+  color: #58a6ff;
+  letter-spacing: 0.5px;
+  margin-bottom: 10px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.key-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 6px;
+  font-size: 11px;
+}
+
+.key-row:last-child {
+  margin-bottom: 0;
+}
+
+.key-combo {
+  display: flex;
+  gap: 4px;
+  min-width: 60px;
+}
+
+.key-combo kbd, .key-row kbd {
+  background: #21262d;
+  border: 1px solid #388bfd;
+  color: #58a6ff;
+  border-radius: 4px;
+  padding: 2px 6px;
+  font-size: 10px;
+  font-family: 'Consolas', 'Courier New', monospace;
+  font-weight: 700;
+  box-shadow: 0 2px 0 rgba(0, 0, 0, 0.4);
+}
+
+.key-desc {
+  color: #c9d1d9;
+  font-size: 11px;
+}
+
+.mouse-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.mouse-item {
+  display: flex;
+  flex-direction: column;
+  background: rgba(13, 17, 23, 0.5);
+  border: 1px solid rgba(48, 54, 61, 0.5);
+  border-radius: 6px;
+  padding: 6px 10px;
+}
+
+.mouse-item .m-action {
+  color: #3fb950;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.mouse-item .m-effect {
+  color: #8b949e;
+  font-size: 10px;
+}
+
+.cyber-hud-footer {
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px solid rgba(48, 54, 61, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  font-size: 9px;
+  color: #8b949e;
+  letter-spacing: 0.8px;
+  font-family: 'Consolas', 'Courier New', monospace;
+}
+
+.pulse-indicator {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #3fb950;
+  box-shadow: 0 0 8px #3fb950;
+}
