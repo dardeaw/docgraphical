@@ -82,64 +82,24 @@ function createFileLabelSprite(n) {
   if (!fileName) return null;
 
   const color = KIND_COLORS.file || '#f0883e';
-  const canvas = document.createElement('canvas');
-  const ctx = canvas.getContext('2d');
 
-  // High resolution for retina sharp text rendering
-  const fontSize = 28;
-  ctx.font = `600 ${fontSize}px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif`;
-  const textWidth = ctx.measureText(fileName).width;
-
-  const padX = 14;
-  const padY = 6;
-  canvas.width = Math.ceil(textWidth + padX * 2);
-  canvas.height = fontSize + padY * 2;
-
-  // Background subtle pill
-  ctx.fillStyle = 'rgba(13, 17, 23, 0.88)';
-  ctx.strokeStyle = color;
-  ctx.lineWidth = 2;
-
-  const r = 6;
-  const w = canvas.width;
-  const h = canvas.height;
-
-  ctx.beginPath();
-  if (ctx.roundRect) {
-    ctx.roundRect(1, 1, w - 2, h - 2, r);
-  } else {
-    ctx.rect(1, 1, w - 2, h - 2);
+  if (typeof SpriteText !== 'undefined') {
+    const sprite = new SpriteText(fileName);
+    sprite.color = color;
+    sprite.textHeight = 3.6;
+    sprite.backgroundColor = 'rgba(13, 17, 23, 0.88)';
+    sprite.borderColor = color;
+    sprite.borderWidth = 1.2;
+    sprite.borderRadius = 4;
+    sprite.padding = [4, 7];
+    sprite.position.set(0, 3.8, 0); // Placed prominently above the file sphere
+    if (sprite.material) {
+      sprite.material.depthWrite = false;
+      sprite.material.transparent = true;
+    }
+    return sprite;
   }
-  ctx.fill();
-  ctx.stroke();
-
-  // Text with exact Document sphere color
-  ctx.font = `600 ${fontSize}px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif`;
-  ctx.fillStyle = color;
-  ctx.textAlign = 'center';
-  ctx.textBaseline = 'middle';
-  ctx.fillText(fileName, w / 2, h / 2);
-
-  if (typeof THREE === 'undefined') return null;
-
-  const texture = new THREE.CanvasTexture(canvas);
-  texture.needsUpdate = true;
-  texture.minFilter = THREE.LinearFilter;
-
-  const spriteMaterial = new THREE.SpriteMaterial({
-    map: texture,
-    depthWrite: false,
-    transparent: true
-  });
-
-  const sprite = new THREE.Sprite(spriteMaterial);
-  const aspect = canvas.width / canvas.height;
-  const spriteH = 2.4;
-  const spriteW = spriteH * aspect;
-  sprite.scale.set(spriteW, spriteH, 1);
-  sprite.position.set(0, 3.2, 0);
-
-  return sprite;
+  return null;
 }
 
 function init3DGraph() {
