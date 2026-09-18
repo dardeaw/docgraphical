@@ -1819,25 +1819,3 @@ function updateControlsHelpI18n() {
     if (mDblD) mDblD.textContent = 'Reset View to Center';
   }
 }
- else {
-    if (lblHud) lblHud.textContent = 'CYBER NAV';
-    if (btnHud) btnHud.title = 'Toggle Cyber Controls Guide [H]';
-    if (heading) heading.textContent = 'CYBERPUNK 3D TACTICAL CONTROLS';
-    if (secFlight) secFlight.textContent = '🚀 FLIGHT & THRUSTERS';
-    if (secTarget) secTarget.textContent = '🎯 TARGETING & WARP';
-    if (secMouse) secMouse.textContent = '🖱️ MOUSE GESTURES';
-
-    if (kWs) kWs.textContent = 'Forward / Backward Thrust';
-    if (kAd) kAd.textContent = 'Lateral Strafe Left / Right';
-    if (kQe) kQe.textContent = 'Yaw Orbit Rotate';
-    if (kRf) kRf.textContent = 'Elevate Up / Down';
-    if (kShift) kShift.textContent = 'Hyper-Speed Boost 2.5x';
-    if (kSpace) kSpace.textContent = 'Tactical Brake & Align';
-    if (kTab) kTab.textContent = 'Hyper-Jump to Next Linked Node';
-    if (kC) kC.textContent = 'Center Focus on Active Node / Galaxy';
-    if (kF) kF.textContent = 'Auto-Frame Galaxy Overview';
-    if (kT) kT.textContent = 'Toggle Quantum Orbit Rotation';
-    if (k123) k123.textContent = 'Switch LOD Level: Arch / Standard / All';
-    if (kH) kH.textContent = 'Toggle Cyber Controls HUD';
-  }
-}
