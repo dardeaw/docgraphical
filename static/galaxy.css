@@ -1060,6 +1060,7 @@ html, body {
   flex-direction: row;
   width: 100vw;
   height: calc(100vh - 52px);
+  margin-top: 52px;
   overflow: hidden;
   background: #090d13;
   position: relative;
@@ -1515,7 +1516,7 @@ html, body {
 /* Floating Panel Swap Button */
 #btn-swap-panels {
   position: absolute;
-  top: 38px;
+  top: 40px;
   left: 12px;
   z-index: 50;
   display: inline-flex;

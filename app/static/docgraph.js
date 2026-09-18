@@ -1147,24 +1147,44 @@ function initDraggableLegend() {
 
 // ─── 7. Resizers (Tree, Doc, 3D and Links) ─────────────────────────
 
+function updateSwapButtonI18n() {
+  const btn = document.getElementById('btn-swap-panels');
+  const lbl = document.getElementById('lbl-swap-text');
+  const appLayout = document.getElementById('app-layout');
+  const isSwapped = appLayout && appLayout.classList.contains('panels-swapped');
+
+  if (!btn || !lbl) return;
+
+  if (currentLanguage === 'zh') {
+    if (isSwapped) {
+      lbl.textContent = '對調回右';
+      btn.title = '對調回右側';
+    } else {
+      lbl.textContent = '左右對調';
+      btn.title = '與 Markdown 瀏覽對調';
+    }
+  } else {
+    if (isSwapped) {
+      lbl.textContent = 'Swap Back';
+      btn.title = 'Swap back to right';
+    } else {
+      lbl.textContent = 'Swap Panels';
+      btn.title = 'Swap with Markdown reader';
+    }
+  }
+}
+
 function togglePanelsSwap() {
   const appLayout = document.getElementById('app-layout');
   if (!appLayout) return;
 
   const isSwapped = appLayout.classList.toggle('panels-swapped');
-  const btn = document.getElementById('btn-swap-panels');
-  const lbl = document.getElementById('lbl-swap-text');
+  updateSwapButtonI18n();
 
-  if (btn) {
-    if (isSwapped) {
-      if (lbl) lbl.textContent = '對調回右';
-      btn.title = '對調回右側 (Swap back to right)';
-      showToast('🔄 已對調：3D 星系置中，Markdown 移至右側');
-    } else {
-      if (lbl) lbl.textContent = '左右對調';
-      btn.title = '與 Markdown 瀏覽對調 (Swap with Markdown Reader)';
-      showToast('🔄 已對調：恢復標準排版');
-    }
+  if (isSwapped) {
+    showToast(currentLanguage === 'zh' ? '🔄 已對調：3D 星系置中，Markdown 移至右側' : '🔄 Panels swapped: 3D Galaxy centered');
+  } else {
+    showToast(currentLanguage === 'zh' ? '🔄 已對調：恢復標準排版' : '🔄 Standard layout restored');
   }
 
   setTimeout(() => {
@@ -1502,7 +1522,8 @@ function toggleLanguage() {
   currentLanguage = currentLanguage === 'en' ? 'zh' : 'en';
   const b = document.getElementById('btn-lang');
   if (b) b.textContent = `Language: ${currentLanguage.toUpperCase()}`;
-  showToast(`Language: ${currentLanguage.toUpperCase()}`);
+  updateSwapButtonI18n();
+  showToast(currentLanguage === 'zh' ? '語系切換：繁體中文' : 'Language switched to English');
 }
 
 function escapeHtml(str) {
