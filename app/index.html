@@ -34,7 +34,7 @@ if (window.THREE && !window.THREE.Timer) {
 </script>
 <script src="/static/three-spritetext.min.js"></script>
 <script src="/static/3d-force-graph.min.js"></script>
-<link rel="stylesheet" href="/static/galaxy.css?v=3.8.0">
+<link rel="stylesheet" href="/static/galaxy.css?v=3.8.1">
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark-dimmed.min.css">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
@@ -153,67 +153,65 @@ if (window.THREE && !window.THREE.Timer) {
     <!-- Upper Slot: 3D Force-Graph Canvas (Pure & Unobstructed, or MD Reader when swapped) -->
     <div id="viewport-3d-pane">
       <div class="graph-pane-header">
-        <span style="font-size:11px; font-weight:600; color:#58a6ff; display:flex; align-items:center; gap:5px;">
-          <span>🪐</span> <span>3D Knowledge Topology</span>
-        </span>
+        <span style="font-size:11px; font-weight:600; color:#58a6ff;">3D Knowledge Graph</span>
       </div>
       <button id="btn-swap-panels" class="floating-swap-btn" onclick="togglePanelsSwap()" title="Swap with Markdown reader">
         <span>⇄</span> <span id="lbl-swap-text">Swap Panels</span>
       </button>
-            <!-- Cyber Navigation HUD Controls & Telemetry -->
-      <button id="btn-cyber-hud" class="floating-cyber-hud-btn" onclick="toggleCyberHud()" title="Toggle Cyber Controls Guide [H]">
-        <span class="cyber-icon">🎮</span> <span class="cyber-label" id="lbl-cyber-hud">CYBER NAV</span> <kbd>H</kbd>
+                  <!-- 3D Navigation Controls Help Button & Telemetry -->
+      <button id="btn-controls-help" class="floating-help-btn" onclick="toggleControlsHelp()" title="3D Navigation Controls Help">
+        <span id="lbl-help-text">Help</span>
       </button>
 
-      <!-- Real-time Cyber Telemetry Display -->
-      <div id="cyber-telemetry" class="cyber-telemetry-hud">
+      <!-- Clean 3D Telemetry Bar -->
+      <div id="graph-telemetry" class="graph-telemetry-bar">
         <div class="telemetry-item"><span class="t-key">POS:</span> <span id="t-pos" class="t-val">0, 0, 100</span></div>
-        <div class="telemetry-item"><span class="t-key">DIST:</span> <span id="t-dist" class="t-val">100u</span></div>
-        <div class="telemetry-item"><span class="t-key">SPEED:</span> <span id="t-speed" class="t-val t-normal">1.0x</span></div>
-        <div class="telemetry-item"><span class="t-key">LOCK:</span> <span id="t-lock" class="t-val t-node">NONE</span></div>
+        <div class="telemetry-item"><span class="t-key">DIST:</span> <span id="t-dist" class="t-val">100</span></div>
+        <div class="telemetry-item"><span class="t-key">SPEED:</span> <span id="t-speed" class="t-val">1.0x</span></div>
+        <div class="telemetry-item"><span class="t-key">TARGET:</span> <span id="t-lock" class="t-val">ALL</span></div>
       </div>
 
-      <!-- Cyberpunk Keymap Hologram HUD Overlay -->
-      <div id="cyber-hud-overlay" class="cyber-hud-overlay hidden">
-        <div class="cyber-hud-glass">
-          <div class="cyber-hud-header">
-            <div class="cyber-hud-title">
-              <span class="cyber-glow-dot"></span>
-              <span id="cyber-hud-heading">CYBERPUNK 3D TACTICAL CONTROLS</span>
-            </div>
-            <button class="cyber-hud-close" onclick="toggleCyberHud(false)">✕</button>
+      <!-- Professional 3D Navigation Controls Modal -->
+      <div id="controls-help-modal" class="controls-modal-backdrop hidden">
+        <div class="controls-modal-dialog">
+          <div class="controls-modal-header">
+            <h3 id="help-modal-title">3D Navigation Controls</h3>
+            <button class="controls-modal-close" onclick="toggleControlsHelp(false)">✕</button>
           </div>
           
-          <div class="cyber-hud-grid">
-            <div class="cyber-hud-section">
-              <div class="section-badge" id="hud-sec-flight">🚀 FLIGHT & THRUSTERS (鍵盤飛行)</div>
-              <div class="key-row"><div class="key-combo"><kbd>W</kbd><kbd>S</kbd></div><span class="key-desc" id="hud-k-ws">Forward / Backward Thrust (推進 / 倒退)</span></div>
-              <div class="key-row"><div class="key-combo"><kbd>A</kbd><kbd>D</kbd></div><span class="key-desc" id="hud-k-ad">Lateral Strafe Left / Right (左移 / 右移)</span></div>
-              <div class="key-row"><div class="key-combo"><kbd>Q</kbd><kbd>E</kbd></div><span class="key-desc" id="hud-k-qe">Yaw Orbit Rotate (左右環繞視角)</span></div>
-              <div class="key-row"><div class="key-combo"><kbd>R</kbd><kbd>F</kbd></div><span class="key-desc" id="hud-k-rf">Elevate Up / Down (垂直升降)</span></div>
-              <div class="key-row"><div class="key-combo"><kbd>Shift</kbd></div><span class="key-desc" id="hud-k-shift">Hyper-Speed Boost 2.5x (曲速加速)</span></div>
-              <div class="key-row"><div class="key-combo"><kbd>Space</kbd></div><span class="key-desc" id="hud-k-space">Tactical Brake & Align (戰術減速對齊)</span></div>
+          <div class="controls-modal-body">
+            <div class="controls-section">
+              <div class="controls-section-title" id="help-sec-keyboard">Keyboard Navigation</div>
+              <div class="control-row"><div class="key-tags"><kbd>W</kbd><kbd>S</kbd></div><span class="control-desc" id="k-ws">Forward / Backward</span></div>
+              <div class="control-row"><div class="key-tags"><kbd>A</kbd><kbd>D</kbd></div><span class="control-desc" id="k-ad">Strafe Left / Right</span></div>
+              <div class="control-row"><div class="key-tags"><kbd>Q</kbd><kbd>E</kbd></div><span class="control-desc" id="k-qe">Elevate Up / Down</span></div>
+              <div class="control-row"><div class="key-tags"><kbd>Shift</kbd></div><span class="control-desc" id="k-shift">Boost Speed (2.5x)</span></div>
+              <div class="control-row"><div class="key-tags"><kbd>Space</kbd></div><span class="control-desc" id="k-space">Brake / Stop</span></div>
             </div>
 
-            <div class="cyber-hud-section">
-              <div class="section-badge" id="hud-sec-target">🎯 TARGETING & WARP (目標跳躍)</div>
-              <div class="key-row"><div class="key-combo"><kbd>Tab</kbd></div><span class="key-desc" id="hud-k-tab">Hyper-Jump to Next Linked Node (跳躍至關聯節點)</span></div>
-              <div class="key-row"><div class="key-combo"><kbd>C</kbd></div><span class="key-desc" id="hud-k-c">Center Focus on Active Node / Galaxy (鎖定置中)</span></div>
-              <div class="key-row"><div class="key-combo"><kbd>F</kbd></div><span class="key-desc" id="hud-k-f">Auto-Frame Galaxy Overview (全景最適化)</span></div>
-              <div class="key-row"><div class="key-combo"><kbd>T</kbd></div><span class="key-desc" id="hud-k-t">Toggle Quantum Orbit Rotation (開關自動旋轉)</span></div>
-              <div class="key-row"><div class="key-combo"><kbd>1</kbd><kbd>2</kbd><kbd>3</kbd></div><span class="key-desc" id="hud-k-123">Switch LOD Level: Arch / Standard / All (切換層級)</span></div>
-              <div class="key-row"><div class="key-combo"><kbd>H</kbd> / <kbd>?</kbd></div><span class="key-desc" id="hud-k-h">Toggle Cyber Controls HUD (切換本指南)</span></div>
+            <div class="controls-section">
+              <div class="controls-section-title" id="help-sec-view">View & LOD Controls</div>
+              <div class="control-row"><div class="key-tags"><kbd>C</kbd></div><span class="control-desc" id="k-c">Center on Active Node / Graph</span></div>
+              <div class="control-row"><div class="key-tags"><kbd>F</kbd></div><span class="control-desc" id="k-f">Fit Entire Graph</span></div>
+              <div class="control-row"><div class="key-tags"><kbd>1</kbd><kbd>2</kbd><kbd>3</kbd></div><span class="control-desc" id="k-lod">Switch LOD Level (Arch / Standard / All)</span></div>
             </div>
 
-            <div class="cyber-hud-section full-width">
-              <div class="section-badge" id="hud-sec-mouse">🖱️ MOUSE GESTURES (滑鼠戰術手勢)</div>
-              <div class="mouse-grid">
-                <div class="mouse-item"><span class="m-action">左鍵點擊節點</span> <span class="m-effect">精準鎖定 & 同步導航</span></div>
-                <div class="mouse-item"><span class="m-action">滑鼠右鍵拖曳</span> <span class="m-effect">360° 自由環繞旋轉</span></div>
-                <div class="mouse-item"><span class="m-action">中鍵 / Shift+左鍵</span> <span class="m-effect">平移視角 (Pan View)</span></div>
-                <div class="mouse-item"><span class="m-action">滑鼠雙擊背景</span> <span class="m-effect">重設星系中心與鏡頭</span></div>
+            <div class="controls-section full-width">
+              <div class="controls-section-title" id="help-sec-mouse">Mouse Controls</div>
+              <div class="mouse-controls-grid">
+                <div class="mouse-cell"><span class="m-title" id="m-click-title">Left Click</span><span class="m-sub" id="m-click-desc">Select Node & Sync Markdown</span></div>
+                <div class="mouse-cell"><span class="m-title" id="m-right-title">Right Click Drag</span><span class="m-sub" id="m-right-desc">Rotate / Orbit View</span></div>
+                <div class="mouse-cell"><span class="m-title" id="m-pan-title">Middle Click / Shift + Drag</span><span class="m-sub" id="m-pan-desc">Pan View</span></div>
+                <div class="mouse-cell"><span class="m-title" id="m-dbl-title">Double Click</span><span class="m-sub" id="m-dbl-desc">Reset View to Center</span></div>
               </div>
             </div>
+          </div>
+          
+          <div class="controls-modal-footer">
+            <span id="help-footer-text">Press Esc to close</span>
+          </div>
+        </div>
+      </div>
           </div>
           
           <div class="cyber-hud-footer">
@@ -315,6 +313,6 @@ if (window.THREE && !window.THREE.Timer) {
 
 <div id="toast"></div>
 
-<script src="/static/docgraph.js?v=3.8.0"></script>
+<script src="/static/docgraph.js?v=3.8.1"></script>
 </body>
 </html>

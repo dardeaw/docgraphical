@@ -48,7 +48,7 @@ const EDGE_COLORS = {
 
 document.addEventListener('DOMContentLoaded', () => {
   try { init3DGraph(); } catch (e) { console.error('init3DGraph error:', e); }
-  try { initCyberControls(); } catch (e) { console.error('initCyberControls error:', e); }
+  try { init3DNavControls(); } catch (e) { console.error('initCyberControls error:', e); }
   try { initAutoRotate(); } catch (e) { console.error('initAutoRotate error:', e); }
   try { initColumnResizers(); } catch (e) { console.error('initColumnResizers error:', e); }
   try { initSearch(); } catch (e) { console.error('initSearch error:', e); }
@@ -1197,12 +1197,12 @@ function togglePanelsSwap() {
   }
 
   updateSwapButtonI18n();
-  updateCyberHudI18n();
+  updateControlsHelpI18n();
 
   if (!isSwapped) {
-    showToast(currentLanguage === 'zh' ? '🔄 3D 拓撲已置中，Markdown 移至右側' : '🔄 3D Topology centered, Markdown in right panel');
+    showToast(currentLanguage === 'zh' ? '3D 圖已置中，Markdown 移至右側' : '3D Graph centered, Markdown in right panel');
   } else {
-    showToast(currentLanguage === 'zh' ? '🔄 已恢復標準版面配置' : '🔄 Standard layout restored');
+    showToast(currentLanguage === 'zh' ? '已恢復標準版面配置' : 'Standard layout restored');
   }
 
   // Preserve center node focus and adjust 3D viewport dimensions smoothly
@@ -1547,7 +1547,7 @@ function toggleLanguage() {
   const b = document.getElementById('btn-lang');
   if (b) b.textContent = `Language: ${currentLanguage.toUpperCase()}`;
   updateSwapButtonI18n();
-  updateCyberHudI18n();
+  updateControlsHelpI18n();
   showToast(currentLanguage === 'zh' ? '語系切換：繁體中文' : 'Language switched to English');
 }
 
@@ -1556,77 +1556,61 @@ function escapeHtml(str) {
 }
 
 
-// ─── 1.1 Cyberpunk 3D Tactical Controls & Telemetry Engine ────────
-let isCyberHudOpen = false;
-let cyberKeys = {};
+
+// ─── 1.1 3D Navigation Controls & Help Modal ──────────────────────
+let isControlsHelpOpen = false;
+let navKeys = {};
 let flightVel = null;
 let flightTargetVel = null;
 let isMouseIn3DPane = false;
-let neighborIndex = 0;
 
-function toggleCyberHud(forceState) {
-  const overlay = document.getElementById('cyber-hud-overlay');
-  if (!overlay) return;
+function toggleControlsHelp(forceState) {
+  const modal = document.getElementById('controls-help-modal');
+  if (!modal) return;
   if (typeof forceState === 'boolean') {
-    isCyberHudOpen = forceState;
+    isControlsHelpOpen = forceState;
   } else {
-    isCyberHudOpen = !isCyberHudOpen;
+    isControlsHelpOpen = !isControlsHelpOpen;
   }
   
-  if (isCyberHudOpen) {
-    overlay.classList.remove('hidden');
+  if (isControlsHelpOpen) {
+    modal.classList.remove('hidden');
+    updateControlsHelpI18n();
   } else {
-    overlay.classList.add('hidden');
+    modal.classList.add('hidden');
   }
 }
 
-function initCyberControls() {
+function init3DNavControls() {
   const pane3D = document.getElementById('viewport-3d-pane');
   const canvasElem = document.getElementById('3d-graph');
   if (!pane3D || !canvasElem) return;
 
-  // Track hover status
   pane3D.addEventListener('mouseenter', () => { isMouseIn3DPane = true; });
   pane3D.addEventListener('mouseleave', () => { 
     isMouseIn3DPane = false; 
-    cyberKeys = {}; 
+    navKeys = {}; 
   });
 
-  // Track key states
   window.addEventListener('keydown', (e) => {
-    // Ignore input events when user is typing in forms/search/modals
     const targetTag = (e.target && e.target.tagName) ? e.target.tagName.toLowerCase() : '';
     if (targetTag === 'input' || targetTag === 'textarea' || targetTag === 'select' || (e.target && e.target.isContentEditable)) {
       return;
     }
 
     const code = e.code;
-    cyberKeys[code] = true;
+    navKeys[code] = true;
 
-    // Hotkey: H or / or ? to toggle Cyber HUD
-    if (code === 'KeyH' || (code === 'Slash' && e.shiftKey)) {
-      e.preventDefault();
-      toggleCyberHud();
-      return;
-    }
-
-    // Hotkey: Escape
+    // Escape closes modal
     if (code === 'Escape') {
-      if (isCyberHudOpen) {
-        toggleCyberHud(false);
+      if (isControlsHelpOpen) {
+        toggleControlsHelp(false);
         e.preventDefault();
         return;
       }
     }
 
-    // Hotkey: Tab to cycle through connected neighbor nodes (Hyper-Jump)
-    if (code === 'Tab') {
-      e.preventDefault();
-      hyperJumpNeighbor();
-      return;
-    }
-
-    // Hotkeys active when hovering 3D canvas or active node exists
+    // View control hotkeys
     if (code === 'KeyC') {
       e.preventDefault();
       if (activeNode) {
@@ -1637,10 +1621,6 @@ function initCyberControls() {
     } else if (code === 'KeyF') {
       e.preventDefault();
       autoFrameGraph();
-    } else if (code === 'KeyT') {
-      e.preventDefault();
-      isRotating = !isRotating;
-      showToast(isRotating ? (currentLanguage === 'zh' ? '已啟動量子環繞巡航' : 'Quantum Auto-Orbit Engaged') : (currentLanguage === 'zh' ? '已解除自動巡航' : 'Auto-Orbit Disengaged'));
     } else if (code === 'Digit1') {
       changeLOD('arch');
     } else if (code === 'Digit2') {
@@ -1650,7 +1630,6 @@ function initCyberControls() {
     } else if (code === 'Space') {
       if (isMouseIn3DPane) {
         e.preventDefault();
-        // Tactical brake
         if (flightVel) flightVel.set(0, 0, 0);
         if (flightTargetVel) flightTargetVel.set(0, 0, 0);
       }
@@ -1658,52 +1637,19 @@ function initCyberControls() {
   });
 
   window.addEventListener('keyup', (e) => {
-    delete cyberKeys[e.code];
+    delete navKeys[e.code];
   });
 
-  // Double click canvas to re-center
+  // Double click canvas to reset view
   canvasElem.addEventListener('dblclick', (e) => {
     e.preventDefault();
     autoFrameGraph();
   });
 
-  // Start continuous Cyber Thruster Loop
-  requestAnimationFrame(cyberFlightLoop);
+  requestAnimationFrame(navFlightLoop);
 }
 
-function hyperJumpNeighbor() {
-  if (!rawData.nodes || rawData.nodes.length === 0) return;
-
-  let candidateNodes = [];
-  if (activeNode) {
-    const rawLinks = rawData.links || [];
-    rawLinks.forEach(l => {
-      const sId = typeof l.source === 'object' ? l.source.id : l.source;
-      const tId = typeof l.target === 'object' ? l.target.id : l.target;
-      if (sId === activeNode.id) {
-        const neighbor = rawData.nodes.find(n => n.id === tId);
-        if (neighbor && !candidateNodes.includes(neighbor)) candidateNodes.push(neighbor);
-      } else if (tId === activeNode.id) {
-        const neighbor = rawData.nodes.find(n => n.id === sId);
-        if (neighbor && !candidateNodes.includes(neighbor)) candidateNodes.push(neighbor);
-      }
-    });
-  }
-
-  if (candidateNodes.length === 0) {
-    // If no neighbors or no activeNode, cycle through top files/H1
-    candidateNodes = rawData.nodes.filter(n => n.kind === 'file' || n.kind === 'heading_1');
-  }
-
-  if (candidateNodes.length > 0) {
-    neighborIndex = (neighborIndex + 1) % candidateNodes.length;
-    const targetNode = candidateNodes[neighborIndex];
-    selectActiveNode(targetNode);
-    showToast(`${currentLanguage === 'zh' ? '曲速鎖定' : 'Warp Target'}: ${targetNode.name}`);
-  }
-}
-
-function cyberFlightLoop() {
+function navFlightLoop() {
   if (Graph && typeof THREE !== 'undefined') {
     const camera = Graph.camera();
     const controls = Graph.controls();
@@ -1714,15 +1660,14 @@ function cyberFlightLoop() {
 
       flightTargetVel.set(0, 0, 0);
 
-      // Check if flying (WASD / QE / RF)
-      const hasMovementKeys = cyberKeys['KeyW'] || cyberKeys['KeyS'] || cyberKeys['KeyA'] || cyberKeys['KeyD'] ||
-                              cyberKeys['KeyQ'] || cyberKeys['KeyE'] || cyberKeys['KeyR'] || cyberKeys['KeyF'];
+      // WASD for horizontal fly & strafe, QE for elevate up / down
+      const hasMovement = navKeys['KeyW'] || navKeys['KeyS'] || navKeys['KeyA'] || navKeys['KeyD'] ||
+                          navKeys['KeyQ'] || navKeys['KeyE'];
 
-      if (hasMovementKeys && (isMouseIn3DPane || document.activeElement === document.body)) {
-        const isTurbo = cyberKeys['ShiftLeft'] || cyberKeys['ShiftRight'];
-        const baseSpeed = isTurbo ? 2.6 : 1.0;
+      if (hasMovement && (isMouseIn3DPane || document.activeElement === document.body)) {
+        const isBoost = navKeys['ShiftLeft'] || navKeys['ShiftRight'];
+        const baseSpeed = isBoost ? 2.5 : 1.0;
 
-        // Camera direction vectors
         const dir = new THREE.Vector3();
         camera.getWorldDirection(dir);
 
@@ -1730,28 +1675,18 @@ function cyberFlightLoop() {
         const right = new THREE.Vector3().crossVectors(dir, up).normalize();
 
         // Forward / Backward (W / S)
-        if (cyberKeys['KeyW']) flightTargetVel.addScaledVector(dir, baseSpeed);
-        if (cyberKeys['KeyS']) flightTargetVel.addScaledVector(dir, -baseSpeed);
+        if (navKeys['KeyW']) flightTargetVel.addScaledVector(dir, baseSpeed);
+        if (navKeys['KeyS']) flightTargetVel.addScaledVector(dir, -baseSpeed);
 
         // Strafe Left / Right (A / D)
-        if (cyberKeys['KeyA']) flightTargetVel.addScaledVector(right, -baseSpeed);
-        if (cyberKeys['KeyD']) flightTargetVel.addScaledVector(right, baseSpeed);
+        if (navKeys['KeyA']) flightTargetVel.addScaledVector(right, -baseSpeed);
+        if (navKeys['KeyD']) flightTargetVel.addScaledVector(right, baseSpeed);
 
-        // Elevate Up / Down (R / F)
-        if (cyberKeys['KeyR']) flightTargetVel.addScaledVector(up, baseSpeed * 0.8);
-        if (cyberKeys['KeyF']) flightTargetVel.addScaledVector(up, -baseSpeed * 0.8);
-
-        // Yaw Orbit (Q / E)
-        if (cyberKeys['KeyQ'] || cyberKeys['KeyE']) {
-          const yawSpeed = (cyberKeys['KeyQ'] ? 0.025 : -0.025) * (isTurbo ? 1.8 : 1.0);
-          const offset = camera.position.clone().sub(controls.target);
-          offset.applyAxisAngle(up, yawSpeed);
-          camera.position.copy(controls.target).add(offset);
-          camera.lookAt(controls.target);
-        }
+        // Elevate Up / Down (Q / E)
+        if (navKeys['KeyQ']) flightTargetVel.addScaledVector(up, baseSpeed * 0.9);
+        if (navKeys['KeyE']) flightTargetVel.addScaledVector(up, -baseSpeed * 0.9);
       }
 
-      // Smooth damping interpolation
       flightVel.lerp(flightTargetVel, 0.18);
 
       if (flightVel.lengthSq() > 0.0001) {
@@ -1759,19 +1694,18 @@ function cyberFlightLoop() {
         controls.target.add(flightVel);
       }
 
-      // Update Telemetry Bar at bottom left
-      updateCyberTelemetry(camera, controls);
+      updateNavTelemetry(camera, controls);
     }
   }
 
-  requestAnimationFrame(cyberFlightLoop);
+  requestAnimationFrame(navFlightLoop);
 }
 
-let lastTelemetryTime = 0;
-function updateCyberTelemetry(camera, controls) {
+let lastNavTelemetryTime = 0;
+function updateNavTelemetry(camera, controls) {
   const now = performance.now();
-  if (now - lastTelemetryTime < 60) return; // limit to ~16 updates/sec for ultra performance
-  lastTelemetryTime = now;
+  if (now - lastNavTelemetryTime < 60) return;
+  lastNavTelemetryTime = now;
 
   const posEl = document.getElementById('t-pos');
   const distEl = document.getElementById('t-dist');
@@ -1783,70 +1717,109 @@ function updateCyberTelemetry(camera, controls) {
   }
   if (distEl && camera && controls) {
     const d = Math.round(camera.position.distanceTo(controls.target));
-    distEl.textContent = `${d}u`;
+    distEl.textContent = `${d}`;
   }
   if (speedEl) {
-    const isTurbo = cyberKeys['ShiftLeft'] || cyberKeys['ShiftRight'];
-    if (isTurbo) {
-      speedEl.textContent = '2.5x TURBO';
-      speedEl.className = 't-val t-turbo';
+    const isBoost = navKeys['ShiftLeft'] || navKeys['ShiftRight'];
+    if (isBoost) {
+      speedEl.textContent = '2.5x';
+      speedEl.className = 't-val t-boost';
     } else {
       speedEl.textContent = '1.0x';
-      speedEl.className = 't-val t-normal';
+      speedEl.className = 't-val';
     }
   }
   if (lockEl) {
     if (activeNode) {
       lockEl.textContent = activeNode.name;
     } else {
-      lockEl.textContent = 'GALAXY';
+      lockEl.textContent = currentLanguage === 'zh' ? '全景' : 'ALL';
     }
   }
 }
 
+function updateControlsHelpI18n() {
+  const lblHelp = document.getElementById('lbl-help-text');
+  const btnHelp = document.getElementById('btn-controls-help');
+  const modalTitle = document.getElementById('help-modal-title');
+  const secKb = document.getElementById('help-sec-keyboard');
+  const secView = document.getElementById('help-sec-view');
+  const secMouse = document.getElementById('help-sec-mouse');
 
-function updateCyberHudI18n() {
-  const lblHud = document.getElementById('lbl-cyber-hud');
-  const btnHud = document.getElementById('btn-cyber-hud');
-  const heading = document.getElementById('cyber-hud-heading');
-  const secFlight = document.getElementById('hud-sec-flight');
-  const secTarget = document.getElementById('hud-sec-target');
-  const secMouse = document.getElementById('hud-sec-mouse');
+  const kWs = document.getElementById('k-ws');
+  const kAd = document.getElementById('k-ad');
+  const kQe = document.getElementById('k-qe');
+  const kShift = document.getElementById('k-shift');
+  const kSpace = document.getElementById('k-space');
+  const kC = document.getElementById('k-c');
+  const kF = document.getElementById('k-f');
+  const kLod = document.getElementById('k-lod');
+  const footer = document.getElementById('help-footer-text');
 
-  const kWs = document.getElementById('hud-k-ws');
-  const kAd = document.getElementById('hud-k-ad');
-  const kQe = document.getElementById('hud-k-qe');
-  const kRf = document.getElementById('hud-k-rf');
-  const kShift = document.getElementById('hud-k-shift');
-  const kSpace = document.getElementById('hud-k-space');
-  const kTab = document.getElementById('hud-k-tab');
-  const kC = document.getElementById('hud-k-c');
-  const kF = document.getElementById('hud-k-f');
-  const kT = document.getElementById('hud-k-t');
-  const k123 = document.getElementById('hud-k-123');
-  const kH = document.getElementById('hud-k-h');
+  const mClickT = document.getElementById('m-click-title');
+  const mClickD = document.getElementById('m-click-desc');
+  const mRightT = document.getElementById('m-right-title');
+  const mRightD = document.getElementById('m-right-desc');
+  const mPanT = document.getElementById('m-pan-title');
+  const mPanD = document.getElementById('m-pan-desc');
+  const mDblT = document.getElementById('m-dbl-title');
+  const mDblD = document.getElementById('m-dbl-desc');
 
   if (currentLanguage === 'zh') {
-    if (lblHud) lblHud.textContent = '鍵鼠操控';
-    if (btnHud) btnHud.title = '切換 3D 戰術操控指南 [H]';
-    if (heading) heading.textContent = '⚡ CYBERPUNK 3D 戰術鍵鼠操控系統';
-    if (secFlight) secFlight.textContent = '🚀 推進與飛行操控 (FLIGHT & THRUSTERS)';
-    if (secTarget) secTarget.textContent = '🎯 目標鎖定與跳躍 (TARGETING & WARP)';
-    if (secMouse) secMouse.textContent = '🖱️ 滑鼠戰術手勢 (MOUSE GESTURES)';
+    if (lblHelp) lblHelp.textContent = '操作說明';
+    if (btnHelp) btnHelp.title = '3D 導航操控說明';
+    if (modalTitle) modalTitle.textContent = '3D 視角與導航操作說明';
+    if (secKb) secKb.textContent = '鍵盤導航操作';
+    if (secView) secView.textContent = '視圖與層級控制';
+    if (secMouse) secMouse.textContent = '滑鼠操作';
 
-    if (kWs) kWs.textContent = '前進 / 倒退推進推進 (Forward / Back)';
-    if (kAd) kAd.textContent = '橫向平移 左移 / 右移 (Strafe)';
-    if (kQe) kQe.textContent = '視角左右環繞旋轉 (Yaw Orbit)';
-    if (kRf) kRf.textContent = '垂直升降 上升 / 下降 (Elevate)';
-    if (kShift) kShift.textContent = '曲速推力加速 2.5x (Hyper Boost)';
-    if (kSpace) kSpace.textContent = '戰術減速煞車 / 對齊 (Brake)';
-    if (kTab) kTab.textContent = '曲速跳躍至下一個關聯節點 (Jump Link)';
-    if (kC) kC.textContent = '鏡頭重設並鎖定至目標 / 星系中心 (Center)';
-    if (kF) kF.textContent = '全景星系視野最適化 (Auto-Frame)';
-    if (kT) kT.textContent = '開關量子自動環繞巡航 (Quantum Orbit)';
-    if (k123) k123.textContent = '切換 LOD 層級: 宏觀架構 / 標準 / 全景';
-    if (kH) kH.textContent = '開關本戰術操控指南 HUD (Toggle Guide)';
+    if (kWs) kWs.textContent = '前進 / 後退';
+    if (kAd) kAd.textContent = '向左平移 / 向右平移';
+    if (kQe) kQe.textContent = '視角上升 / 視角下降';
+    if (kShift) kShift.textContent = '加速移動 (2.5倍)';
+    if (kSpace) kSpace.textContent = '減速煞車';
+    if (kC) kC.textContent = '鏡頭置中並對齊目標節點';
+    if (kF) kF.textContent = '全景視野最適化';
+    if (kLod) kLod.textContent = '切換層級 (架構 / 標準 / 全部)';
+    if (footer) footer.textContent = '按 Esc 或點擊關閉按鈕';
+
+    if (mClickT) mClickT.textContent = '滑鼠左鍵點擊';
+    if (mClickD) mClickD.textContent = '選取節點並同步章節內容';
+    if (mRightT) mRightT.textContent = '滑鼠右鍵拖曳';
+    if (mRightD) mRightD.textContent = '360度環繞旋轉視角';
+    if (mPanT) mPanT.textContent = '滑鼠中鍵 / Shift + 左鍵';
+    if (mPanD) mPanD.textContent = '平移視角';
+    if (mDblT) mDblT.textContent = '雙擊背景';
+    if (mDblD) mDblD.textContent = '重設全景中心視野';
   } else {
+    if (lblHelp) lblHelp.textContent = 'Help';
+    if (btnHelp) btnHelp.title = '3D Navigation Controls Help';
+    if (modalTitle) modalTitle.textContent = '3D Navigation Controls';
+    if (secKb) secKb.textContent = 'Keyboard Navigation';
+    if (secView) secView.textContent = 'View & LOD Controls';
+    if (secMouse) secMouse.textContent = 'Mouse Controls';
+
+    if (kWs) kWs.textContent = 'Forward / Backward';
+    if (kAd) kAd.textContent = 'Strafe Left / Right';
+    if (kQe) kQe.textContent = 'Elevate Up / Down';
+    if (kShift) kShift.textContent = 'Boost Speed (2.5x)';
+    if (kSpace) kSpace.textContent = 'Brake / Stop';
+    if (kC) kC.textContent = 'Center on Active Node / Graph';
+    if (kF) kF.textContent = 'Fit Entire Graph';
+    if (kLod) kLod.textContent = 'Switch LOD Level (Arch / Standard / All)';
+    if (footer) footer.textContent = 'Press Esc to close';
+
+    if (mClickT) mClickT.textContent = 'Left Click';
+    if (mClickD) mClickD.textContent = 'Select Node & Sync Markdown';
+    if (mRightT) mRightT.textContent = 'Right Click Drag';
+    if (mRightD) mRightD.textContent = 'Rotate / Orbit View';
+    if (mPanT) mPanT.textContent = 'Middle Click / Shift + Drag';
+    if (mPanD) mPanD.textContent = 'Pan View';
+    if (mDblT) mDblT.textContent = 'Double Click';
+    if (mDblD) mDblD.textContent = 'Reset View to Center';
+  }
+}
+ else {
     if (lblHud) lblHud.textContent = 'CYBER NAV';
     if (btnHud) btnHud.title = 'Toggle Cyber Controls Guide [H]';
     if (heading) heading.textContent = 'CYBERPUNK 3D TACTICAL CONTROLS';
