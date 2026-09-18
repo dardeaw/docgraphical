@@ -1,5 +1,7 @@
 # DocGraphical
 
+[English](README.md) | [繁體中文](README.zh-TW.md)
+
 A deterministic Markdown Abstract Syntax Tree (AST) analyzer, surgical section slicer, and 3D visual knowledge graph studio designed for LLM coding agents, RAG pipelines, and enterprise engineering workflows.
 
 ---

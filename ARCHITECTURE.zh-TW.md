@@ -1,5 +1,7 @@
 # DocGraphical 系統架構規格說明書
 
+[繁體中文](ARCHITECTURE.zh-TW.md) | [English](ARCHITECTURE.md)
+
 本文件詳盡闡述 DocGraphical 之內部軟體架構、語法解析狀態機演算法、資料模型與元件交互設計。
 
 ---

@@ -1,5 +1,7 @@
 # 版本變更記錄
 
+[繁體中文](CHANGELOG.zh-TW.md) | [English](CHANGELOG.md)
+
 本文件記錄 DocGraphical 專案的所有重要版本演進與功能變更。
 
 格式遵循 [Keep a Changelog](https://keepachangelog.com/zh-TW/1.0.0/)，並嚴格遵循 [語意化版本 (Semantic Versioning)](https://semver.org/lang/zh-TW/) 規範。

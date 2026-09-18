@@ -1,5 +1,7 @@
 # DocGraphical
 
+[繁體中文](README.zh-TW.md) | [English](README.md)
+
 專為大型語言模型程式代理（LLM Coding Agents）、檢索增強生成（RAG）管線與大型工程規格文檔設計的確定性 Markdown 抽象語法樹（AST）解析、精準切片引擎與 3D 知識圖譜工作站。
 
 ---

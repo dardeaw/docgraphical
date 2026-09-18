@@ -1,5 +1,7 @@
 # DocGraphical 貢獻指南
 
+[繁體中文](CONTRIBUTING.zh-TW.md) | [English](CONTRIBUTING.md)
+
 感謝您對 DocGraphical 專案的關注與支持。我們竭誠歡迎社群貢獻，共同推動 Markdown 抽象語法樹解析、Token 節約技術與 AI 代理生態的繁榮發展。
 
 ---

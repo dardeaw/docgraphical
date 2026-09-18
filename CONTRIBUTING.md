@@ -1,5 +1,7 @@
 # Contributing to DocGraphical
 
+[English](CONTRIBUTING.md) | [繁體中文](CONTRIBUTING.zh-TW.md)
+
 Thank you for your interest in contributing to DocGraphical. We welcome contributions from the community to help make documentation parsing faster, more precise, and more efficient for AI agents and human developers alike.
 
 ---

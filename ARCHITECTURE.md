@@ -1,5 +1,7 @@
 # DocGraphical Architecture Specification
 
+[English](ARCHITECTURE.md) | [繁體中文](ARCHITECTURE.zh-TW.md)
+
 This document provides a comprehensive technical overview of the internal architecture, parsing algorithms, data models, and component interactions within DocGraphical.
 
 ---
