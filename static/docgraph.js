@@ -311,10 +311,10 @@ function updateLabelsVisibility() {
         n.__labelSprite.backgroundColor = 'rgba(10, 14, 20, 0.85)';
       } else {
         if (isRevealed) {
-          // Revealed Shrine: prominent white text on dark blue glass
+          // Revealed Shrine: Strictly preserve original AST kind color (H1=blue, H2=green, H3=purple, File=orange, etc.)
           if (n.__labelSprite.material) n.__labelSprite.material.opacity = 1.0;
-          n.__labelSprite.color = '#ffffff';
-          n.__labelSprite.backgroundColor = 'rgba(13, 22, 38, 0.95)';
+          n.__labelSprite.color = KIND_COLORS[n.kind] || '#58a6ff';
+          n.__labelSprite.backgroundColor = 'rgba(10, 14, 20, 0.92)';
         } else if (isHighlighted && isFile) {
           if (n.__labelSprite.material) n.__labelSprite.material.opacity = 0.92;
           n.__labelSprite.color = KIND_COLORS[n.kind] || '#f0883e';
