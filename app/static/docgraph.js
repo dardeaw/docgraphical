@@ -790,17 +790,47 @@ function selectTreeNode(el) {
 function syncExplorerSelection(node) {
   if (!node) return;
   const cleanPath = (node.file || '').replace(/\\/g, '/');
+  const projName = getNodeProject(node);
   let targetEl = null;
 
-  if (node.kind === 'file') {
-    targetEl = document.querySelector(`[data-tree-file$="${cleanPath}"]`);
-  } else {
-    targetEl = document.querySelector(`[data-tree-node-id="${node.id}"]`);
+  // 1. Direct match by exact node ID (file or heading) across all tree nodes
+  if (node.id) {
+    const allNodes = document.querySelectorAll('#tree-container .tree-node');
+    for (const el of allNodes) {
+      if (el.getAttribute('data-tree-node-id') === node.id) {
+        targetEl = el;
+        break;
+      }
+    }
   }
 
+  // 2. Exact match by project and exact file path for file nodes
+  if (!targetEl && (node.kind === 'file' || cleanPath)) {
+    const allFileEls = document.querySelectorAll('#tree-container [data-tree-file]');
+    for (const el of allFileEls) {
+      const elNodeId = el.getAttribute('data-tree-node-id') || '';
+      const elProj = el.getAttribute('data-tree-proj') || '';
+      const elFilePath = el.getAttribute('data-tree-file-path') || '';
+      const elFileKey = el.getAttribute('data-tree-file') || '';
+
+      if (node.id && elNodeId === node.id) {
+        targetEl = el;
+        break;
+      }
+      if (projName && elProj === projName && (elFilePath === cleanPath || elFileKey === `${projName}:${cleanPath}`)) {
+        targetEl = el;
+        break;
+      }
+      if (elFilePath === cleanPath) {
+        targetEl = el;
+        break;
+      }
+    }
+  }
+
+  // 3. Highlight and open all ancestor parent containers
   if (targetEl) {
     selectTreeNode(targetEl);
-    targetEl.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
 
     // Open parents recursively
     let p = targetEl.parentElement;
@@ -815,6 +845,8 @@ function syncExplorerSelection(node) {
       }
       p = p.parentElement;
     }
+
+    targetEl.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
   }
 }
 
