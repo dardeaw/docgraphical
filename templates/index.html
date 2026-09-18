@@ -34,7 +34,7 @@ if (window.THREE && !window.THREE.Timer) {
 </script>
 <script src="/static/three-spritetext.min.js"></script>
 <script src="/static/3d-force-graph.min.js"></script>
-<link rel="stylesheet" href="/static/galaxy.css?v=3.6.0">
+<link rel="stylesheet" href="/static/galaxy.css?v=3.7.0">
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark-dimmed.min.css">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
@@ -98,56 +98,59 @@ if (window.THREE && !window.THREE.Timer) {
   <!-- Resizer 1: Between Tree and Doc -->
   <div class="column-resizer" id="resizer-tree-doc"></div>
 
-  <!-- Column 2: Center Markdown Reader & Slicer (Primary Main Stage) -->
-  <div id="doc-panel">
-    <!-- Doc Header -->
-    <div class="doc-panel-header">
-      <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:4px;">
-        <div style="display:flex; align-items:center; gap:8px; flex:1; min-width:0;">
-          <span class="node-kind-tag" id="d-kind-badge" style="background:#f0883e;">DOC</span>
-          <span class="doc-title-text" id="d-name">Select a document or section</span>
+  <!-- Column 2: Center Stage Area (Hosts Markdown Reader OR 3D Canvas when swapped) -->
+  <div id="stage-col-center">
+    <!-- Center Content Slot (By default holds Markdown Reader) -->
+    <div id="doc-panel">
+      <!-- Doc Header -->
+      <div class="doc-panel-header">
+        <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:4px;">
+          <div style="display:flex; align-items:center; gap:8px; flex:1; min-width:0;">
+            <span class="node-kind-tag" id="d-kind-badge" style="background:#f0883e;">DOC</span>
+            <span class="doc-title-text" id="d-name">Select a document or section</span>
+          </div>
+        </div>
+        <div class="doc-sub-text" id="d-sub">Select an item from the left Explorer or the 3D topology</div>
+
+        <!-- Token Intelligence Metric -->
+        <div class="doc-token-bar">
+          <div style="display:flex; justify-content:space-between; font-size:11px; margin-bottom:3px;">
+            <span>⚡ Token Efficiency: <b id="stat-savings-badge" style="color:#00ffaa;">0.0%</b> saved</span>
+            <span>Full: <b id="stat-full-tokens" style="color:#c9d1d9;">0</b> · Sliced: <b id="stat-sliced-tokens" style="color:#00ffaa;">0</b> tokens</span>
+          </div>
+          <div class="token-fill-track">
+            <div id="stat-savings-fill" class="token-fill-bar" style="width:0%;"></div>
+          </div>
+        </div>
+
+        <!-- Action Bar -->
+        <div class="doc-action-bar">
+          <span style="font-size:11px; font-weight:600; color:#8b949e;" id="d-code-title">🗡️ Sliced Section Markdown</span>
+          <div style="display:flex; gap:6px;">
+            <button class="mini-btn" onclick="copyCurrentSection()" title="Copy Markdown text">📋 Copy Markdown</button>
+            <button class="mini-btn" style="background:#238636; color:#fff; border-color:#2ea043;" onclick="copyMcpPayload()" title="Copy structured payload for AI Agent">🤖 Copy for Agent</button>
+          </div>
         </div>
       </div>
-      <div class="doc-sub-text" id="d-sub">Select an item from the left Explorer or the right 3D topology</div>
 
-      <!-- Token Intelligence Metric -->
-      <div class="doc-token-bar">
-        <div style="display:flex; justify-content:space-between; font-size:11px; margin-bottom:3px;">
-          <span>⚡ Token Efficiency: <b id="stat-savings-badge" style="color:#00ffaa;">0.0%</b> saved</span>
-          <span>Full: <b id="stat-full-tokens" style="color:#c9d1d9;">0</b> · Sliced: <b id="stat-sliced-tokens" style="color:#00ffaa;">0</b> tokens</span>
+      <!-- Scrollable Markdown Reader -->
+      <div id="d-code-markdown" class="doc-content-viewer">
+        <div class="doc-placeholder-state">
+          <div style="font-size:28px; margin-bottom:8px;">📄</div>
+          <div style="font-size:14px; font-weight:600; color:#e6edf3; margin-bottom:4px;">DocGraph Markdown Intelligence Studio</div>
+          <div style="font-size:12px; color:#8b949e;">Select any document or heading from the Explorer on the left, or click a 3D sphere node on the right to read.</div>
         </div>
-        <div class="token-fill-track">
-          <div id="stat-savings-fill" class="token-fill-bar" style="width:0%;"></div>
-        </div>
-      </div>
-
-      <!-- Action Bar -->
-      <div class="doc-action-bar">
-        <span style="font-size:11px; font-weight:600; color:#8b949e;" id="d-code-title">🗡️ Sliced Section Markdown</span>
-        <div style="display:flex; gap:6px;">
-          <button class="mini-btn" onclick="copyCurrentSection()" title="Copy Markdown text">📋 Copy Markdown</button>
-          <button class="mini-btn" style="background:#238636; color:#fff; border-color:#2ea043;" onclick="copyMcpPayload()" title="Copy structured payload for AI Agent">🤖 Copy for Agent</button>
-        </div>
-      </div>
-    </div>
-
-    <!-- Scrollable Markdown Reader -->
-    <div id="d-code-markdown" class="doc-content-viewer">
-      <div class="doc-placeholder-state">
-        <div style="font-size:28px; margin-bottom:8px;">📄</div>
-        <div style="font-size:14px; font-weight:600; color:#e6edf3; margin-bottom:4px;">DocGraph Markdown Intelligence Studio</div>
-        <div style="font-size:12px; color:#8b949e;">Select any document or heading from the Explorer on the left, or click a 3D sphere node on the right to read.</div>
       </div>
     </div>
   </div>
 
-  <!-- Resizer 2: Between Doc and 3D Hub -->
+  <!-- Resizer 2: Between Center Stage and Right Hub Column -->
   <div class="column-resizer" id="resizer-doc-3d"></div>
 
-  <!-- Column 3: Right 3D Knowledge Galaxy & Connected Links Hub (Default 40% Width) -->
+  <!-- Column 3: Right Column (Fixed Right 40% Column; Holds 3D Graph + Connected Links Hub) -->
   <div id="graph-panel">
 
-    <!-- Upper Pane: 3D Force-Graph Canvas (Pure & Unobstructed) -->
+    <!-- Upper Slot: 3D Force-Graph Canvas (Pure & Unobstructed, or MD Reader when swapped) -->
     <div id="viewport-3d-pane">
       <div class="graph-pane-header">
         <span style="font-size:11px; font-weight:600; color:#58a6ff; display:flex; align-items:center; gap:5px;">
@@ -160,10 +163,10 @@ if (window.THREE && !window.THREE.Timer) {
       <div id="3d-graph"></div>
     </div>
 
-    <!-- Horizontal Resizer: Between 3D Canvas and Mode / Links Hub -->
+    <!-- Horizontal Resizer: Between Upper Stage and Lower Connected Links Hub -->
     <div class="pane-h-resizer" id="resizer-3d-links" title="Drag up/down to adjust 3D vs Control Hub height"></div>
 
-    <!-- Lower Pane: Integrated Mode & Connected Links Hub (Fixed, Non-draggable) -->
+    <!-- Lower Pane: Integrated Mode & Connected Links Hub (PERMANENTLY FIXED IN RIGHT COLUMN!) -->
     <div id="viewport-links-pane">
       
       <!-- Docked AST & Relationship Filter Section (Clean & Streamlined) -->
@@ -250,6 +253,6 @@ if (window.THREE && !window.THREE.Timer) {
 
 <div id="toast"></div>
 
-<script src="/static/docgraph.js?v=3.6.0"></script>
+<script src="/static/docgraph.js?v=3.7.0"></script>
 </body>
 </html>

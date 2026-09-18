@@ -1150,8 +1150,7 @@ function initDraggableLegend() {
 function updateSwapButtonI18n() {
   const btn = document.getElementById('btn-swap-panels');
   const lbl = document.getElementById('lbl-swap-text');
-  const appLayout = document.getElementById('app-layout');
-  const isSwapped = appLayout && appLayout.classList.contains('panels-swapped');
+  const isSwapped = !!document.querySelector('#stage-col-center > #viewport-3d-pane');
 
   if (!btn || !lbl) return;
 
@@ -1175,22 +1174,45 @@ function updateSwapButtonI18n() {
 }
 
 function togglePanelsSwap() {
-  const appLayout = document.getElementById('app-layout');
-  if (!appLayout) return;
+  const centerStage = document.getElementById('stage-col-center');
+  const rightHub = document.getElementById('graph-panel');
+  const resizer3DLinks = document.getElementById('resizer-3d-links');
+  if (!centerStage || !rightHub) return;
 
-  const isSwapped = appLayout.classList.toggle('panels-swapped');
-  updateSwapButtonI18n();
+  const docPanel = document.getElementById('doc-panel');
+  const pane3D = document.getElementById('viewport-3d-pane');
+  if (!docPanel || !pane3D) return;
 
-  if (isSwapped) {
-    showToast(currentLanguage === 'zh' ? '🔄 已對調：3D 星系置中，Markdown 移至右側' : '🔄 Panels swapped: 3D Galaxy centered');
+  const isSwapped = !!centerStage.querySelector('#viewport-3d-pane');
+
+  if (!isSwapped) {
+    // SWAP: Move 3D Canvas into Center Stage; Move Markdown Reader into Right Upper Slot
+    centerStage.appendChild(pane3D);
+    rightHub.insertBefore(docPanel, resizer3DLinks);
   } else {
-    showToast(currentLanguage === 'zh' ? '🔄 已對調：恢復標準排版' : '🔄 Standard layout restored');
+    // RESTORE: Move Markdown Reader back into Center Stage; Move 3D Canvas back into Right Upper Slot
+    centerStage.appendChild(docPanel);
+    rightHub.insertBefore(pane3D, resizer3DLinks);
   }
 
+  updateSwapButtonI18n();
+
+  if (!isSwapped) {
+    showToast(currentLanguage === 'zh' ? '🔄 3D 拓撲已置中，Markdown 移至右側' : '🔄 3D Topology centered, Markdown in right panel');
+  } else {
+    showToast(currentLanguage === 'zh' ? '🔄 已恢復標準版面配置' : '🔄 Standard layout restored');
+  }
+
+  // Preserve center node focus and adjust 3D viewport dimensions smoothly
   setTimeout(() => {
     updateGraphSize();
     if (Graph) {
-      autoFrameGraph();
+      // Re-center active node or full graph dead-center without distortion
+      if (activeNode) {
+        focusOnNode(activeNode);
+      } else {
+        autoFrameGraph();
+      }
     }
   }, 60);
 }

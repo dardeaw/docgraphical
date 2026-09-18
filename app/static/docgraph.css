@@ -1513,6 +1513,60 @@ html, body {
   margin-top: 2px;
 }
 
+
+/* ─── Center Stage Column (Host for Markdown Reader or 3D Canvas) ─── */
+#stage-col-center {
+  flex: 1;
+  min-width: 360px;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  background: #0d1117;
+  overflow: hidden;
+  position: relative;
+  z-index: 10;
+}
+
+#stage-col-center > #doc-panel,
+#stage-col-center > #viewport-3d-pane {
+  width: 100%;
+  height: 100%;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+/* ─── Right Hub Column (Fixed 40% Width: Holds Upper Slot + Connected Links Hub) ─── */
+#graph-panel {
+  width: 40%;
+  min-width: 320px;
+  max-width: 750px;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  background: #090d13;
+  flex-shrink: 0;
+  z-index: 10;
+}
+
+#graph-panel > #viewport-3d-pane,
+#graph-panel > #doc-panel {
+  height: 52%;
+  min-height: 160px;
+  position: relative;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  background: #090d13;
+  flex-shrink: 0;
+}
+
+#graph-panel > #doc-panel {
+  background: #0d1117;
+  border-bottom: 1px solid #30363d;
+}
+
 /* Floating Panel Swap Button */
 #btn-swap-panels {
   position: absolute;
@@ -1526,38 +1580,25 @@ html, body {
   font-size: 11px;
   font-weight: 600;
   color: #c9d1d9;
-  background: rgba(22, 27, 34, 0.88);
+  background: rgba(22, 27, 34, 0.9);
   border: 1px solid #30363d;
   border-radius: 6px;
   backdrop-filter: blur(8px);
   cursor: pointer;
   transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
 }
 
 #btn-swap-panels:hover {
   background: #1f6feb;
   color: #ffffff;
   border-color: #388bfd;
-  box-shadow: 0 4px 14px rgba(31, 111, 235, 0.45);
+  box-shadow: 0 4px 14px rgba(31, 111, 235, 0.5);
   transform: translateY(-1px);
 }
 
-/* Swapped State: Graph panel in center, Doc panel on right */
-#app-layout.panels-swapped #graph-panel {
-  order: 2;
-}
-
-#app-layout.panels-swapped #resizer-doc-3d {
-  order: 3;
-}
-
-#app-layout.panels-swapped #doc-panel {
-  order: 4;
-}
-
-/* When swapped, move button to top-right corner of 3D graph */
-#app-layout.panels-swapped #btn-swap-panels {
+/* When 3D graph is in center stage, button sits at top-right corner of 3D canvas */
+#stage-col-center #btn-swap-panels {
   left: auto;
-  right: 12px;
+  right: 14px;
 }
