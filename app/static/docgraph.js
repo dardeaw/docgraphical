@@ -77,7 +77,7 @@ function updateGraphSize() {
 
 // ─── File Node 3D Text Sprite Label ──────────────────────────────
 function createFileLabelSprite(n) {
-  // Only render floating 3D text label for File / Document nodes
+  // Only render sleek floating 3D text label for File / Document nodes
   if (!n || n.kind !== 'file') {
     return null;
   }
@@ -90,86 +90,25 @@ function createFileLabelSprite(n) {
 
   const color = KIND_COLORS.file || '#f0883e';
 
-  // 1. If SpriteText library is available, use it (extends THREE.Sprite)
   if (typeof SpriteText !== 'undefined') {
     try {
       const sprite = new SpriteText(fileName);
       sprite.color = color;
-      sprite.textHeight = 3.6;
-      sprite.backgroundColor = 'rgba(13, 17, 23, 0.85)';
+      sprite.textHeight = 1.6;
+      sprite.backgroundColor = 'rgba(13, 17, 23, 0.88)';
       sprite.borderColor = color;
-      sprite.borderWidth = 1.0;
-      sprite.borderRadius = 4;
-      sprite.padding = [3, 6];
-      sprite.position.set(0, 4.2, 0);
+      sprite.borderWidth = 0.4;
+      sprite.borderRadius = 2;
+      // Ultra-tight vertical padding: [horizontal, vertical] eliminates giant empty gaps
+      sprite.padding = [1.0, 0.12];
+      sprite.position.set(0, 2.2, 0);
       if (sprite.material) {
         sprite.material.depthWrite = false;
         sprite.material.transparent = true;
       }
       return sprite;
     } catch (err) {
-      console.warn('SpriteText creation failed, falling back to CanvasTexture:', err);
-    }
-  }
-
-  // 2. Fallback: native Three.js CanvasTexture Sprite
-  if (typeof THREE !== 'undefined') {
-    try {
-      const canvas = document.createElement('canvas');
-      const ctx = canvas.getContext('2d');
-
-      const fontSize = 28;
-      ctx.font = 'bold ' + fontSize + 'px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif';
-      const textWidth = ctx.measureText(fileName).width;
-
-      const padX = 14;
-      const padY = 8;
-      canvas.width = Math.ceil(textWidth + padX * 2);
-      canvas.height = fontSize + padY * 2;
-
-      ctx.fillStyle = 'rgba(13, 17, 23, 0.85)';
-      ctx.strokeStyle = color;
-      ctx.lineWidth = 2.0;
-
-      const r = 6;
-      const w = canvas.width;
-      const h = canvas.height;
-
-      ctx.beginPath();
-      if (ctx.roundRect) {
-        ctx.roundRect(1, 1, w - 2, h - 2, r);
-      } else {
-        ctx.rect(1, 1, w - 2, h - 2);
-      }
-      ctx.fill();
-      ctx.stroke();
-
-      ctx.font = 'bold ' + fontSize + 'px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif';
-      ctx.fillStyle = color;
-      ctx.textAlign = 'center';
-      ctx.textBaseline = 'middle';
-      ctx.fillText(fileName, w / 2, h / 2);
-
-      const texture = new THREE.CanvasTexture(canvas);
-      texture.minFilter = THREE.LinearFilter;
-
-      const spriteMaterial = new THREE.SpriteMaterial({
-        map: texture,
-        depthWrite: false,
-        transparent: true
-      });
-
-      const sprite = new THREE.Sprite(spriteMaterial);
-      const aspect = canvas.width / canvas.height;
-      const spriteH = 3.2;
-      const spriteW = spriteH * aspect;
-      sprite.scale.set(spriteW, spriteH, 1);
-      sprite.position.set(0, 4.2, 0);
-
-      return sprite;
-    } catch (err) {
-      console.error('Canvas sprite creation failed:', err);
-      return null;
+      console.warn('SpriteText creation failed:', err);
     }
   }
 
@@ -252,6 +191,14 @@ function init3DGraph() {
     .onBackgroundClick(() => {
       clearHighlight();
     });
+
+  // Balanced lighting preserves rich AST colors, preventing MeshLambertMaterial white blowout
+  if (typeof THREE !== 'undefined' && Graph.lights) {
+    Graph.lights([
+      new THREE.AmbientLight(0xffffff, 0.55),
+      new THREE.DirectionalLight(0xffffff, 0.45)
+    ]);
+  }
 
   // Configure tight d3 forces: small distance and controlled repulsion for compact 3D viewport
   if (Graph.d3Force('link')) {
