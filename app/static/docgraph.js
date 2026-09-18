@@ -95,13 +95,13 @@ function createFileLabelSprite(n) {
       const sprite = new SpriteText(fileName);
       sprite.color = color;
       sprite.textHeight = 1.6;
-      sprite.backgroundColor = 'rgba(13, 17, 23, 0.88)';
-      sprite.borderColor = color;
-      sprite.borderWidth = 0.4;
-      sprite.borderRadius = 2;
-      // Ultra-tight vertical padding: [horizontal, vertical] eliminates giant empty gaps
-      sprite.padding = [1.0, 0.12];
-      sprite.position.set(0, 2.2, 0);
+      sprite.backgroundColor = 'rgba(10, 14, 20, 0.82)';
+      sprite.borderWidth = 0;
+      sprite.borderRadius = 0;
+      // Clean padding without border distortion
+      sprite.padding = [0.8, 0.18];
+      // Node sphere radius is ~2.6; y = 4.0 places label cleanly above the top of the sphere
+      sprite.position.set(0, 4.0, 0);
       if (sprite.material) {
         sprite.material.depthWrite = false;
         sprite.material.transparent = true;
