@@ -1,56 +1,65 @@
 # Contributing to DocGraphical
 
-Thank you for your interest in contributing to DocGraphical! We welcome bug fixes, documentation improvements, and architectural enhancements.
+Thank you for your interest in contributing to DocGraphical. We welcome contributions from the community to help make documentation parsing faster, more precise, and more efficient for AI agents and human developers alike.
 
 ---
 
 ## Code of Conduct
 
-We are committed to providing a welcoming, constructive, and collaborative environment. Please treat all contributors and maintainers with respect.
+We expect all contributors and maintainers to adhere to principles of mutual respect, constructive collaboration, and technical integrity.
 
 ---
 
-## Development Setup
+## Development Workflow
 
-### 1. Clone Repository & Setup Environment
+### 1. Fork & Clone Repository
 
 ```bash
 git clone https://github.com/dardeaw/docgraphical.git
 cd docgraphical
+```
+
+### 2. Setup Python Environment
+
+```bash
 python -m venv .venv
-source .venv/bin/activate  # Or .venv\Scripts\activate on Windows
+# On Windows:
+.venv\Scripts\activate
+# On Linux / macOS:
+source .venv/bin/activate
+
 pip install -e ".[dev,mcp]"
 ```
 
-### 2. Running Test Suites
+### 3. Setup Node.js Environment
 
-Before submitting any pull request, ensure all tests pass:
+```bash
+npm install
+```
+
+### 4. Running Test Suites
+
+All submissions must pass both Python and Node.js test suites:
 
 ```bash
 # Run Python unit tests
-pytest
+pytest tests/
 
 # Run Node.js tests
-node test.js
-
-# Check code formatting & linting
-flake8 docgraphical tests --max-line-length=127
+npm test
 ```
 
 ---
 
 ## Pull Request Guidelines
 
-1. **Focused Scope**: Keep PRs focused on a single bug fix or feature.
-2. **Test Coverage**: Add test cases in `tests/test_docgraphical.py` for any new parser or slicing behavior.
-3. **Commit Messages**: Use concise, conventional commit prefixes (`feat:`, `fix:`, `docs:`, `test:`, `refactor:`).
-4. **Documentation**: Update documentation and docstrings if public API behavior changes.
+1. **Focused Changes**: Keep pull requests focused on a single feature, bugfix, or improvement.
+2. **Deterministic Code**: Ensure all parsing logic maintains strict state-machine determinism without introducing heuristic approximations.
+3. **Zero New External Dependencies**: The core parser must remain free of external dependencies.
+4. **Documentation**: Update both English (`README.md`, `ARCHITECTURE.md`) and Traditional Chinese (`README.zh-TW.md`, `ARCHITECTURE.zh-TW.md`) documentation when introducing new features or altering CLI behaviors.
 
 ---
 
-## Reporting Issues
+## License
 
-When reporting bugs, please provide:
-- Python version and OS environment.
-- Minimal reproducible Markdown snippet.
-- Expected versus actual output.
+By submitting code to DocGraphical, you agree that your contributions will be licensed under the project's [MIT License](LICENSE).

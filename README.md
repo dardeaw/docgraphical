@@ -1,6 +1,6 @@
 # DocGraphical
 
-A deterministic Markdown Abstract Syntax Tree (AST) analyzer and surgical section slicer designed for LLM coding agents, RAG pipelines, and developer documentation workflows.
+A deterministic Markdown Abstract Syntax Tree (AST) analyzer, surgical section slicer, and 3D visual knowledge graph studio designed for LLM coding agents, RAG pipelines, and enterprise engineering workflows.
 
 ---
 
@@ -20,7 +20,8 @@ This approach introduces several practical challenges:
 - **Surgical Section Slicing**: Slices the exact boundary of a requested section (including all child sub-headings and code blocks) without reading preceding or succeeding chapters (~100 to 300 tokens).
 - **Fenced Code Block Protection**: Guarantees that hash symbols (`#`) inside code blocks (e.g., Python comments, Bash scripts) are never misinterpreted as headings.
 - **Knowledge Graph & Cross-Reference Mapping**: Maps relationships and cross-document markdown links into a lightweight local SQLite graph database (`.docgraphical/docgraphical.db`).
-- **Model Context Protocol (MCP) Native**: Exposes standard tools for automated integration with MCP-compatible agent environments.
+- **3D Visual AST Studio**: Interactive WebGL force-directed graph with slot-based stage swap, immediate ancestor centering, dynamic SpriteText shrine labels, and subtle translucent galactic depth.
+- **Model Context Protocol (MCP) Native**: Exposes standard tools for automated integration with MCP-compatible agent environments via stdio JSON-RPC.
 
 ---
 
@@ -32,7 +33,7 @@ This approach introduces several practical challenges:
 | **Hierarchy Preservation** | Full (High Token Cost) | Fragmented | **Strict AST Maintained** |
 | **Code Block Integrity** | Full | Frequently Severed | **Guaranteed Intact** |
 | **Context Noise** | High | Medium | **Zero Irrelevant Text** |
-| **Token Savings** | 0% | ~85% | **~97%** |
+| **Token Savings** | 0% | ~85% | **~97.4%** |
 
 ---
 
@@ -122,13 +123,24 @@ Scans a repository, parses all Markdown files into AST nodes and cross-document 
 docg index .
 ```
 
-### 5. Launch Web Studio
+### 5. Launch Web Studio & 3D Knowledge Galaxy
 
 Starts the local HTTP server and opens the visual inspection interface:
 
 ```bash
 docg serve --port 5002
 ```
+
+---
+
+## 3D Visual AST Workstation
+
+DocGraphical includes a high-performance 3D WebGL knowledge galaxy designed for structural exploration:
+
+1. **Slot-Based Stage Swap**: Instant DOM-level swapping between the central Markdown Reader and the 3D Knowledge Graph without altering column proportions.
+2. **Immediate Ancestor Centering (1-Level Parent Focus)**: Selecting a sub-section (H2, H3, H4) centers the camera directly on its immediate parent section (H1/H2), providing intuitive hierarchical context.
+3. **Dynamic SpriteText Shrine Reveal**: Floating 3D text billboards preserve authentic AST color tokens and illuminate upon selection, while unselected background nodes transition smoothly to subtle translucent ghosting.
+4. **Contextual Ancestor Tracing**: Clicking any deep AST node highlights the entire ancestral lineage back to the root Document node.
 
 ---
 
@@ -185,6 +197,24 @@ print(section_content)
 matches = search_file("docs/spec.md", query="LSM-Tree")
 for m in matches:
     print(f"Line {m['line']}: {m['content']}")
+```
+
+---
+
+## Node.js API Reference
+
+DocGraphical is also available as a standalone Node.js module:
+
+```javascript
+const { parseHeadings, extractToc, extractSection, searchDoc } = require('docgraphical');
+
+// 1. Extract TOC outline
+const toc = extractToc('docs/spec.md');
+console.log(toc);
+
+// 2. Surgical section slice
+const slice = extractSection('docs/spec.md', '1. Storage Subsystem', { includeSubsections: true });
+console.log(slice);
 ```
 
 ---

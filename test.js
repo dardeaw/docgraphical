@@ -33,26 +33,26 @@ try {
   assert.strictEqual(headings.length, 4, 'Should parse exactly 4 headings');
   assert.strictEqual(headings[0].title, 'Sample Spec');
   assert.strictEqual(headings[1].title, '1. Architecture');
-  console.log('  ✔ parseHeadings (code block protection intact)');
+  console.log('  [PASS] parseHeadings (code block protection intact)');
 
   // 2. extractToc
   const toc = extractToc(samplePath);
   assert.ok(toc.includes('[DocGraphical TOC]'), 'TOC header must exist');
   assert.ok(toc.includes('## 1. Architecture'), 'TOC item must exist');
-  console.log('  ✔ extractToc text format');
+  console.log('  [PASS] extractToc text format');
 
   // 3. extractSection
   const sec = extractSection(samplePath, '1. Architecture');
   assert.ok(sec.includes('### 1.1 Storage Engine'), 'Subsections should be included by default');
   assert.ok(!sec.includes('## 2. Quickstart'), 'Next section must be excluded');
-  console.log('  ✔ extractSection surgical slicing');
+  console.log('  [PASS] extractSection surgical slicing');
 
   // 4. searchDoc
   const res = searchDoc(samplePath, 'quickstart');
   assert.ok(res.includes('Quickstart'), 'Search should find keyword');
-  console.log('  ✔ searchDoc line query');
+  console.log('  [PASS] searchDoc line query');
 
-  console.log('\n🎉 All 4 Node.js tests passed 100%!');
+  console.log('\n[PASS] All 4 Node.js unit tests passed successfully.');
 } finally {
   if (fs.existsSync(samplePath)) {
     fs.unlinkSync(samplePath);

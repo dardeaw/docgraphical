@@ -1,109 +1,81 @@
-# DocGraphical Architecture & Design Specification
+# DocGraphical Architecture Specification
 
-This document outlines the internal architecture, algorithmic design, and data structures of DocGraphical.
+This document provides a comprehensive technical overview of the internal architecture, parsing algorithms, data models, and component interactions within DocGraphical.
 
 ---
 
-## System Overview
+## System Architecture Overview
+
+DocGraphical operates on a layered, modular architecture designed for high throughput, deterministic parsing, and minimal resource utilization.
 
 ```text
-+-----------------------------------------------------------------------------+
-|                             DocGraphical Engine                             |
-+-----------------------------------------------------------------------------+
-                                       |
-    +----------------------------------+----------------------------------+
-    |                                  |                                  |
-    v                                  v                                  v
-+---------------------+      +---------------------+      +---------------------+
-|   Core AST Parser   |      |  Graph Persistence  |      |   Interface Layer   |
-| (docgraphical.parser)|     |  (docgraphical.db)   |     |  (CLI / MCP / Web)  |
-+---------------------+      +---------------------+      +---------------------+
-    |                                  |                                  |
-    |-- State Machine Parsing          |-- SQLite Schema (B-Tree)         |-- Stdio MCP Protocol
-    |-- Fenced Code Protection         |-- Node & Edge Topology           |-- CLI (docgraphical / docg)
-    |-- Surgical Slicing Algorithm     |-- Bidirectional Link Map         |-- 3D Web Studio
++-------------------------------------------------------------------+
+|                        Client Interfaces                          |
+|  [CLI (docg)]  [MCP Stdio Server]  [Web Studio]  [Electron App]   |
++-------------------------------------------------------------------+
+                                  |
++-------------------------------------------------------------------+
+|                         Core API Layer                            |
+|       parser.py        scanner.py        db.py        server.py   |
++-------------------------------------------------------------------+
+                                  |
++-------------------------------------------------------------------+
+|                     Deterministic AST Engine                      |
+|  - State-Machine Fenced Code Block Tracking                       |
+|  - Strict Line Anchor Indexing                                    |
+|  - Surgical Subtree Boundary Resolution                           |
++-------------------------------------------------------------------+
+                                  |
++-------------------------------------------------------------------+
+|                     Persistence & Graph Layer                     |
+|           SQLite Database (.docgraphical/docgraphical.db)         |
+|     [AST Nodes Table]    [Cross-Doc Relations]    [B-Tree Index]  |
++-------------------------------------------------------------------+
 ```
 
 ---
 
-## 1. Core AST Parser (`docgraphical.parser`)
+## Core Component Responsibilities
 
-The parser operates as a deterministic line-by-line streaming state machine.
+### 1. Parser Engine (`docgraphical/parser.py`)
+- **State Machine**: Tracks Markdown line states to guarantee code block isolation.
+- **Heading Extractor**: Identifies ATX (`#`) and Setext (`===`, `---`) headings with 1-based line anchors.
+- **Section Slicer**: Computes the exact span `[StartLine, EndLine)` for any targeted heading.
 
-### 1.1 Fenced Code Block State Machine
+### 2. Scanner & Graph Builder (`docgraphical/scanner.py`)
+- **Directory Traversal**: Walks project directories while respecting `.gitignore` and default exclusions.
+- **Link Extractor**: Discovers Markdown hyperlinks (`[label](path.md#heading)`) and wiki-links (`[[target]]`).
+- **AST Hierarchy Generation**: Connects Document root nodes to Top-Level Sections (H1) and nested sub-sections (H2-H6).
 
-To prevent markdown headings inside code blocks from being falsely recognized:
-- Tracks opening and closing code fences matching `^\s*(```|~~~)`
-- While inside an active code fence, all heading regex patterns are ignored.
+### 3. Database Layer (`docgraphical/db.py`)
+- Manages connection lifecycle and migrations for `.docgraphical/docgraphical.db`.
+- Implements parameterized SQL queries for node retrieval, edge traversal, and full-text keyword indexing.
 
-### 1.2 Heading Level Hierarchy
+### 4. Model Context Protocol Server (`docgraphical/mcp_server.py`)
+- Implements the JSON-RPC 2.0 protocol over `stdin`/`stdout`.
+- Exposes tools: `docgraphical_toc`, `docgraphical_section`, `docgraphical_search`, `docgraphical_graph`, and `docgraphical_index`.
 
-Headings matching `^(#{1,6})\s+(.+)$` are extracted with:
-- `level`: Integer depth from 1 (`#`) to 6 (`######`).
-- `title`: Sanitized text heading without trailing hashes or formatting tags.
-- `line`: 1-based exact line index in source file.
-
-### 1.3 Deterministic Section Slicing Algorithm
-
-Given `target_heading` and `include_subsections`:
-1. Find the target heading node $H_t$ with depth $L_t$.
-2. Define start line $S = 	ext{line}(H_t)$.
-3. Scan subsequent headings until finding the first heading $H_e$ such that:
-   - If `include_subsections == True`: $	ext{level}(H_e) \le L_t$.
-   - If `include_subsections == False`: $	ext{level}(H_e) \le L_t + 1$.
-4. Define end line $E = 	ext{line}(H_e) - 1$, or end of file if no terminating heading is encountered.
-5. Return lines $[S, E]$ verbatim.
+### 5. Web & Visual Studio (`static/docgraph.js`, `templates/index.html`)
+- Provides 3D WebGL Force-Directed visualization powered by Three.js.
+- Implements slot-based dynamic component swapping, immediate ancestor camera focus, and SpriteText billboard rendering.
 
 ---
 
-## 2. Graph Persistence & Schema (`docgraphical.db`)
+## Deterministic Section Slicing Algorithm
 
-DocGraphical indexes documentation into a local SQLite database (`.docgraphical/docgraphical.db`).
+The slicing algorithm guarantees precision through the following execution steps:
 
-### 2.1 Nodes Table
+1. **Tokenize Document**: Parse the file into an ordered list of heading AST descriptors:
+   $$\mathcal{H} = \{ (l_1, d_1, t_1), (l_2, d_2, t_2), \dots, (l_n, d_n, t_n) \}$$
+   where $l_i$ denotes the line number, $d_i \in [1, 6]$ denotes heading depth, and $t_i$ denotes the normalized title string.
 
-```sql
-CREATE TABLE IF NOT EXISTS nodes (
-    id TEXT PRIMARY KEY,
-    name TEXT NOT NULL,
-    kind TEXT NOT NULL,         -- 'file' | 'heading_1' | ... | 'heading_6'
-    file TEXT NOT NULL,
-    line INTEGER NOT NULL,
-    level INTEGER,              -- NULL for 'file', 1..6 for headings
-    project TEXT NOT NULL
-);
+2. **Locate Target Anchor**: Find index $k$ such that $t_k = 	ext{TargetTitle}$.
 
-CREATE INDEX IF NOT EXISTS idx_nodes_file ON nodes(file);
-CREATE INDEX IF NOT EXISTS idx_nodes_project ON nodes(project);
-```
+3. **Compute Boundary**:
+   - $	ext{StartLine} = l_k$
+   - If `includeSubsections = True`: Find the first subsequent heading $j > k$ such that $d_j \le d_k$.
+     $$	ext{EndLine} = egin{cases} l_j - 1 & 	ext{if such } j 	ext{ exists} \ 	ext{TotalDocumentLines} & 	ext{otherwise} \end{cases}$$
+   - If `includeSubsections = False`: Find the immediate next heading $j = k + 1$.
+     $$	ext{EndLine} = egin{cases} l_{k+1} - 1 & 	ext{if } k+1 \le n \ 	ext{TotalDocumentLines} & 	ext{otherwise} \end{cases}$$
 
-### 2.2 Edges Table
-
-```sql
-CREATE TABLE IF NOT EXISTS edges (
-    source TEXT NOT NULL,
-    target TEXT NOT NULL,
-    kind TEXT NOT NULL,         -- 'parent_child' | 'doc_link'
-    PRIMARY KEY (source, target, kind)
-);
-
-CREATE INDEX IF NOT EXISTS idx_edges_source ON edges(source);
-CREATE INDEX IF NOT EXISTS idx_edges_target ON edges(target);
-```
-
----
-
-## 3. Model Context Protocol (MCP) Server
-
-The MCP server implements the official JSON-RPC protocol over `stdio`:
-- Handles `tools/list` to register `docgraphical_toc`, `docgraphical_section`, `docgraphical_search`, `docgraphical_graph`, and `docgraphical_index`.
-- Handles `tools/call` with strict validation and formatted responses.
-
----
-
-## 4. Visual 3D Web Studio
-
-The dual-pane visual interface combines:
-- **Left Explorer Tree**: Hierarchical project and folder tree with collapsible file headings.
-- **Center Document Viewer**: Synchronized Markdown and raw source viewer with bidirectional jump.
-- **Right 3D Force Graph**: WebGL 3D graph visualizer with AST layer filtering and real-time relationship tracking.
+4. **Verbatim Slice**: Extract lines $	ext{Lines}[	ext{StartLine} : 	ext{EndLine}]$ without post-processing or re-encoding.

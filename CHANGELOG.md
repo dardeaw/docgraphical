@@ -1,21 +1,20 @@
 # Changelog
 
-All notable changes to this project will be documented in this file.
+All notable changes to the DocGraphical project will be documented in this file.
 
-The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
-## [1.0.0] - 2026-09-17
+## [1.0.0] - 2026-09-18
 
 ### Added
-- **Deterministic AST Markdown Parser**: Line-by-line parser with fenced code block tracking.
-- **Surgical Section Slicer**: Precision chapter extraction with configurable child section inclusion.
-- **TOC Extractor**: Compact outline generator with exact line numbers in text and JSON formats.
-- **Model Context Protocol (MCP) Server**: Native stdio MCP server exposing 5 tools (`docgraphical_*`).
-- **Multi-Document Scanner & SQLite Database**: B-Tree indexed node and edge graph storage.
-- **Visual 3D Web Studio**: Dual-pane Markdown reader and WebGL 3D Force Graph explorer.
-- **Electron Desktop Application**: Cross-platform desktop distribution package.
-- **Dual CLI Names**: Full `docgraphical` command alongside ultra-ergonomic `docg` short alias.
-- **Comprehensive Test Suite**: Unit tests covering code fence safety, edge cases, and JSON-RPC tools.
+- **Deterministic AST Parser**: Line-by-line state machine parser with strict fenced code block protection.
+- **Surgical Section Slicer**: Extracts exact heading content and child subtrees while saving ~97.4% tokens.
+- **TOC Outline Extractor**: Rapid outline generation with line anchors in text and JSON formats.
+- **Dual Runtime Support**: Full feature parity across Python 3.9+ and Node.js 18+ runtimes.
+- **Model Context Protocol (MCP) Server**: Native stdio JSON-RPC 2.0 server supporting `docgraphical_toc`, `docgraphical_section`, `docgraphical_search`, `docgraphical_graph`, and `docgraphical_index`.
+- **3D Visual AST Studio**: WebGL force-directed graph with slot-based stage swap, immediate ancestor centering, dynamic SpriteText shrine reveal, and subtle translucent galactic depth.
+- **Desktop Studio Application**: Electron wrapper with cross-platform desktop build configurations.
+- **Comprehensive Documentation Suite**: Dignified, formal bilingual documentation in English and Traditional Chinese.
