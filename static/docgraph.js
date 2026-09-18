@@ -107,6 +107,13 @@ function createFileLabelSprite(n) {
         sprite.material.depthWrite = false;
         sprite.material.transparent = true;
       }
+      n.__labelSprite = sprite;
+      // If a filter/highlight is already active, sync initial visibility
+      if (highlightNodes.size > 0) {
+        const isHighlighted = highlightNodes.has(n.id);
+        sprite.visible = isHighlighted;
+        if (sprite.material) sprite.material.opacity = isHighlighted ? 1.0 : 0.0;
+      }
       return sprite;
     } catch (err) {
       console.warn('SpriteText creation failed:', err);
@@ -236,6 +243,25 @@ function focusOnNode(node) {
   }
 }
 
+
+function updateLabelsVisibility() {
+  const nodes = (rawData && rawData.nodes) ? rawData.nodes : [];
+  const hasFilter = highlightNodes.size > 0;
+
+  nodes.forEach(n => {
+    if (n.__labelSprite) {
+      if (!hasFilter) {
+        n.__labelSprite.visible = true;
+        if (n.__labelSprite.material) n.__labelSprite.material.opacity = 1.0;
+      } else {
+        const isHighlighted = highlightNodes.has(n.id);
+        n.__labelSprite.visible = isHighlighted;
+        if (n.__labelSprite.material) n.__labelSprite.material.opacity = isHighlighted ? 1.0 : 0.0;
+      }
+    }
+  });
+}
+
 function highlightScope(scopeType, targetObj) {
   highlightNodes.clear();
   highlightLinks.clear();
@@ -294,13 +320,14 @@ function highlightScope(scopeType, targetObj) {
     });
   }
 
-  // Refresh 3D Graph elements
+  // Refresh 3D Graph elements and sync label visibility
   if (Graph) {
     Graph.nodeColor(Graph.nodeColor())
       .linkColor(Graph.linkColor())
       .linkWidth(Graph.linkWidth())
       .linkDirectionalParticles(Graph.linkDirectionalParticles());
   }
+  updateLabelsVisibility();
 }
 
 function clearHighlight() {
@@ -317,6 +344,7 @@ function clearHighlight() {
       .linkWidth(Graph.linkWidth())
       .linkDirectionalParticles(Graph.linkDirectionalParticles());
   }
+  updateLabelsVisibility();
 }
 
 // ─── 2. Auto Rotate ───────────────────────────────────────────────
