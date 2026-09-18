@@ -76,44 +76,80 @@ function updateGraphSize() {
 }
 
 
-// ─── File Node 3D Text Sprite Label ──────────────────────────────
+
+// ─── Ancestor Resolution & SpriteText Shrine Logic ───────────────
+
+function findClosestVisibleAncestor(node, gNodes) {
+  if (!node) return null;
+  const nodesList = gNodes || (Graph && Graph.graphData ? Graph.graphData().nodes : rawData.nodes) || [];
+  const rawLinks = rawData.links || [];
+
+  let currId = node.id;
+  const visited = new Set([currId]);
+
+  while (currId) {
+    let parentId = null;
+    for (const l of rawLinks) {
+      if (l.kind === 'parent_child') {
+        const sId = typeof l.source === 'object' ? l.source.id : l.source;
+        const tId = typeof l.target === 'object' ? l.target.id : l.target;
+        if (tId === currId && !visited.has(sId)) {
+          parentId = sId;
+          visited.add(sId);
+          break;
+        }
+      }
+    }
+
+    if (!parentId && node.file) {
+      const cleanPath = (node.file || '').replace(/\\/g, '/');
+      const fileNode = nodesList.find(n => n.kind === 'file' && ((n.file || '').replace(/\\/g, '/') === cleanPath || n.id === `file::${cleanPath}`));
+      if (fileNode && fileNode.id !== currId) {
+        parentId = fileNode.id;
+      }
+    }
+
+    if (!parentId) break;
+
+    const pNode = nodesList.find(n => n.id === parentId);
+    if (pNode && !hiddenKinds.has(pNode.kind)) {
+      return pNode;
+    }
+    currId = parentId;
+  }
+
+  if (node.file) {
+    const cleanPath = (node.file || '').replace(/\\/g, '/');
+    return nodesList.find(n => n.kind === 'file' && ((n.file || '').replace(/\\/g, '/') === cleanPath || n.id === `file::${cleanPath}`));
+  }
+  return null;
+}
+
 function createFileLabelSprite(n) {
-  // Only render sleek floating 3D text label for File / Document nodes
-  if (!n || n.kind !== 'file') {
-    return null;
-  }
+  if (!n) return null;
 
-  const rawPath = n.file || n.name || '';
-  const fileName = rawPath.split(/[\\/]/).pop();
-  if (!fileName) {
-    return null;
-  }
+  const isFile = (n.kind === 'file');
+  const labelText = isFile ? (n.file || n.name || '').split(/[\\/]/).pop() : (n.name || '');
+  if (!labelText) return null;
 
-  const color = KIND_COLORS.file || '#f0883e';
+  const color = KIND_COLORS[n.kind] || '#58a6ff';
 
   if (typeof SpriteText !== 'undefined') {
     try {
-      const sprite = new SpriteText(fileName);
+      const sprite = new SpriteText(labelText);
       sprite.color = color;
-      sprite.textHeight = 1.6;
-      sprite.backgroundColor = 'rgba(10, 14, 20, 0.82)';
+      sprite.textHeight = isFile ? 1.6 : 1.3;
+      sprite.backgroundColor = 'rgba(10, 14, 20, 0.85)';
       sprite.borderWidth = 0;
-      sprite.borderRadius = 0;
-      // Clean padding without border distortion
-      sprite.padding = [0.8, 0.18];
-      // Node sphere radius is ~2.6; y = 4.0 places label cleanly above the top of the sphere
-      sprite.position.set(0, 4.0, 0);
+      sprite.borderRadius = 2;
+      sprite.padding = [0.7, 0.16];
+      sprite.position.set(0, (KIND_SIZES[n.kind] || 1.5) + 2.4, 0);
       if (sprite.material) {
         sprite.material.depthWrite = false;
         sprite.material.transparent = true;
+        sprite.material.opacity = isFile ? 0.95 : 0.0;
       }
       n.__labelSprite = sprite;
-      // If a filter/highlight is already active, sync initial visibility
-      if (highlightNodes.size > 0) {
-        const isHighlighted = highlightNodes.has(n.id);
-        sprite.visible = isHighlighted;
-        if (sprite.material) sprite.material.opacity = isHighlighted ? 1.0 : 0.0;
-      }
       return sprite;
     } catch (err) {
       console.warn('SpriteText creation failed:', err);
@@ -123,116 +159,64 @@ function createFileLabelSprite(n) {
   return null;
 }
 
-function init3DGraph() {
-  const elem = document.getElementById('3d-graph');
-  const pane3D = document.getElementById('viewport-3d-pane');
-  if (!elem || !pane3D) return;
+function updateLabelsVisibility() {
+  const gNodes = (Graph && Graph.graphData) ? (Graph.graphData().nodes || []) : (rawData.nodes || []);
+  const hasFilter = highlightNodes.size > 0;
 
-  const header = pane3D.querySelector('.graph-pane-header');
-  const headerH = header ? header.offsetHeight : 30;
-  const width = pane3D.clientWidth || 400;
-  const height = Math.max(100, (pane3D.clientHeight || 350) - headerH);
-
-  Graph = ForceGraph3D()(elem)
-    .width(width)
-    .height(height)
-    .backgroundColor('#090d13')
-    .nodeId('id')
-    .nodeLabel(n => {
-      const typeLabel = n.kind === 'file' ? 'Document' : `H${n.level || 1} Section`;
-      const fileName = (n.file || '').split(/[\\/]/).pop();
-      const nodeColor = KIND_COLORS[n.kind] || '#58a6ff';
-      return `<div class="scene-tooltip">
-        <div class="tooltip-title" style="color:${nodeColor};">${escapeHtml(n.name)}</div>
-        <div class="tooltip-sub">${typeLabel} · ${escapeHtml(fileName)} · Line ${n.line || 1}</div>
-      </div>`;
-    })
-    .nodeColor(n => {
-      if (highlightNodes.size > 0) {
-        return highlightNodes.has(n.id) ? (KIND_COLORS[n.kind] || '#58a6ff') : '#1c212888';
-      }
-      return KIND_COLORS[n.kind] || '#58a6ff';
-    })
-    .nodeVal(n => {
-      let base = KIND_SIZES[n.kind] || 1.0;
-      if (highlightNodes.has(n.id)) return base * 1.4;
-      return base;
-    })
-    .nodeRelSize(1.8)
-    .nodeResolution(16)
-    .nodeThreeObjectExtend(true)
-    .nodeThreeObject(n => createFileLabelSprite(n))
-    .linkOpacity(l => {
-      if (highlightNodes.size > 0) {
-        return highlightLinks.has(l) ? 0.95 : 0.08;
-      }
-      return l.kind === 'doc_link' ? 0.6 : 0.35;
-    })
-    .linkColor(l => {
-      if (highlightNodes.size > 0) {
-        return highlightLinks.has(l) ? (l.kind === 'doc_link' ? '#00ffaa' : '#58a6ff') : '#21262d22';
-      }
-      return EDGE_COLORS[l.kind] || '#58a6ff';
-    })
-    .linkWidth(l => {
-      if (highlightNodes.size > 0) {
-        return highlightLinks.has(l) ? 1.2 : 0.15;
-      }
-      return l.kind === 'doc_link' ? 0.7 : 0.3;
-    })
-    .linkDirectionalParticles(l => {
-      if (highlightNodes.size > 0) {
-        return highlightLinks.has(l) ? 2 : 0;
-      }
-      return l.kind === 'doc_link' ? 1 : 0;
-    })
-    .linkDirectionalParticleWidth(l => highlightLinks.has(l) ? 1.0 : 0.6)
-    .linkDirectionalParticleSpeed(l => highlightLinks.has(l) ? 0.005 : 0.0025)
-    .d3AlphaDecay(0.03)
-    .d3VelocityDecay(0.35)
-    .onNodeClick(node => {
-      highlightScope('node', node);
-      focusOnNode(node);
-      selectActiveNode(node);
-      syncExplorerSelection(node);
-    })
-    .onBackgroundClick(() => {
-      clearHighlight();
-    });
-
-  // Balanced lighting preserves rich AST colors, preventing MeshLambertMaterial white blowout
-  if (typeof THREE !== 'undefined' && Graph.lights) {
-    Graph.lights([
-      new THREE.AmbientLight(0xffffff, 0.55),
-      new THREE.DirectionalLight(0xffffff, 0.45)
-    ]);
+  // Determine which node's "牌位" (SpriteText) should be revealed
+  let revealedNodeId = null;
+  if (activeNode) {
+    if (!hiddenKinds.has(activeNode.kind) && gNodes.some(n => n.id === activeNode.id)) {
+      revealedNodeId = activeNode.id;
+    } else {
+      // If activeNode's layer is not shown, reveal closest visible ancestor's "牌位"
+      const closestAnc = findClosestVisibleAncestor(activeNode, gNodes);
+      if (closestAnc) revealedNodeId = closestAnc.id;
+    }
   }
 
-  // Configure tight d3 forces: small distance and controlled repulsion for compact 3D viewport
-  if (Graph.d3Force('link')) {
-    Graph.d3Force('link')
-      .distance(l => (l.kind === 'doc_link' ? 22 : 7))
-      .strength(l => (l.kind === 'doc_link' ? 0.35 : 0.85));
-  }
-  if (Graph.d3Force('charge')) {
-    Graph.d3Force('charge')
-      .strength(-14)
-      .distanceMax(100);
-  }
+  gNodes.forEach(n => {
+    if (n.__labelSprite) {
+      const isFile = n.kind === 'file';
+      const isRevealed = (n.id === revealedNodeId);
+      const isHighlighted = highlightNodes.has(n.id);
 
-  // Dynamic ResizeObserver strictly measures ONLY the 3D pane viewport
-  if (pane3D && window.ResizeObserver) {
-    const ro = new ResizeObserver(() => {
-      updateGraphSize();
-    });
-    ro.observe(pane3D);
-  }
+      n.__labelSprite.visible = true; // Never completely remove
+
+      if (!hasFilter) {
+        if (n.__labelSprite.material) {
+          n.__labelSprite.material.opacity = isFile ? 0.95 : 0.0;
+        }
+        n.__labelSprite.color = KIND_COLORS[n.kind] || '#58a6ff';
+        n.__labelSprite.backgroundColor = 'rgba(10, 14, 20, 0.85)';
+      } else {
+        if (isRevealed) {
+          // Revealed Shrine: prominent white text on dark blue glass
+          if (n.__labelSprite.material) n.__labelSprite.material.opacity = 1.0;
+          n.__labelSprite.color = '#ffffff';
+          n.__labelSprite.backgroundColor = 'rgba(13, 22, 38, 0.95)';
+        } else if (isHighlighted && isFile) {
+          if (n.__labelSprite.material) n.__labelSprite.material.opacity = 0.92;
+          n.__labelSprite.color = KIND_COLORS[n.kind] || '#f0883e';
+          n.__labelSprite.backgroundColor = 'rgba(10, 14, 20, 0.85)';
+        } else if (isHighlighted) {
+          if (n.__labelSprite.material) n.__labelSprite.material.opacity = 0.75;
+          n.__labelSprite.color = KIND_COLORS[n.kind] || '#58a6ff';
+          n.__labelSprite.backgroundColor = 'rgba(10, 14, 20, 0.75)';
+        } else {
+          // Unselected background nodes: 低調透明跟edge一樣
+          if (n.__labelSprite.material) n.__labelSprite.material.opacity = isFile ? 0.12 : 0.0;
+          n.__labelSprite.color = '#6e7681';
+          n.__labelSprite.backgroundColor = 'rgba(10, 14, 20, 0.15)';
+        }
+      }
+    }
+  });
 }
 
 function focusOnNode(node) {
   if (!node) return;
 
-  // Always resolve to the live simulated node in Graph or rawData that possesses valid x,y,z coordinates
   let liveNode = node;
   if (liveNode.x === undefined || liveNode.y === undefined || liveNode.z === undefined) {
     if (Graph && Graph.graphData) {
@@ -241,24 +225,32 @@ function focusOnNode(node) {
     }
   }
 
-  if (!liveNode || liveNode.x === undefined) {
-    console.warn('focusOnNode: live node coordinates not available for', node.id);
-    return;
-  }
-
+  if (!liveNode) return;
   activeNode = liveNode;
 
+  // 1. 近祖置中 (Focus on Immediate Parent / Closest Visible Ancestor for sections)
+  let centerNode = liveNode;
+  if (liveNode.kind !== 'file') {
+    const gNodes = (Graph && Graph.graphData) ? (Graph.graphData().nodes || []) : (rawData.nodes || []);
+    const closestAncestor = findClosestVisibleAncestor(liveNode, gNodes);
+    if (closestAncestor && closestAncestor.x !== undefined) {
+      centerNode = closestAncestor;
+    }
+  }
+
+  if (centerNode.x === undefined) centerNode = liveNode;
+  if (centerNode.x === undefined) return;
+
   if (Graph) {
-    const targetPos = { x: Number(liveNode.x) || 0, y: Number(liveNode.y) || 0, z: Number(liveNode.z) || 0 };
+    const targetPos = { x: Number(centerNode.x) || 0, y: Number(centerNode.y) || 0, z: Number(centerNode.z) || 0 };
     const camera = Graph.camera();
     const controls = Graph.controls();
 
     let camPos;
     if (camera && controls && typeof THREE !== 'undefined') {
-      // Glide camera smoothly to center dead-on targetPos while preserving natural perspective
       const dir = new THREE.Vector3().subVectors(camera.position, controls.target);
       if (dir.lengthSq() < 0.001) dir.set(0, 0, 1);
-      const focusDist = 42; // optimal comfortable zoom distance
+      const focusDist = 45; // comfortable viewing distance for ancestor & child framing
       dir.normalize().multiplyScalar(focusDist);
       camPos = {
         x: targetPos.x + dir.x,
@@ -266,7 +258,7 @@ function focusOnNode(node) {
         z: targetPos.z + dir.z
       };
     } else {
-      const distance = 42;
+      const distance = 45;
       const distRatio = 1 + distance / Math.hypot(targetPos.x || 1, targetPos.y || 1, targetPos.z || 1);
       camPos = {
         x: targetPos.x * distRatio,
@@ -279,23 +271,6 @@ function focusOnNode(node) {
   }
 }
 
-function updateLabelsVisibility() {
-  const nodes = (rawData && rawData.nodes) ? rawData.nodes : [];
-  const hasFilter = highlightNodes.size > 0;
-
-  nodes.forEach(n => {
-    if (n.__labelSprite) {
-      if (!hasFilter) {
-        n.__labelSprite.visible = true;
-        if (n.__labelSprite.material) n.__labelSprite.material.opacity = 1.0;
-      } else {
-        const isHighlighted = highlightNodes.has(n.id);
-        n.__labelSprite.visible = isHighlighted;
-        if (n.__labelSprite.material) n.__labelSprite.material.opacity = isHighlighted ? 1.0 : 0.0;
-      }
-    }
-  });
-}
 
 function highlightScope(scopeType, targetObj) {
   highlightNodes.clear();
