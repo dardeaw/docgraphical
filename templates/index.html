@@ -4,10 +4,37 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>DocGraphical 3D - Markdown Knowledge Studio</title>
+
+
 <script src="/static/three.min.js"></script>
+<script>
+if (window.THREE && !window.THREE.Timer) {
+  window.THREE.Timer = class Timer {
+    constructor() {
+      this._previousTime = 0;
+      this._currentTime = 0;
+      this._delta = 0;
+      this._elapsed = 0;
+      this._timescale = 1;
+    }
+    getDelta() { return (this._delta || 16.67) / 1000; }
+    getElapsed() { return (this._elapsed || 0) / 1000; }
+    setDelta(d) { this._delta = d * 1000; return this; }
+    reset() { this._currentTime = performance.now(); return this; }
+    dispose() { return this; }
+    update(timestamp) {
+      const now = timestamp !== undefined ? timestamp : performance.now();
+      this._delta = (now - this._previousTime) * this._timescale;
+      this._previousTime = now;
+      this._elapsed += this._delta;
+      return this;
+    }
+  };
+}
+</script>
 <script src="/static/three-spritetext.min.js"></script>
 <script src="/static/3d-force-graph.min.js"></script>
-<link rel="stylesheet" href="/static/galaxy.css?v=3.1.0">
+<link rel="stylesheet" href="/static/galaxy.css?v=3.2.0">
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark-dimmed.min.css">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
@@ -220,6 +247,6 @@
 
 <div id="toast"></div>
 
-<script src="/static/docgraph.js?v=3.1.0"></script>
+<script src="/static/docgraph.js?v=3.2.0"></script>
 </body>
 </html>

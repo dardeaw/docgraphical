@@ -41,6 +41,7 @@ def create_app(initial_paths: Optional[List[str]] = None, search_roots: Optional
         template_folder=template_dir,
         static_folder=static_dir
     )
+    app.config['TEMPLATES_AUTO_RELOAD'] = True
 
     @app.after_request
     def add_security_and_cache_headers(response: Response) -> Response:
