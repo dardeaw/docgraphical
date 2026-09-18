@@ -76,50 +76,67 @@ function updateGraphSize() {
 
 // ─── Ancestor Resolution & SpriteText Shrine Logic ───────────────
 
-function findClosestVisibleAncestor(node, gNodes) {
+function findImmediateAncestor(node, gNodes) {
   if (!node) return null;
   const nodesList = gNodes || (Graph && Graph.graphData ? Graph.graphData().nodes : rawData.nodes) || [];
   const rawLinks = rawData.links || [];
 
-  let currId = node.id;
-  const visited = new Set([currId]);
+  // 1. Direct parent link (parent_child where target === node.id)
+  let parentId = null;
+  for (const l of rawLinks) {
+    if (l.kind === 'parent_child') {
+      const sId = typeof l.source === 'object' ? l.source.id : l.source;
+      const tId = typeof l.target === 'object' ? l.target.id : l.target;
+      if (tId === node.id) {
+        parentId = sId;
+        break;
+      }
+    }
+  }
 
+  // 2. If direct 1-level parent exists in active 3D nodes, return it immediately (真·近祖!)
+  if (parentId) {
+    const parentNode = nodesList.find(n => n.id === parentId);
+    if (parentNode && parentNode.x !== undefined) {
+      return parentNode;
+    }
+  }
+
+  // 3. If direct parent is not active, step-by-step trace upward for nearest visible ancestor
+  let currId = parentId;
+  const visited = new Set([node.id, currId]);
   while (currId) {
-    let parentId = null;
+    let nextParentId = null;
     for (const l of rawLinks) {
       if (l.kind === 'parent_child') {
         const sId = typeof l.source === 'object' ? l.source.id : l.source;
         const tId = typeof l.target === 'object' ? l.target.id : l.target;
         if (tId === currId && !visited.has(sId)) {
-          parentId = sId;
+          nextParentId = sId;
           visited.add(sId);
           break;
         }
       }
     }
-
-    if (!parentId && node.file) {
-      const cleanPath = (node.file || '').replace(/\\/g, '/');
-      const fileNode = nodesList.find(n => n.kind === 'file' && ((n.file || '').replace(/\\/g, '/') === cleanPath || n.id === `file::${cleanPath}`));
-      if (fileNode && fileNode.id !== currId) {
-        parentId = fileNode.id;
+    if (nextParentId) {
+      const ancNode = nodesList.find(n => n.id === nextParentId);
+      if (ancNode && ancNode.x !== undefined) {
+        return ancNode;
       }
+      currId = nextParentId;
+    } else {
+      break;
     }
-
-    if (!parentId) break;
-
-    const pNode = nodesList.find(n => n.id === parentId);
-    if (pNode && !hiddenKinds.has(pNode.kind)) {
-      return pNode;
-    }
-    currId = parentId;
   }
 
+  // 4. Fallback: owner Document file node
   if (node.file) {
     const cleanPath = (node.file || '').replace(/\\/g, '/');
-    return nodesList.find(n => n.kind === 'file' && ((n.file || '').replace(/\\/g, '/') === cleanPath || n.id === `file::${cleanPath}`));
+    const fileNode = nodesList.find(n => n.kind === 'file' && ((n.file || '').replace(/\\/g, '/') === cleanPath || n.id === `file::${cleanPath}`));
+    if (fileNode && fileNode.x !== undefined) return fileNode;
   }
-  return null;
+
+  return node;
 }
 
 function createFileLabelSprite(n) {
@@ -266,13 +283,15 @@ function updateLabelsVisibility() {
   const gNodes = (Graph && Graph.graphData) ? (Graph.graphData().nodes || []) : (rawData.nodes || []);
   const hasFilter = highlightNodes.size > 0;
 
+  // Determine which node's "牌位" (SpriteText) should be revealed
   let revealedNodeId = null;
   if (activeNode) {
     if (!hiddenKinds.has(activeNode.kind) && gNodes.some(n => n.id === activeNode.id)) {
       revealedNodeId = activeNode.id;
     } else {
-      const closestAnc = findClosestVisibleAncestor(activeNode, gNodes);
-      if (closestAnc) revealedNodeId = closestAnc.id;
+      // If activeNode's layer is not shown, reveal closest visible ancestor's "牌位"
+      const nearAnc = findImmediateAncestor(activeNode, gNodes);
+      if (nearAnc) revealedNodeId = nearAnc.id;
     }
   }
 
@@ -292,6 +311,7 @@ function updateLabelsVisibility() {
         n.__labelSprite.backgroundColor = 'rgba(10, 14, 20, 0.85)';
       } else {
         if (isRevealed) {
+          // Revealed Shrine: prominent white text on dark blue glass
           if (n.__labelSprite.material) n.__labelSprite.material.opacity = 1.0;
           n.__labelSprite.color = '#ffffff';
           n.__labelSprite.backgroundColor = 'rgba(13, 22, 38, 0.95)';
@@ -328,13 +348,13 @@ function focusOnNode(node) {
   if (!liveNode) return;
   activeNode = liveNode;
 
-  // 1. 近祖置中 (Focus on Immediate Parent / Closest Visible Ancestor for sections)
+  // 1. 真·近祖置中 (Focus on 1-level Direct Immediate Parent for sections, NEVER skip to root file!)
   let centerNode = liveNode;
   if (liveNode.kind !== 'file') {
     const gNodes = (Graph && Graph.graphData) ? (Graph.graphData().nodes || []) : (rawData.nodes || []);
-    const closestAncestor = findClosestVisibleAncestor(liveNode, gNodes);
-    if (closestAncestor && closestAncestor.x !== undefined) {
-      centerNode = closestAncestor;
+    const nearAncestor = findImmediateAncestor(liveNode, gNodes);
+    if (nearAncestor && nearAncestor.x !== undefined) {
+      centerNode = nearAncestor;
     }
   }
 
