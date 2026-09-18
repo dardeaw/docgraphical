@@ -77,29 +77,31 @@ function updateGraphSize() {
 
 // ─── File Node 3D Text Sprite Label ──────────────────────────────
 function createFileLabelSprite(n) {
+  // Only render floating 3D text label for File / Document nodes
   if (!n || n.kind !== 'file') {
-    return (typeof THREE !== 'undefined') ? new THREE.Group() : null;
+    return null;
   }
 
-  const fileName = (n.file || n.name || '').split(/[\/]/).pop();
+  const rawPath = n.file || n.name || '';
+  const fileName = rawPath.split(/[\\/]/).pop();
   if (!fileName) {
-    return (typeof THREE !== 'undefined') ? new THREE.Group() : null;
+    return null;
   }
 
   const color = KIND_COLORS.file || '#f0883e';
 
-  // 1. If SpriteText library is available, use it
+  // 1. If SpriteText library is available, use it (extends THREE.Sprite)
   if (typeof SpriteText !== 'undefined') {
     try {
       const sprite = new SpriteText(fileName);
       sprite.color = color;
-      sprite.textHeight = 3.2;
-      sprite.backgroundColor = 'rgba(13, 17, 23, 0.88)';
+      sprite.textHeight = 3.6;
+      sprite.backgroundColor = 'rgba(13, 17, 23, 0.85)';
       sprite.borderColor = color;
       sprite.borderWidth = 1.0;
       sprite.borderRadius = 4;
       sprite.padding = [3, 6];
-      sprite.position.set(0, 3.5, 0);
+      sprite.position.set(0, 4.2, 0);
       if (sprite.material) {
         sprite.material.depthWrite = false;
         sprite.material.transparent = true;
@@ -116,20 +118,20 @@ function createFileLabelSprite(n) {
       const canvas = document.createElement('canvas');
       const ctx = canvas.getContext('2d');
 
-      const fontSize = 32;
-      ctx.font = `bold ${fontSize}px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif`;
+      const fontSize = 28;
+      ctx.font = 'bold ' + fontSize + 'px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif';
       const textWidth = ctx.measureText(fileName).width;
 
-      const padX = 16;
+      const padX = 14;
       const padY = 8;
       canvas.width = Math.ceil(textWidth + padX * 2);
       canvas.height = fontSize + padY * 2;
 
-      ctx.fillStyle = 'rgba(13, 17, 23, 0.88)';
+      ctx.fillStyle = 'rgba(13, 17, 23, 0.85)';
       ctx.strokeStyle = color;
-      ctx.lineWidth = 2.5;
+      ctx.lineWidth = 2.0;
 
-      const r = 8;
+      const r = 6;
       const w = canvas.width;
       const h = canvas.height;
 
@@ -142,7 +144,7 @@ function createFileLabelSprite(n) {
       ctx.fill();
       ctx.stroke();
 
-      ctx.font = `bold ${fontSize}px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif`;
+      ctx.font = 'bold ' + fontSize + 'px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif';
       ctx.fillStyle = color;
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
@@ -159,19 +161,19 @@ function createFileLabelSprite(n) {
 
       const sprite = new THREE.Sprite(spriteMaterial);
       const aspect = canvas.width / canvas.height;
-      const spriteH = 2.8;
+      const spriteH = 3.2;
       const spriteW = spriteH * aspect;
       sprite.scale.set(spriteW, spriteH, 1);
-      sprite.position.set(0, 3.5, 0);
+      sprite.position.set(0, 4.2, 0);
 
       return sprite;
     } catch (err) {
       console.error('Canvas sprite creation failed:', err);
-      return new THREE.Group();
+      return null;
     }
   }
 
-  return (typeof THREE !== 'undefined') ? new THREE.Group() : null;
+  return null;
 }
 
 function init3DGraph() {
