@@ -47,12 +47,12 @@ const EDGE_COLORS = {
 };
 
 document.addEventListener('DOMContentLoaded', () => {
-  init3DGraph();
-  initAutoRotate();
-  initColumnResizers();
-  initSearch();
-  loadProjects();
-  checkElectronNative();
+  try { init3DGraph(); } catch (e) { console.error('init3DGraph error:', e); }
+  try { initAutoRotate(); } catch (e) { console.error('initAutoRotate error:', e); }
+  try { initColumnResizers(); } catch (e) { console.error('initColumnResizers error:', e); }
+  try { initSearch(); } catch (e) { console.error('initSearch error:', e); }
+  try { loadProjects(); } catch (e) { console.error('loadProjects error:', e); }
+  try { checkElectronNative(); } catch (e) { console.error('checkElectronNative error:', e); }
 });
 
 // ─── 1. 3D WebGL Scene & Node Rendering ───────────────────────────
@@ -77,29 +77,101 @@ function updateGraphSize() {
 
 // ─── File Node 3D Text Sprite Label ──────────────────────────────
 function createFileLabelSprite(n) {
-  if (n.kind !== 'file') return null;
-  const fileName = (n.file || n.name || '').split(/[\\/]/).pop();
-  if (!fileName) return null;
+  if (!n || n.kind !== 'file') {
+    return (typeof THREE !== 'undefined') ? new THREE.Group() : null;
+  }
+
+  const fileName = (n.file || n.name || '').split(/[\/]/).pop();
+  if (!fileName) {
+    return (typeof THREE !== 'undefined') ? new THREE.Group() : null;
+  }
 
   const color = KIND_COLORS.file || '#f0883e';
 
+  // 1. If SpriteText library is available, use it
   if (typeof SpriteText !== 'undefined') {
-    const sprite = new SpriteText(fileName);
-    sprite.color = color;
-    sprite.textHeight = 3.6;
-    sprite.backgroundColor = 'rgba(13, 17, 23, 0.88)';
-    sprite.borderColor = color;
-    sprite.borderWidth = 1.2;
-    sprite.borderRadius = 4;
-    sprite.padding = [4, 7];
-    sprite.position.set(0, 3.8, 0); // Placed prominently above the file sphere
-    if (sprite.material) {
-      sprite.material.depthWrite = false;
-      sprite.material.transparent = true;
+    try {
+      const sprite = new SpriteText(fileName);
+      sprite.color = color;
+      sprite.textHeight = 3.2;
+      sprite.backgroundColor = 'rgba(13, 17, 23, 0.88)';
+      sprite.borderColor = color;
+      sprite.borderWidth = 1.0;
+      sprite.borderRadius = 4;
+      sprite.padding = [3, 6];
+      sprite.position.set(0, 3.5, 0);
+      if (sprite.material) {
+        sprite.material.depthWrite = false;
+        sprite.material.transparent = true;
+      }
+      return sprite;
+    } catch (err) {
+      console.warn('SpriteText creation failed, falling back to CanvasTexture:', err);
     }
-    return sprite;
   }
-  return null;
+
+  // 2. Fallback: native Three.js CanvasTexture Sprite
+  if (typeof THREE !== 'undefined') {
+    try {
+      const canvas = document.createElement('canvas');
+      const ctx = canvas.getContext('2d');
+
+      const fontSize = 32;
+      ctx.font = `bold ${fontSize}px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif`;
+      const textWidth = ctx.measureText(fileName).width;
+
+      const padX = 16;
+      const padY = 8;
+      canvas.width = Math.ceil(textWidth + padX * 2);
+      canvas.height = fontSize + padY * 2;
+
+      ctx.fillStyle = 'rgba(13, 17, 23, 0.88)';
+      ctx.strokeStyle = color;
+      ctx.lineWidth = 2.5;
+
+      const r = 8;
+      const w = canvas.width;
+      const h = canvas.height;
+
+      ctx.beginPath();
+      if (ctx.roundRect) {
+        ctx.roundRect(1, 1, w - 2, h - 2, r);
+      } else {
+        ctx.rect(1, 1, w - 2, h - 2);
+      }
+      ctx.fill();
+      ctx.stroke();
+
+      ctx.font = `bold ${fontSize}px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif`;
+      ctx.fillStyle = color;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(fileName, w / 2, h / 2);
+
+      const texture = new THREE.CanvasTexture(canvas);
+      texture.minFilter = THREE.LinearFilter;
+
+      const spriteMaterial = new THREE.SpriteMaterial({
+        map: texture,
+        depthWrite: false,
+        transparent: true
+      });
+
+      const sprite = new THREE.Sprite(spriteMaterial);
+      const aspect = canvas.width / canvas.height;
+      const spriteH = 2.8;
+      const spriteW = spriteH * aspect;
+      sprite.scale.set(spriteW, spriteH, 1);
+      sprite.position.set(0, 3.5, 0);
+
+      return sprite;
+    } catch (err) {
+      console.error('Canvas sprite creation failed:', err);
+      return new THREE.Group();
+    }
+  }
+
+  return (typeof THREE !== 'undefined') ? new THREE.Group() : null;
 }
 
 function init3DGraph() {
