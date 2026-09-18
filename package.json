@@ -51,11 +51,15 @@
       "target": [
         {
           "target": "nsis",
-          "arch": ["x64"]
+          "arch": [
+            "x64"
+          ]
         },
         {
           "target": "portable",
-          "arch": ["x64"]
+          "arch": [
+            "x64"
+          ]
         }
       ],
       "icon": "assets/icon.ico"
@@ -68,5 +72,15 @@
       "shortcutName": "DocGraphical"
     },
     "icon": "assets/icon.png"
-  }
+  },
+  "files": [
+    "bin/**/*",
+    "lib/**/*",
+    "electron/**/*",
+    "app/**/*",
+    "assets/**/*",
+    "README.md",
+    "README.zh-TW.md",
+    "LICENSE"
+  ]
 }
