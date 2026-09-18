@@ -307,6 +307,46 @@ function highlightScope(scopeType, targetObj) {
     const node = targetObj;
     highlightNodes.add(node.id);
 
+    // 1. Trace ALL Ancestors recursively up to the Root Document / File node
+    let currentAncestors = [node.id];
+    const visitedAncestors = new Set([node.id]);
+
+    while (currentAncestors.length > 0) {
+      const nextAncestors = [];
+      currentAncestors.forEach(currId => {
+        rawLinks.forEach(l => {
+          if (l.kind === 'parent_child') {
+            const sId = typeof l.source === 'object' ? l.source.id : l.source;
+            const tId = typeof l.target === 'object' ? l.target.id : l.target;
+            if (tId === currId && !visitedAncestors.has(sId)) {
+              visitedAncestors.add(sId);
+              highlightNodes.add(sId);
+              highlightLinks.add(l);
+              nextAncestors.push(sId);
+            }
+          }
+        });
+      });
+      currentAncestors = nextAncestors;
+    }
+
+    // 2. Ensure owner Document / File node is 100% included in ancestor chain
+    if (node.file) {
+      const cleanPath = (node.file || '').replace(/\\/g, '/');
+      const fileNode = rawData.nodes.find(n => n.kind === 'file' && ((n.file || '').replace(/\\/g, '/') === cleanPath || n.id === `file::${cleanPath}`));
+      if (fileNode) {
+        highlightNodes.add(fileNode.id);
+        rawLinks.forEach(l => {
+          const sId = typeof l.source === 'object' ? l.source.id : l.source;
+          const tId = typeof l.target === 'object' ? l.target.id : l.target;
+          if (sId === fileNode.id && highlightNodes.has(tId)) {
+            highlightLinks.add(l);
+          }
+        });
+      }
+    }
+
+    // 3. Highlight direct children (subsections) & direct doc_links (references)
     rawLinks.forEach(l => {
       const sId = typeof l.source === 'object' ? l.source.id : l.source;
       const tId = typeof l.target === 'object' ? l.target.id : l.target;
