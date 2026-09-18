@@ -1146,6 +1146,35 @@ function initDraggableLegend() {
 }
 
 // ─── 7. Resizers (Tree, Doc, 3D and Links) ─────────────────────────
+
+function togglePanelsSwap() {
+  const appLayout = document.getElementById('app-layout');
+  if (!appLayout) return;
+
+  const isSwapped = appLayout.classList.toggle('panels-swapped');
+  const btn = document.getElementById('btn-swap-panels');
+  const lbl = document.getElementById('lbl-swap-text');
+
+  if (btn) {
+    if (isSwapped) {
+      if (lbl) lbl.textContent = '對調回右';
+      btn.title = '對調回右側 (Swap back to right)';
+      showToast('🔄 已對調：3D 星系置中，Markdown 移至右側');
+    } else {
+      if (lbl) lbl.textContent = '左右對調';
+      btn.title = '與 Markdown 瀏覽對調 (Swap with Markdown Reader)';
+      showToast('🔄 已對調：恢復標準排版');
+    }
+  }
+
+  setTimeout(() => {
+    updateGraphSize();
+    if (Graph) {
+      autoFrameGraph();
+    }
+  }, 60);
+}
+
 function initColumnResizers() {
   // Resizer 1: Tree vs Doc
   const resizerTreeDoc = document.getElementById('resizer-tree-doc');

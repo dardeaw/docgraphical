@@ -1511,3 +1511,52 @@ html, body {
   color: #8b949e;
   margin-top: 2px;
 }
+
+/* Floating Panel Swap Button */
+#btn-swap-panels {
+  position: absolute;
+  top: 38px;
+  left: 12px;
+  z-index: 50;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 10px;
+  font-size: 11px;
+  font-weight: 600;
+  color: #c9d1d9;
+  background: rgba(22, 27, 34, 0.88);
+  border: 1px solid #30363d;
+  border-radius: 6px;
+  backdrop-filter: blur(8px);
+  cursor: pointer;
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+}
+
+#btn-swap-panels:hover {
+  background: #1f6feb;
+  color: #ffffff;
+  border-color: #388bfd;
+  box-shadow: 0 4px 14px rgba(31, 111, 235, 0.45);
+  transform: translateY(-1px);
+}
+
+/* Swapped State: Graph panel in center, Doc panel on right */
+#app-layout.panels-swapped #graph-panel {
+  order: 2;
+}
+
+#app-layout.panels-swapped #resizer-doc-3d {
+  order: 3;
+}
+
+#app-layout.panels-swapped #doc-panel {
+  order: 4;
+}
+
+/* When swapped, move button to top-right corner of 3D graph */
+#app-layout.panels-swapped #btn-swap-panels {
+  left: auto;
+  right: 12px;
+}
