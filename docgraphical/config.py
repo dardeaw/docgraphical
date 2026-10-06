@@ -37,7 +37,15 @@ def get_default_db_path(repo_path: Optional[str] = None) -> str:
 
 
 def load_config() -> Dict[str, List[str]]:
-    """Load configuration, seamlessly migrating from legacy config if needed."""
+    """Load configuration, seamlessly migrating from legacy config if needed.
+
+    Isolated mode: when DOCGRAPHICAL_CONFIG env points to a dedicated file
+    (e.g. a clean test instance), skip legacy migration AND the standard
+    PythonCode fallback so an empty config truly means "no roots yet" —
+    the UI then guides the user into repo setup instead of inheriting
+    the main instance's roots.
+    """
+    isolated = bool(os.environ.get("DOCGRAPHICAL_CONFIG"))
     legacy_cfg_path = os.path.expanduser("~/.docgraph_config.json")
     
     roots: List[str] = []
@@ -53,8 +61,8 @@ def load_config() -> Dict[str, List[str]]:
         except Exception:
             pass
 
-    # 2. If modern config has no roots, check legacy config
-    if not roots and os.path.exists(legacy_cfg_path):
+    # 2. If modern config has no roots, check legacy config (skip when isolated)
+    if not roots and not isolated and os.path.exists(legacy_cfg_path):
         try:
             with open(legacy_cfg_path, "r", encoding="utf-8") as f:
                 data = json.load(f)
@@ -66,8 +74,8 @@ def load_config() -> Dict[str, List[str]]:
         except Exception:
             pass
 
-    # 3. If still empty, check standard OneDrive PythonCode folder
-    if not roots:
+    # 3. If still empty, check standard OneDrive PythonCode folder (skip when isolated)
+    if not roots and not isolated:
         standard_roots = [
             os.path.abspath(r"D:\OneDrive - 勤誠興業股份有限公司\文件\PythonCode"),
             os.path.abspath(r"C:\OneDrive - 勤誠興業股份有限公司\文件\PythonCode"),

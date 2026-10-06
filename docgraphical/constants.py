@@ -8,6 +8,9 @@ IGNORE_DIRS = {
 
 DOC_EXTS = (".md", ".markdown", ".mdown", ".txt")
 
-CONFIG_FILE = os.path.expanduser("~/.docgraphical_config.json")
+# Ingest source types shown by the Explorer "Show source" toggle.
+SOURCE_EXTS = (".pptx", ".ppt", ".docx", ".doc", ".pdf")
+
+CONFIG_FILE = os.environ.get("DOCGRAPHICAL_CONFIG") or os.path.expanduser("~/.docgraphical_config.json")
 DEFAULT_PORT = 5002
 DEFAULT_HOST = "127.0.0.1"

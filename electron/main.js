@@ -111,19 +111,9 @@ function createMainWindow(port) {
         { role: 'forceReload', label: 'Force Reload', accelerator: 'CmdOrCtrl+Shift+R' },
         { type: 'separator' },
         {
-          label: 'Toggle Section Slice Mode',
-          accelerator: 'CmdOrCtrl+S',
-          click: () => mainWindow.webContents.executeJavaScript('toggleSliceMode()')
-        },
-        {
           label: 'Toggle Explorer Panel',
           accelerator: 'CmdOrCtrl+B',
           click: () => mainWindow.webContents.executeJavaScript('toggleTreePanel()')
-        },
-        {
-          label: 'Toggle Intelligence Drawer',
-          accelerator: 'CmdOrCtrl+I',
-          click: () => mainWindow.webContents.executeJavaScript('toggleDrawer()')
         },
         { type: 'separator' },
         { role: 'togglefullscreen', label: 'Toggle Full Screen' },
@@ -135,7 +125,7 @@ function createMainWindow(port) {
       submenu: [
         {
           label: 'GitHub Repository',
-          click: () => shell.openExternal('https://github.com/dardeaw/docgraph')
+          click: () => shell.openExternal('https://github.com/dardeaw/docgraphical')
         },
         {
           label: 'About DocGraph',

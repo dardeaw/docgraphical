@@ -57,8 +57,11 @@ def run_mcp():
     def docgraphical_index(repoPath: str) -> str:
         """Scan and build/refresh .docgraphical/docgraphical.db SQLite AST graph index for a project."""
         try:
-            f, n, e = index_repository(repoPath)
-            return f"Successfully indexed {repoPath}: {f} files, {n} nodes, {e} edges stored in .docgraphical/docgraphical.db"
+            res = index_repository(repoPath, incremental=True)
+            return (f"Successfully indexed {repoPath}: {res['files']} files "
+                    f"({res['parsed']} parsed, {res['skipped']} unchanged, "
+                    f"{res['removed']} removed), {res['nodes']} nodes, "
+                    f"{res['edges']} edges stored in .docgraphical/docgraphical.db")
         except Exception as e:
             return f"Error indexing repository: {e}"
 

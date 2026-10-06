@@ -7,6 +7,8 @@ let filteredData = { nodes: [], links: [] };
 let masterGraphData = { nodes: [], links: [] };
 let allProjectsList = [];
 const selectedProjects = new Set();
+// Explorer checkbox selection persists across reloads/refresh (galaxy-style)
+const PROJECTS_SEL_KEY = 'docgraphical-selected-projects';
 
 const highlightNodes = new Set();
 const highlightLinks = new Set();
@@ -51,9 +53,10 @@ document.addEventListener('DOMContentLoaded', () => {
   try { init3DNavControls(); } catch (e) { console.error('initCyberControls error:', e); }
   try { initAutoRotate(); } catch (e) { console.error('initAutoRotate error:', e); }
   try { initColumnResizers(); } catch (e) { console.error('initColumnResizers error:', e); }
-  try { initSearch(); } catch (e) { console.error('initSearch error:', e); }
   try { loadProjects(); } catch (e) { console.error('loadProjects error:', e); }
   try { checkElectronNative(); } catch (e) { console.error('checkElectronNative error:', e); }
+  try { updateHealthIndicator(); } catch (e) { console.error('health error:', e); }
+  try { initTreeCtxMenu(); } catch (e) { console.error('ctxmenu error:', e); }
 });
 
 // ─── 1. 3D WebGL Scene & Node Rendering ───────────────────────────
@@ -597,18 +600,57 @@ function getNodeRelativePathInProject(n, projName) {
 }
 
 // ─── 3. Project & Graph Data Loading ──────────────────────────────
-function loadProjects() {
+function persistSelectedProjects() {
+  try { localStorage.setItem(PROJECTS_SEL_KEY, JSON.stringify(Array.from(selectedProjects))); } catch (e) { /* ignore */ }
+}
+
+function loadProjects(opts = {}) {
+  const bPreserve = !!opts.preserve;
+  const vPrev = bPreserve ? Array.from(selectedProjects) : null;
+
   fetch('/api/projects')
     .then(res => res.json())
     .then(projects => {
       allProjectsList = projects || [];
       renderRepoTable(allProjectsList);
 
-      // Default select all projects
+      // Selection priority: explicit preserve (Refresh) > localStorage >
+      // default (every indexed project).
       selectedProjects.clear();
-      allProjectsList.forEach(p => {
-        if (p.status === 'ready') selectedProjects.add(p.name);
-      });
+      const vNames = new Set(allProjectsList.map(p => p.name));
+      let vChosen = null;
+      if (bPreserve && vPrev) {
+        vChosen = vPrev;
+      } else {
+        try { vChosen = JSON.parse(localStorage.getItem(PROJECTS_SEL_KEY) || 'null'); } catch (e) { vChosen = null; }
+      }
+      if (Array.isArray(vChosen) && vChosen.length) {
+        vChosen.filter(n => vNames.has(n)).forEach(n => selectedProjects.add(n));
+      } else {
+        allProjectsList.forEach(p => {
+          if (p.status === 'ready') selectedProjects.add(p.name);
+        });
+      }
+      // Saved selection may all be stale -> make sure something is active
+      if (selectedProjects.size === 0 && allProjectsList.length > 0) {
+        allProjectsList.forEach(p => {
+          if (p.status === 'ready') selectedProjects.add(p.name);
+        });
+      }
+      persistSelectedProjects();
+
+      // First run only (zero repos registered): guide the user straight into
+      // repo setup instead of a blank screen. Repos that exist but hold no
+      // files yet must NOT trigger this — the user already did the setup.
+      if (allProjectsList.length === 0) {
+        buildProjectTree();
+        showToast(currentLanguage === 'zh' ? '👋 知識庫是空的 — 先加入文件目錄吧' : '👋 Knowledge base is empty — add a directory to begin');
+        // bRefresh=false: this call is INSIDE loadProjects — re-triggering a
+        // refresh here would recurse forever (loadProjects -> openPathModal
+        // -> loadProjects -> ...) and flood /api/projects (~200 req/s).
+        openPathModal(false);
+        return;
+      }
 
       if (allProjectsList.length > 0) {
         loadMasterGraphAndFilter();
@@ -619,11 +661,16 @@ function loadProjects() {
 
 function loadMasterGraphAndFilter() {
   if (allProjectsList.length === 0) return;
-  
-  // The root project (e.g. PythonCode) contains the complete unified database
-  const rootProj = allProjectsList.find(p => p.name === 'PythonCode') || allProjectsList[0];
-  
-  fetch(`/api/graph?path=${encodeURIComponent(rootProj.path)}`)
+
+  // Multi-repo merge: ask the server for EVERY known project path so the
+  // merged payload carries an explicit `project` on each node (deepest repo
+  // wins on duplicates). Repos without an index simply contribute nothing.
+  const strParams = allProjectsList
+    .filter(p => p && p.path)
+    .map(p => 'path=' + encodeURIComponent(p.path))
+    .join('&');
+
+  fetch(`/api/graph${strParams ? '?' + strParams : ''}`)
     .then(res => res.json())
     .then(data => {
       masterGraphData = data || { nodes: [], links: [] };
@@ -695,6 +742,9 @@ function buildProjectTree() {
     selectedTreeNodeEl.getAttribute('data-tree-proj')
   ) : null;
 
+  // Keep the user's scroll position across rebuilds (P1)
+  const prevScrollTop = container.scrollTop;
+
   container.innerHTML = '';
   const summaryEl = document.getElementById('lbl-proj-summary');
   if (summaryEl) summaryEl.innerText = `${selectedProjects.size} Active`;
@@ -748,6 +798,78 @@ function buildProjectTree() {
     }
   });
 
+  // Galaxy-style: merge real filesystem entries that are NOT in the DB, so
+  // the tree shows the true folder hierarchy (pending for indexed repos,
+  // full disk list for unindexed ones). Rendered with an amber badge.
+  (allProjectsList || []).forEach(p => {
+    const extra = (p.pending_files && p.pending_files.length)
+      ? p.pending_files : (p.unindexed_files || []);
+    if (!extra.length) return;
+    if (!projRoots[p.name]) projRoots[p.name] = { name: p.name, dirs: {}, files: {} };
+    const vRoot = projRoots[p.name];
+    extra.forEach(rel => {
+      const parts = (rel || '').split('/');
+      const fName = parts.pop();
+      if (!fName) return;
+      let cur = vRoot, acc = '';
+      parts.forEach(seg => {
+        acc = acc ? acc + '/' + seg : seg;
+        if (!cur.dirs[seg]) cur.dirs[seg] = { name: seg, path: acc, dirs: {}, files: {} };
+        cur = cur.dirs[seg];
+      });
+      if (!cur.files[fName]) {
+        cur.files[fName] = { name: fName, path: rel, symbols: [], node: null, is_unindexed: true };
+      }
+    });
+  });
+
+  // Empty dirs from disk (all_dirs): freshly created folders hold no files
+  // yet, so no file entry implies them — merge the chain so New Folder
+  // results stay visible in the tree.
+  (allProjectsList || []).forEach(p => {
+    const vDirs = p.all_dirs || [];
+    if (!vDirs.length) return;
+    if (!projRoots[p.name]) projRoots[p.name] = { name: p.name, dirs: {}, files: {} };
+    const vR = projRoots[p.name];
+    vDirs.forEach(rel => {
+      let cur = vR, acc = '';
+      (rel || '').split('/').forEach(seg => {
+        if (!seg) return;
+        acc = acc ? acc + '/' + seg : seg;
+        if (!cur.dirs[seg]) cur.dirs[seg] = { name: seg, path: acc, dirs: {}, files: {} };
+        cur = cur.dirs[seg];
+      });
+    });
+  });
+
+  // Sources follow their md: md_sources maps md rel -> header-recorded
+  // source rels (existing files only). Attached onto the md's file entry;
+  // orphans (recorded in no md header) are never shown.
+  const findFileEntry = (root, rel) => {
+    const parts = (rel || '').split('/');
+    const fn = parts.pop();
+    if (!fn) return null;
+    let cur = root;
+    for (const seg of parts) {
+      if (!cur.dirs[seg]) return null;
+      cur = cur.dirs[seg];
+    }
+    return (cur.files && cur.files[fn]) || null;
+  };
+  if (isShowSource()) {
+    (allProjectsList || []).forEach(p => {
+      const mapping = p.md_sources || {};
+      const keys = Object.keys(mapping);
+      if (!keys.length) return;
+      if (!projRoots[p.name]) projRoots[p.name] = { name: p.name, dirs: {}, files: {} };
+      const vRt = projRoots[p.name];
+      keys.forEach(mdRel => {
+        const entry = findFileEntry(vRt, mdRel);
+        if (entry && !entry.is_source) entry.sources = mapping[mdRel] || [];
+      });
+    });
+  }
+
   // Render All Projects
   allProjectsList.forEach(proj => {
     const projName = proj.name;
@@ -759,11 +881,18 @@ function buildProjectTree() {
     projNodeEl.className = 'tree-node';
     projNodeEl.setAttribute('data-tree-proj', projName);
 
+    // Unindexed projects stay visible as todo entries with an inline Create Index action.
+    const vProjIndexed = proj.status === 'ready' || proj.is_indexed || proj.has_db;
+    const vProjZh = currentLanguage === 'zh';
+    const vProjEsc = (proj.path || '').replace(/\\/g, '\\\\');
+
     projNodeEl.innerHTML = `
       <span class="tree-arrow ${isProjOpen ? 'open' : ''}">▸</span>
       <input type="checkbox" ${isSelected ? 'checked' : ''} title="Toggle project inclusion" />
-      <span style="font-weight:600; color:#58a6ff;">📦 ${escapeHtml(projName)}</span>
-      <span class="node-kind-tag" style="margin-left:auto;">${proj.files || Object.keys(projData.files).length} files</span>
+      <span title="${escapeHtml(projName)}" style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:600;color:#58a6ff;">📦 ${escapeHtml(projName)}</span>
+      <button class="mini-btn" style="margin-left:auto; padding:1px 8px; font-size:11px;" title="${vProjZh ? '在此專案新增文件…（開啟 LLM 摘要入庫對話框）' : 'New document here… (open LLM summary ingest dialog)'}" onclick="event.stopPropagation();treeNewDocument('${vProjEsc}')">＋</button>
+      <span class="node-kind-tag" style="margin-left:6px;">${proj.files || Object.keys(projData.files).length} files</span>
+      ${vProjIndexed ? '' : `<button class="mini-btn" style="margin-left:6px; padding:1px 8px; font-size:10px; border-color:#9e6a03; color:#d29922;" title="${vProjZh ? '建立索引後才會出現在圖上' : 'Index it to show its nodes in the graph'}" onclick="event.stopPropagation();initRepo('${vProjEsc}', this)">${vProjZh ? '＋ 建立索引' : '＋ Create Index'}</button>`}
     `;
 
     const projChildrenEl = document.createElement('div');
@@ -774,6 +903,7 @@ function buildProjectTree() {
       e.stopPropagation();
       if (cb.checked) selectedProjects.add(projName);
       else selectedProjects.delete(projName);
+      persistSelectedProjects();
       filterGraphBySelectedProjects(false);
     };
 
@@ -798,6 +928,100 @@ function buildProjectTree() {
     container.appendChild(projNodeEl);
     container.appendChild(projChildrenEl);
   });
+
+  // Restore scroll position after the full rebuild
+  container.scrollTop = prevScrollTop;
+  paintShowSourceBtn();
+}
+
+// Explorer "Show source" toggle: list ingest source files (ppt/pdf/word)
+// next to the md docs. Default ON, remembered in localStorage.
+const SRC_VIS_KEY = 'docgraphical-show-source';
+function isShowSource() {
+  try { const v = localStorage.getItem(SRC_VIS_KEY); return v === null ? true : v === '1'; }
+  catch (e) { return true; }
+}
+function toggleShowSource() {
+  const v = !isShowSource();
+  try { localStorage.setItem(SRC_VIS_KEY, v ? '1' : '0'); } catch (e) { /* ignore */ }
+  paintShowSourceBtn();
+  if (typeof buildProjectTree === 'function') buildProjectTree();
+}
+function paintShowSourceBtn() {
+  const el = document.getElementById('btn-toggle-src');
+  if (!el) return;
+  const zh = (typeof currentLanguage !== 'undefined' && currentLanguage === 'zh');
+  const on = isShowSource();
+  el.textContent = on ? '👁 Source' : '🚫 Source';
+  el.title = zh ? (on ? '隱藏來源檔案（ppt／pdf／word）' : '顯示來源檔案（ppt／pdf／word）')
+                : (on ? 'Hide source files (ppt/pdf/word)' : 'Show source files (ppt/pdf/word)');
+}
+// Recursive file count under a tree dir node (md docs only — sources excluded).
+function countDirFiles(d) {
+  if (!d) return 0;
+  let n = 0;
+  Object.values(d.files || {}).forEach(f => { if (f && !f.is_source) n++; });
+  Object.values(d.dirs || {}).forEach(s => { n += countDirFiles(s); });
+  return n;
+}
+// Inline ＋ on project/dir rows: same dialog as the ctx-menu New document.
+function treeNewDocument(absPath) {
+  const zh = (typeof currentLanguage !== 'undefined' && currentLanguage === 'zh');
+  if (typeof openIngestDialog === 'function') openIngestDialog(absPath);
+  else showToast(zh ? '⏳ 文件匯入即將推出' : '⏳ Document ingest coming soon');
+}
+// Ctx-menu / inline New Folder: mkdir under absPath, then refresh the tree
+// (all_dirs from the backend makes the empty folder visible).
+function treeNewFolder(absPath) {
+  const zh = (typeof currentLanguage !== 'undefined' && currentLanguage === 'zh');
+  if (!absPath) { showToast(zh ? '❌ 無目標路徑' : '❌ No target path'); return; }
+  const name = (window.prompt(zh ? `新資料夾名稱（建在 ${absPath} 下）` : `New folder name (under ${absPath})`, '') || '').trim();
+  if (!name) return;
+  fetch('/api/browse/mkdir', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ parent: absPath, name: name })
+  })
+    .then(r => r.json().then(d => ({ status: r.status, body: d })))
+    .then(({ status, body }) => {
+      if (status === 200 && body.success) {
+        showToast((zh ? '📁 已建立：' : '📁 Created: ') + body.path);
+        if (typeof loadProjects === 'function') loadProjects({ preserve: true });
+      } else {
+        showToast('❌ ' + ((body && body.error) || status));
+      }
+    })
+    .catch(err => showToast('❌ ' + err));
+}
+
+// Inline − on md rows: delete the md + its header-recorded sources + index.
+// Always asks first (native confirm lists exactly what will go).
+function treeDeleteFile(absPath, displayName) {
+  const zh = (typeof currentLanguage !== 'undefined' && currentLanguage === 'zh');
+  if (!absPath) { showToast(zh ? '❌ 無目標路徑' : '❌ No target path'); return; }
+  const name = displayName || absPath.split('\\').pop() || absPath;
+  const ok = window.confirm(zh
+    ? `確定刪除「${name}」？\n\nmd 本體＋它 header 記載的來源檔會一起砍掉，索引同步移除。\n此動作無法復原。`
+    : `Delete "${name}"?\n\nThe md plus its header-recorded source files will be removed and the index updated.\nThis cannot be undone.`);
+  if (!ok) return;
+  fetch('/api/ingest/delete', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ path: absPath })
+  })
+    .then(r => r.json().then(d => ({ status: r.status, body: d })))
+    .then(({ status, body }) => {
+      if (status === 200 && body.success) {
+        const n = (body.deleted || []).length;
+        const miss = (body.missing || []).length;
+        showToast((zh ? `🗑 已刪除 ${n} 個檔案` : `🗑 Deleted ${n} file(s)`)
+          + (miss ? (zh ? `（${miss} 個找不到，略過）` : ` (${miss} missing, skipped)`) : ''));
+        if (typeof loadProjects === 'function') loadProjects({ preserve: true });
+      } else {
+        showToast('❌ ' + ((body && body.error) || status));
+      }
+    })
+    .catch(err => showToast('❌ ' + err));
 }
 
 // Recursive directory & file renderer
@@ -816,9 +1040,16 @@ function renderDirContents(projName, dirObj, parentEl, openDirs, openFiles, sele
     dirNodeEl.className = 'tree-node';
     dirNodeEl.setAttribute('data-tree-dir', dirKey);
 
+    // Folder badge (recursive file count) + inline ＋ (same as New document).
+    const vDirZh = (typeof currentLanguage !== 'undefined' && currentLanguage === 'zh');
+    const vDirCount = countDirFiles(subDir);
+    const vDirAbs = resolveTreeAbsPath(projName, cleanSubPath);
+    const vDirEsc = (vDirAbs || '').replace(/\\/g, '\\\\').replace(/'/g, "\\'");
     dirNodeEl.innerHTML = `
       <span class="tree-arrow ${isDirOpen ? 'open' : ''}">▸</span>
-      <span style="font-weight:500; color:#e6edf3;">📁 ${escapeHtml(dName)}</span>
+      <span title="${escapeHtml(dName)}" style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:500;color:#e6edf3;">📁 ${escapeHtml(dName)}</span>
+      <button class="mini-btn" style="margin-left:auto; padding:1px 8px; font-size:11px;" title="${vDirZh ? `在此資料夾新增文件…（${escapeHtml(vDirAbs)}）` : `New document here… (${escapeHtml(vDirAbs)})`}" onclick="event.stopPropagation();treeNewDocument('${vDirEsc}')">＋</button>
+      ${vDirCount > 0 ? `<span class="node-kind-tag" style="margin-left:6px;">${vDirCount} files</span>` : ''}
     `;
 
     const dirChildrenEl = document.createElement('div');
@@ -851,6 +1082,8 @@ function renderDirContents(projName, dirObj, parentEl, openDirs, openFiles, sele
   fileNames.forEach(fName => {
     const fileData = dirObj.files[fName];
     const symList = fileData.symbols || [];
+    const bUnindexed = !!fileData.is_unindexed;
+    const bUzh = currentLanguage === 'zh';
     const cleanFilePath = (fileData.path || '').replace(/\\/g, '/');
     const fileKey = `${projName}:${cleanFilePath}`;
     const isFileOpen = openFiles ? openFiles.has(fileKey) : false;
@@ -871,10 +1104,18 @@ function renderDirContents(projName, dirObj, parentEl, openDirs, openFiles, sele
     fileNodeEl.setAttribute('data-tree-proj', projName);
     fileNodeEl.setAttribute('data-tree-file-path', cleanFilePath);
 
+    // Long names truncate with … (badge + delete stay visible); full name on hover.
+    const vIsMd = /\.md$/i.test(fName || '');
+    const vFileAbs = resolveTreeAbsPath(projName, cleanFilePath);
+    const vFileEsc = (vFileAbs || '').replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+    const vNameEsc = (fName || '').replace(/\\/g, '\\\\').replace(/'/g, "\\'");
     fileNodeEl.innerHTML = `
-      <span class="tree-arrow ${isFileOpen ? 'open' : ''}">▸</span>
-      <span style="color:#c9d1d9;">📄 ${escapeHtml(fName)}</span>
-      <span class="node-kind-tag">${symList.length}h</span>
+      <span class="tree-arrow ${isFileOpen ? 'open' : ''}" style="${bUnindexed ? 'visibility:hidden;' : ''}">▸</span>
+      <span title="${escapeHtml(fName)}" style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:${bUnindexed ? '#d29922' : '#c9d1d9'};">📄 ${escapeHtml(fName)}</span>
+      ${vIsMd ? `<button class="mini-btn" style="padding:0 7px;font-size:11px;flex-shrink:0;border-color:#5a2d2d;color:#f85149;" title="${bUzh ? `刪除「${escapeHtml(fName)}」（md＋來源檔＋索引，需確認）` : `Delete "${escapeHtml(fName)}" (md + sources + index, asks first)`}" onclick="event.stopPropagation();treeDeleteFile('${vFileEsc}', '${vNameEsc}')">−</button>` : ''}
+      ${bUnindexed
+        ? `<span class="node-kind-tag" style="flex-shrink:0;margin-left:6px;background:#3a2e12;color:#d29922;border:1px solid #9e6a03;">${bUzh ? '⏳ 待索引' : '⏳ unindexed'}</span>`
+        : `<span class="node-kind-tag" style="flex-shrink:0;margin-left:6px;">${symList.length}h</span>`}
     `;
 
     const fileChildrenEl = document.createElement('div');
@@ -891,6 +1132,10 @@ function renderDirContents(projName, dirObj, parentEl, openDirs, openFiles, sele
 
     fileNodeEl.onclick = () => {
       selectTreeNode(fileNodeEl);
+      if (bUnindexed) {
+        showToast(currentLanguage === 'zh' ? '⏳ 尚未索引 — 用 Sync 納入' : '⏳ Not indexed yet — Sync to include it');
+        return;
+      }
       highlightScope('file', { project: projName, file: cleanFilePath, node: fileNode, symbols: symList });
       selectActiveNode(fileNode);
       focusOnNode(fileNode);
@@ -898,6 +1143,33 @@ function renderDirContents(projName, dirObj, parentEl, openDirs, openFiles, sele
 
     if (selectedKey === fileKey) {
       selectTreeNode(fileNodeEl);
+    }
+
+    // 3a. Header-recorded sources hang directly under their md (toggle-gated).
+    const vSrcList = fileData.sources || [];
+    if (vSrcList.length) {
+      const vPe = (allProjectsList || []).find(p => p.name === projName);
+      const vRepoPath = (vPe && vPe.path) || '';
+      vSrcList.forEach(srcRel => {
+        const sName = (srcRel || '').split('/').pop() || srcRel;
+        const sExt = (sName.split('.').pop() || '').toLowerCase();
+        const sUrl = vRepoPath ? `/api/ingest/source?repo=${encodeURIComponent(vRepoPath)}&file=${encodeURIComponent(srcRel)}` : '';
+        const sEl = document.createElement('div');
+        sEl.className = 'tree-node';
+        sEl.setAttribute('data-tree-src', '1');
+        sEl.setAttribute('data-tree-proj', projName);
+        sEl.setAttribute('data-tree-file-path', srcRel);
+        sEl.innerHTML = `
+          <span class="tree-arrow" style="visibility:hidden;">▸</span>
+          <span title="${escapeHtml(srcRel)}" style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#8b949e;">📎 ${escapeHtml(sName)}</span>
+          <span class="node-kind-tag" style="flex-shrink:0;margin-left:6px;background:#21262d;color:#8b949e;border:1px solid #30363d;">${escapeHtml(sExt) || 'src'}</span>
+        `;
+        sEl.onclick = () => {
+          selectTreeNode(sEl);
+          if (sUrl) window.open(sUrl, '_blank', 'noopener');
+        };
+        fileChildrenEl.appendChild(sEl);
+      });
     }
 
     // 3. Convert flat headings into a nested AST hierarchy tree (Every level collapsible!)
@@ -942,7 +1214,7 @@ function renderNestedHeadingTree(headingNodes, parentEl, openDirs, selectedKey) 
     hNodeEl.innerHTML = `
       <span class="tree-arrow ${isHeadingOpen ? 'open' : ''}" style="${hasChildren ? '' : 'visibility:hidden;'}">▸</span>
       <span style="color:${KIND_COLORS[h.kind] || '#58a6ff'}; margin-right:4px; font-weight:700; font-size:11px;">${'#'.repeat(h.level || 1)}</span>
-      <span style="color:#e6edf3; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:12px;">${escapeHtml(h.name)}</span>
+      <span title="${escapeHtml(h.name)}" style="flex:1;min-width:0;color:#e6edf3;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px;">${escapeHtml(h.name)}</span>
       <span class="tree-line-badge" style="margin-left:auto; font-size:10px; color:#6e7681;">L${h.line || 1}</span>
     `;
 
@@ -1049,14 +1321,52 @@ function syncExplorerSelection(node) {
 
 function filterTree(q) {
   const query = (q || '').trim().toLowerCase();
-  document.querySelectorAll('#tree-container .tree-node').forEach(el => {
-    if (!query) {
-      el.style.display = 'flex';
-      return;
+  const container = document.getElementById('tree-container');
+  if (!container) return;
+  const vNodes = Array.from(container.querySelectorAll('.tree-node'));
+
+  if (!query) {
+    vNodes.forEach(el => { el.style.display = 'flex'; });
+    container.querySelectorAll('.tree-children').forEach(c => { c.style.display = ''; });
+    return;
+  }
+
+  // Show every match PLUS all of its ancestors (project/dir rows), so a hit
+  // deep in the hierarchy is never hidden behind collapsed parents.
+  const showSet = new Set();
+  vNodes.forEach(el => {
+    const text = (el.innerText || '').toLowerCase();
+    if (!text.includes(query)) return;
+    showSet.add(el);
+    let p = el.parentElement;
+    while (p && p !== container) {
+      if (p.classList && p.classList.contains('tree-node')) showSet.add(p);
+      p = p.parentElement;
     }
-    const text = el.innerText.toLowerCase();
-    el.style.display = text.includes(query) ? 'flex' : 'none';
   });
+
+  vNodes.forEach(el => {
+    el.style.display = showSet.has(el) ? 'flex' : 'none';
+  });
+
+  // Auto-expand every container that holds a visible node; hide empty ones.
+  container.querySelectorAll('.tree-children').forEach(c => {
+    const vKids = Array.from(c.querySelectorAll('.tree-node'));
+    const bAny = vKids.some(n => showSet.has(n));
+    c.style.display = bAny ? '' : 'none';
+    if (bAny) {
+      c.classList.add('open');
+      const prev = c.previousElementSibling;
+      const arrow = prev ? prev.querySelector('.tree-arrow') : null;
+      if (arrow) arrow.classList.add('open');
+    }
+  });
+}
+
+function clearTreeFilter() {
+  const input = document.getElementById('tree-search');
+  if (input) input.value = '';
+  filterTree('');
 }
 
 function selectAllProjects(val) {
@@ -1065,10 +1375,14 @@ function selectAllProjects(val) {
     else selectedProjects.delete(p.name);
   });
   document.querySelectorAll('#tree-container input[type="checkbox"]').forEach(cb => cb.checked = val);
+  persistSelectedProjects();
   filterGraphBySelectedProjects(false);
 }
 
 // ─── 5. Center Doc Stage & Right Links Updates ────────────────────
+// md viewer context: owning project/repo + header source rels
+// (drives source-file links + the viewer right-click menu).
+let viewCtx = { project: '', file: '', repo: '', sources: [] };
 function selectActiveNode(node) {
   if (!node) return;
   activeNode = node;
@@ -1086,6 +1400,11 @@ function selectActiveNode(node) {
 
   // Fetch Section / Full Content for Center Markdown Viewer
   const queryFile = node.abs_path || node.file || '';
+  // Viewer context: owning project/repo (for source-file links + ctx menu).
+  viewCtx = { project: '', file: (node.file || '').replace(/\\/g, '/'), repo: '', sources: [] };
+  try { viewCtx.project = node.project || getNodeProject(node) || ''; } catch (e) { /* ignore */ }
+  const vProjEntry = (allProjectsList || []).find(p => p.name === viewCtx.project);
+  if (vProjEntry && vProjEntry.path) viewCtx.repo = vProjEntry.path;
   const headingParam = node.kind === 'file' ? '' : `&heading=${encodeURIComponent(node.name)}`;
   fetch(`/api/doc/section?file=${encodeURIComponent(queryFile)}${headingParam}&sub=1`)
     .then(res => res.json())
@@ -1093,8 +1412,12 @@ function selectActiveNode(node) {
       const content = data.content || node.content || '';
       renderMarkdown(content);
 
-      // Token Intelligence Metrics
-      const fullTokens = node.tokens || Math.ceil(content.length / 3.8);
+      // Token Intelligence Metrics — full doc is the denominator, the slice
+      // is the numerator (previously both were computed from the same text,
+      // so heading savings were always 0.0%).
+      const fullChars = (typeof data.full_chars === 'number' && data.full_chars > 0)
+        ? data.full_chars : content.length;
+      const fullTokens = Math.max(1, Math.ceil(fullChars / 3.8));
       const slicedTokens = Math.ceil(content.length / 3.8);
       const savings = node.kind === 'file' ? '0.0%' : `${Math.max(0, ((fullTokens - slicedTokens) / (fullTokens || 1)) * 100).toFixed(1)}%`;
 
@@ -1115,6 +1438,11 @@ function selectActiveNode(node) {
       console.error('Section read error, falling back to cached content:', err);
       if (node.content) {
         renderMarkdown(node.content);
+        // Honest fallback: the file is gone from disk (stale index) or the
+        // server hiccuped — say so instead of silently showing full text.
+        const zh = (typeof currentLanguage !== 'undefined' && currentLanguage === 'zh');
+        showToast(zh ? '⚠ 後端讀不到檔案（可能已刪除），顯示的是快取全文 — 請 Sync 更新'
+                     : '⚠ File unreadable server-side (may be deleted), showing cached full text — Sync to refresh');
       }
     });
 
@@ -1179,14 +1507,112 @@ function selectActiveNode(node) {
 function renderMarkdown(mdText) {
   const container = document.getElementById('d-code-markdown');
   if (!container) return;
+  // Ingest-md header sources: `> - `rel`` lines — remembered for linkify + menu.
+  viewCtx.sources = [];
+  ((mdText || '').match(/^> - `(.+)`$/gm) || []).forEach(l => {
+    const r = l.replace(/^> - `|`$/g, '');
+    if (r && viewCtx.sources.indexOf(r) < 0) viewCtx.sources.push(r);
+  });
   if (window.marked) {
     container.innerHTML = marked.parse(mdText || '');
     container.querySelectorAll('pre code').forEach((block) => {
       if (window.hljs) hljs.highlightElement(block);
     });
+    linkifySources(container);
   } else {
     container.innerText = mdText || '';
   }
+  // Every new selection starts at the top — never inherit the old scroll
+  // position (that made heading clicks look like "full doc minus the front").
+  container.scrollTop = 0;
+  // Viewer right-click menu (bound once).
+  if (!container.dataset.viewCtxBound) {
+    container.dataset.viewCtxBound = '1';
+    container.addEventListener('contextmenu', openViewCtxMenu);
+  }
+}
+
+// Turn header `> - `rel`` code spans into source-file links (new tab:
+// pdf renders inline, office files download via /api/ingest/source).
+function viewSourceUrl(rel) {
+  if (!viewCtx.repo || !rel) return '';
+  return `/api/ingest/source?repo=${encodeURIComponent(viewCtx.repo)}&file=${encodeURIComponent(rel)}`;
+}
+function linkifySources(container) {
+  if (!viewCtx.sources.length || !viewCtx.repo) return;
+  const zh = (typeof currentLanguage !== 'undefined' && currentLanguage === 'zh');
+  container.querySelectorAll('blockquote code').forEach((code) => {
+    const rel = (code.textContent || '').trim();
+    if (viewCtx.sources.indexOf(rel) < 0) return;
+    const url = viewSourceUrl(rel);
+    if (!url) return;
+    const a = document.createElement('a');
+    a.className = 'src-link';
+    a.href = url;
+    a.target = '_blank';
+    a.rel = 'noopener';
+    a.textContent = rel;
+    a.title = (zh ? '開啟來源檔案：' : 'Open source file: ') + rel;
+    code.replaceWith(a);
+  });
+}
+
+// ─── md viewer custom context menu ───
+// Native selection + Ctrl+C work (CSS user-select:text); this menu adds:
+// copy selection / copy section / copy-for-agent / open source / copy path.
+let viewCtxEl = null;
+function closeViewCtxMenu() {
+  if (viewCtxEl) { viewCtxEl.remove(); viewCtxEl = null; }
+  document.removeEventListener('click', closeViewCtxMenu);
+}
+function openViewCtxMenu(e) {
+  const c = document.getElementById('d-code-markdown');
+  if (!c || !c.contains(e.target)) return;
+  e.preventDefault();
+  const zh = (typeof currentLanguage !== 'undefined' && currentLanguage === 'zh');
+  const sel = (window.getSelection ? window.getSelection().toString() : '').trim();
+  const items = [];
+  if (sel) {
+    items.push({ label: zh ? '📋 複製選取文字' : '📋 Copy selection', fn: () => {
+      copyTextToClipboard(sel, zh ? '📋 已複製選取文字' : '📋 Selection copied');
+    }});
+  }
+  items.push({ label: zh ? '📄 複製本節 Markdown' : '📄 Copy section markdown', fn: () => copyCurrentSection() });
+  items.push({ label: zh ? '🤖 複製給 Agent' : '🤖 Copy for Agent', fn: () => copyMcpPayload() });
+  (viewCtx.sources || []).slice(0, 5).forEach(rel => {
+    const base = rel.split('/').pop();
+    const url = viewSourceUrl(rel);
+    if (!url) return;
+    items.push({ label: (zh ? '📂 開啟來源檔案：' : '📂 Open source: ') + base, fn: () => window.open(url, '_blank', 'noopener') });
+  });
+  if (viewCtx.sources.length) {
+    items.push({ label: zh ? '📁 複製來源絕對路徑' : '📁 Copy source absolute path', fn: () => {
+      const abs = viewCtx.sources.map(r => `${viewCtx.repo}\\${r.replace(/\//g, '\\')}`).join('\n');
+      copyTextToClipboard(abs, zh ? '📁 已複製來源路徑' : '📁 Source path copied');
+    }});
+  }
+  if (!items.length) return;
+  closeViewCtxMenu();
+  viewCtxEl = document.createElement('div');
+  viewCtxEl.style.cssText = 'position:fixed;z-index:1000006;min-width:200px;max-width:340px;background:#161b22;border:1px solid #30363d;border-radius:8px;padding:4px;box-shadow:0 8px 24px rgba(0,0,0,.55);font-size:12px;color:#e6edf3;zoom:1.16;';
+  items.forEach(it => {
+    const row = document.createElement('div');
+    row.textContent = it.label;
+    row.style.cssText = 'padding:7px 10px;border-radius:6px;cursor:pointer;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;';
+    row.title = it.label;
+    row.onmouseenter = () => { row.style.background = '#1f6feb44'; };
+    row.onmouseleave = () => { row.style.background = ''; };
+    row.onclick = (ev) => { ev.stopPropagation(); closeViewCtxMenu(); it.fn(); };
+    viewCtxEl.appendChild(row);
+  });
+  document.body.appendChild(viewCtxEl);
+  const mw = viewCtxEl.offsetWidth, mh = viewCtxEl.offsetHeight;
+  let x = e.clientX, y = e.clientY;
+  if (x + mw > window.innerWidth - 8) x = Math.max(8, window.innerWidth - mw - 8);
+  if (y + mh > window.innerHeight - mh - 8) y = Math.max(8, window.innerHeight - mh - 8);
+  viewCtxEl.style.left = x + 'px';
+  viewCtxEl.style.top = y + 'px';
+  setTimeout(() => document.addEventListener('click', closeViewCtxMenu), 0);
 }
 
 function copyCurrentSection() {
@@ -1527,32 +1953,13 @@ function toggleTreePanel() {
   if (b) b.classList.toggle('active', isTreeOpen);
 }
 
-function initSearch() {
-  const searchBox = document.getElementById('search-box');
-  if (!searchBox) return;
-  searchBox.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter') {
-      const q = searchBox.value.trim().toLowerCase();
-      if (!q) return;
 
-      const found = (filteredData.nodes || []).find(n => n.name.toLowerCase().includes(q));
-      if (found) {
-        highlightScope('node', found);
-        focusOnNode(found);
-        selectActiveNode(found);
-        syncExplorerSelection(found);
-        showToast(`🎯 Focused: ${found.name}`);
-      } else {
-        showToast(`❌ Not found: ${q}`);
-      }
-    }
-  });
-}
-
-function openPathModal() {
+function openPathModal(bRefresh = true) {
   const m = document.getElementById('path-modal');
   if (m) m.classList.add('show');
-  loadProjects();
+  // bRefresh=false when called from inside loadProjects itself — otherwise
+  // loadProjects -> openPathModal -> loadProjects recurses infinitely.
+  if (bRefresh) loadProjects();
 }
 
 function closePathModal() {
@@ -1587,47 +1994,89 @@ function renderRepoTable(projects) {
   const tbody = document.getElementById('manager-table-body');
   if (!tbody) return;
   tbody.innerHTML = '';
-  
-  (projects || []).forEach(p => {
+
+  const zh = currentLanguage === 'zh';
+  const T = {
+    indexed: zh ? '已索引' : 'Indexed',
+    unindexed: zh ? '未索引' : 'Unindexed',
+    pendingTip: zh ? '尚未索引的檔案：' : 'Files not yet indexed: ',
+    sync: zh ? '增量同步' : 'Incremental Sync',
+    syncPending: (n) => zh ? `同步（${n} 待索引）` : `Sync (${n} pending)`,
+    rebuild: zh ? '完整重建' : 'Full Rebuild',
+    uninit: zh ? '移除索引' : 'Uninit',
+    create: zh ? '建立索引' : 'Create Index',
+    exclude: zh ? '排除' : 'Exclude',
+    pendingTag: (n) => zh ? `${n} 待索引` : `${n} pending`,
+  };
+
+  (projects || []).forEach((p, vIdx) => {
     const tr = document.createElement('tr');
     const isIndexed = p.is_indexed || p.has_db;
     const metricsText = isIndexed ? `${p.nodes || 0} / ${p.links || 0}` : '--';
     const escapedPath = p.path.replace(/\\/g, '\\\\');
+    const pendingCount = p.pending_count || 0;
+    const vPending = p.pending_files || [];
 
     let actionsHtml = '';
     if (isIndexed) {
+      const strSyncLabel = pendingCount > 0 ? T.syncPending(pendingCount) : T.sync;
       actionsHtml = `
         <div class="action-btn-group">
-          <button class="act-btn" onclick="syncRepo('${escapedPath}')">Incremental Index</button>
-          <button class="act-btn" onclick="rebuildRepo('${escapedPath}')">Full Rebuild</button>
-          <button class="act-btn danger" onclick="uninitRepo('${escapedPath}')">Uninit</button>
+          <button class="act-btn" onclick="syncRepo('${escapedPath}', this)">${strSyncLabel}</button>
+          <button class="act-btn" onclick="rebuildRepo('${escapedPath}', this)">${T.rebuild}</button>
+          <button class="act-btn danger" onclick="uninitRepo('${escapedPath}', this)">${T.uninit}</button>
         </div>
       `;
     } else {
       actionsHtml = `
         <div class="action-btn-group">
-          <button class="act-btn green" onclick="initRepo('${escapedPath}')">Create Index</button>
-          <button class="act-btn danger" onclick="excludeRepo('${escapedPath}')">Exclude</button>
+          <button class="act-btn green" onclick="initRepo('${escapedPath}', this)">${T.create}</button>
+          <button class="act-btn danger" onclick="excludeRepo('${escapedPath}')">${T.exclude}</button>
         </div>
       `;
+    }
+
+    // Honest status: grey "pending" badge only exists for indexed repos.
+    // Click it to expand the full pending-file list (lightweight SyncReview).
+    let statusHtml = `<span class="status-tag ${isIndexed ? 'ready' : 'unindexed'}">
+          ${isIndexed ? T.indexed : T.unindexed}
+        </span>`;
+    if (isIndexed && pendingCount > 0) {
+      const strTip = T.pendingTip + vPending.slice(0, 8).join(', ') +
+        (pendingCount > vPending.length || pendingCount > 8 ? ' …' : '');
+      statusHtml += ` <span class="status-tag pending" title="${escapeHtml(strTip)}"
+          style="background:#3a2e12; color:#d29922; border:1px solid #9e6a03; cursor:pointer;"
+          onclick="togglePendingRow(${vIdx}, this)">
+          ${T.pendingTag(pendingCount)}
+        </span>`;
     }
 
     tr.innerHTML = `
       <td style="font-weight:600; color:#58a6ff;">${escapeHtml(p.name)}</td>
       <td style="font-family:monospace; font-size:11px; color:#8b949e;" title="${escapeHtml(p.path)}">${escapeHtml(p.path)}</td>
       <td style="font-family:monospace; font-size:11px; color:#c9d1d9;">${metricsText}</td>
-      <td>
-        <span class="status-tag ${isIndexed ? 'ready' : 'unindexed'}">
-          ${isIndexed ? 'Indexed' : 'Unindexed'}
-        </span>
-      </td>
+      <td>${statusHtml}</td>
       <td>${actionsHtml}</td>
     `;
     tbody.appendChild(tr);
   });
 }
 
-function syncRepo(path) {
+// Busy-state helper for index action buttons (galaxy-style: disable while running).
+function setBusy(btn, busy, busyLabel) {
+  if (!btn) return;
+  if (busy) {
+    if (!btn.dataset.orig) btn.dataset.orig = btn.innerHTML;
+    btn.disabled = true;
+    if (busyLabel) btn.innerHTML = busyLabel;
+    return;
+  }
+  btn.disabled = false;
+  if (btn.dataset.orig) { btn.innerHTML = btn.dataset.orig; delete btn.dataset.orig; }
+}
+
+function syncRepo(path, btn) {
+  setBusy(btn, true, '⏳ Syncing…');
   showToast('⏳ Performing incremental AST sync...');
   fetch('/api/sync', {
     method: 'POST',
@@ -1640,14 +2089,16 @@ function syncRepo(path) {
       showToast(`✅ Synced: ${res.files} files, ${res.nodes} nodes, ${res.edges} links!`);
       loadProjects();
     } else {
+      setBusy(btn, false);
       alert('Sync failed: ' + res.error);
     }
   })
-  .catch(err => alert('Sync error: ' + err));
+  .catch(err => { setBusy(btn, false); alert('Sync error: ' + err); });
 }
 
-function rebuildRepo(path) {
+function rebuildRepo(path, btn) {
   if (!confirm('Are you sure you want to perform a full AST rebuild?')) return;
+  setBusy(btn, true, '⏳ Rebuilding…');
   showToast('⏳ Full rebuild in progress...');
   fetch('/api/reindex', {
     method: 'POST',
@@ -1660,14 +2111,16 @@ function rebuildRepo(path) {
       showToast(`✅ Rebuilt: ${res.files} files, ${res.nodes} nodes, ${res.edges} links!`);
       loadProjects();
     } else {
+      setBusy(btn, false);
       alert('Rebuild failed: ' + res.error);
     }
   })
-  .catch(err => alert('Rebuild error: ' + err));
+  .catch(err => { setBusy(btn, false); alert('Rebuild error: ' + err); });
 }
 
-function uninitRepo(path) {
+function uninitRepo(path, btn) {
   if (!confirm('Uninitialize repository? This removes the local .docgraphical database.')) return;
+  setBusy(btn, true, '⏳ Removing…');
   showToast('⏳ Removing index database...');
   fetch('/api/uninit', {
     method: 'POST',
@@ -1680,13 +2133,15 @@ function uninitRepo(path) {
       showToast('🗑️ Repository uninitialized.');
       loadProjects();
     } else {
+      setBusy(btn, false);
       alert('Uninit failed: ' + res.error);
     }
   })
-  .catch(err => alert('Uninit error: ' + err));
+  .catch(err => { setBusy(btn, false); alert('Uninit error: ' + err); });
 }
 
-function initRepo(path) {
+function initRepo(path, btn) {
+  setBusy(btn, true, '⏳ Indexing…');
   showToast('⏳ Creating AST index for repository...');
   fetch('/api/index', {
     method: 'POST',
@@ -1699,10 +2154,396 @@ function initRepo(path) {
       showToast(`✅ Index created: ${res.files} files, ${res.nodes} nodes, ${res.edges} links!`);
       loadProjects();
     } else {
+      setBusy(btn, false);
       alert('Index failed: ' + res.error);
     }
   })
-  .catch(err => alert('Index error: ' + err));
+  .catch(err => { setBusy(btn, false); alert('Index error: ' + err); });
+}
+
+// Expandable pending-file list under a repo row (lightweight SyncReview).
+function togglePendingRow(idx, el) {
+  const p = (allProjectsList || [])[idx];
+  if (!p || !el) return;
+  const tr = el.closest('tr');
+  if (!tr) return;
+  const next = tr.nextElementSibling;
+  if (next && next.classList.contains('pending-detail-row')) { next.remove(); return; }
+  const zh = currentLanguage === 'zh';
+  const files = p.pending_files || [];
+  const total = p.pending_count || 0;
+  const items = files.map(f => `<div style="font-family:monospace; font-size:11px; color:#c9d1d9; padding:1px 0;">📄 ${escapeHtml(f)}</div>`).join('');
+  const dtr = document.createElement('tr');
+  dtr.className = 'pending-detail-row';
+  dtr.innerHTML = `<td colspan="5" style="background:#161b22; border-top:1px dashed #30363d; padding:8px 12px;">
+    <div style="font-size:12px; font-weight:600; color:#d29922; margin-bottom:4px;">${escapeHtml(p.name)} — ${zh ? `待索引檔案（${total}）` : `pending files (${total})`}${total > files.length ? (zh ? `，僅列前 ${files.length} 個` : `, showing first ${files.length}`) : ''}</div>
+    <div style="max-height:180px; overflow-y:auto;">${items || (zh ? '（無）' : '(none)')}</div>
+  </td>`;
+  tr.after(dtr);
+}
+
+// Global one-click incremental sync across every indexed repo.
+function syncAllRepos(btn) {
+  const indexed = (allProjectsList || []).filter(q => q.status === 'ready' || q.is_indexed || q.has_db);
+  if (!indexed.length) {
+    showToast(currentLanguage === 'zh' ? '沒有已索引的 repo 可同步' : 'No indexed repositories to sync');
+    return;
+  }
+  setBusy(btn, true, currentLanguage === 'zh' ? '⏳ 全域同步中…' : '⏳ Syncing all…');
+  showToast(currentLanguage === 'zh' ? `⏳ 正在同步 ${indexed.length} 個已索引 repo…` : `⏳ Syncing ${indexed.length} indexed repos…`);
+  fetch('/api/sync_all', { method: 'POST' })
+  .then(res => res.json())
+  .then(res => {
+    if (res.success) {
+      const t = res.totals || {};
+      showToast(currentLanguage === 'zh'
+        ? `⚡ 全域同步完成：${res.synced} 個 repo，解析 ${t.parsed || 0}，跳過 ${t.skipped || 0}，移除 ${t.removed || 0}`
+        : `⚡ Synced ${res.synced} repos: ${t.parsed || 0} parsed, ${t.skipped || 0} skipped, ${t.removed || 0} removed`);
+      loadProjects();
+    } else {
+      setBusy(btn, false);
+      alert('Sync all failed: ' + (res.error || 'unknown'));
+    }
+  })
+  .catch(err => { setBusy(btn, false); alert('Sync all error: ' + err); });
+}
+
+// ─── Document ingest dialog (dir-node "New document": ppt/word/pdf -> LLM -> md) ───
+// Rule: sources are copied INTO the target dir, the md lands NEXT TO them,
+// and the md header always records each source's repo-relative path.
+let ingState = null;
+function closeIngestDialog() {
+  const o = document.getElementById('ing-overlay');
+  if (o) o.remove();
+  ingState = null;
+}
+function ingMsg(t, bad) {
+  const m = document.getElementById('ing-msg');
+  if (m) { m.textContent = t || ''; m.style.color = bad ? '#f85149' : '#8b949e'; }
+}
+function openIngestDialog(absDir) {
+  const zh = currentLanguage === 'zh';
+  closeIngestDialog();
+  const t = (absDir || '').replace(/\\/g, '/');
+  let repoPath = '', projName = '';
+  (allProjectsList || []).forEach(p => {
+    if (!p.path) return;
+    const r = p.path.replace(/\\/g, '/');
+    if (t === r || t.startsWith(r + '/')) {
+      if (!repoPath || r.length > repoPath.replace(/\\/g, '/').length) { repoPath = p.path; projName = p.name; }
+    }
+  });
+  if (!repoPath) { showToast(zh ? '❌ 找不到所屬 repo' : '❌ Owning repo not found'); return; }
+  ingState = { dir: absDir, repo: repoPath, proj: projName, picked: [], files: [], summary: '', model: '', zh };
+  const o = document.createElement('div');
+  o.id = 'ing-overlay';
+  o.style.cssText = 'position:fixed;inset:0;z-index:1000002;background:rgba(0,0,0,.6);display:flex;align-items:center;justify-content:center;';
+  o.innerHTML = `
+  <div style="width:90vw;max-width:1700px;height:88vh;overflow:hidden;display:flex;flex-direction:column;background:#0d1117;border:1px solid #30363d;border-radius:12px;padding:16px;color:#e6edf3;">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px;">
+      <span style="font-weight:600;font-size:19px;">${zh ? '📥 新增文件 — LLM 摘要入庫' : '📥 New document — LLM summary ingest'} <span style="font-size:14px;color:#8b949e;font-weight:400;">v3.9.14</span></span>
+      <button onclick="closeIngestDialog()" style="background:transparent;border:none;color:#8b949e;cursor:pointer;font-size:16px;">✕</button>
+    </div>
+    <div style="font-size:15px;color:#8b949e;margin-bottom:10px;word-break:break-all;">${zh ? '目標目錄：' : 'Target: '}${escapeHtml(absDir)}${projName ? ` &nbsp;·&nbsp; ${escapeHtml(projName)}` : ''}</div>
+    <div style="display:flex;gap:12px;flex:1;min-height:0;">
+      <div style="flex:0 1 330px;min-width:250px;display:flex;flex-direction:column;gap:8px;">
+        <div style="font-size:16px;font-weight:600;color:#c9d1d9;">${zh ? '① 選擇檔案（ppt／word／pdf，可拖拉）' : '① Pick files (ppt/word/pdf, drag & drop)'}</div>
+        <div id="ing-drop" style="border:1.5px dashed #30363d;border-radius:8px;padding:20px 12px;text-align:center;color:#8b949e;font-size:16px;cursor:pointer;transition:border-color .15s,background .15s;">
+          ${zh ? '🖱️ 把檔案拖到這裡放開，或點此選擇檔案' : '🖱️ Drag files here, or click to browse'}
+          <input type="file" id="ing-file-input" multiple accept=".pptx,.ppt,.docx,.doc,.pdf" style="display:none;" />
+        </div>
+        <div id="ing-file-list" style="display:flex;flex-direction:column;gap:4px;flex:1;min-height:100px;overflow-y:auto;"></div>
+      </div>
+      <div style="flex:1;min-width:0;display:flex;flex-direction:column;gap:8px;">
+        <div style="font-size:16px;font-weight:600;color:#c9d1d9;">${zh ? '② LLM 摘要預覽' : '② LLM summary preview'}</div>
+        <div style="display:flex;gap:6px;align-items:center;">
+          <input id="ing-name-input" placeholder="${zh ? '摘要檔名（免副檔名）' : 'Summary filename (no ext)'}" style="flex:1;min-width:0;background:#010409;border:1px solid #30363d;border-radius:6px;padding:6px 10px;color:#e6edf3;font-size:16px;" />
+          <button id="ing-btn-sum" onclick="ingSummarize(this)" style="background:transparent;border:1px solid #1f6feb;color:#58a6ff;border-radius:6px;padding:6px 12px;cursor:pointer;white-space:nowrap;font-size:16px;">${zh ? '✨ 生成摘要' : '✨ Summarize'}</button>
+        </div>
+        <div style="display:flex;gap:6px;align-items:center;">
+          <button id="ing-tab-prev" onclick="ingShowTab('prev')" style="background:#1f6feb44;border:1px solid #1f6feb;color:#58a6ff;border-radius:6px;padding:4px 12px;cursor:pointer;font-size:16px;">👁 ${zh ? '預覽' : 'Preview'}</button>
+          <button id="ing-tab-edit" onclick="ingShowTab('edit')" style="background:transparent;border:1px solid #30363d;color:#c9d1d9;border-radius:6px;padding:4px 12px;cursor:pointer;font-size:16px;">✏️ ${zh ? '編輯' : 'Edit'}</button>
+          <span style="font-size:15px;color:#8b949e;">${zh ? '存檔前可先修改摘要' : 'review & edit before saving'}</span>
+        </div>
+        <div id="ing-preview" style="background:#010409;border:1px solid #21262d;border-radius:6px;padding:12px;font-size:13px;flex:1;min-height:220px;overflow-y:auto;color:#c9d1d9;word-break:break-word;">${zh ? '（摘要會顯示在這裡）' : '(summary appears here)'}</div>
+        <textarea id="ing-edit" style="display:none;background:#010409;border:1px solid #1f6feb;border-radius:6px;padding:12px;font-size:13px;color:#e6edf3;flex:1;min-height:220px;overflow-y:auto;font-family:inherit;white-space:pre-wrap;"></textarea>
+        <button id="ing-btn-save" onclick="ingSave(this)" style="background:#238636;border:1px solid #2ea043;color:#fff;border-radius:6px;padding:8px 12px;cursor:pointer;font-weight:600;font-size:16px;">${zh ? '✅ 確認產出 md 並入庫' : '✅ Confirm: write md & index'}</button>
+      </div>
+    </div>
+    <div id="ing-msg" style="font-size:16px;color:#8b949e;margin-top:8px;min-height:16px;"></div>
+  </div>`;
+  document.body.appendChild(o);
+  o.addEventListener('click', (ev) => { if (ev.target === o) closeIngestDialog(); });
+  // Picker + drag&drop share one list (drops accumulate; dupes by name+size dropped).
+  const dz = document.getElementById('ing-drop');
+  const fi = document.getElementById('ing-file-input');
+  if (dz && fi) {
+    dz.addEventListener('click', () => fi.click());
+    fi.addEventListener('change', (ev) => {
+      ingAddPicked(Array.from(ev.target.files || []));
+      fi.value = '';  // allow re-picking the same file
+    });
+    ['dragenter', 'dragover'].forEach(evName => dz.addEventListener(evName, (ev) => {
+      ev.preventDefault();
+      dz.style.borderColor = '#1f6feb';
+      dz.style.background = '#1f6feb22';
+    }));
+    ['dragleave', 'drop'].forEach(evName => dz.addEventListener(evName, (ev) => {
+      ev.preventDefault();
+      dz.style.borderColor = '#30363d';
+      dz.style.background = '';
+    }));
+    dz.addEventListener('drop', (ev) => {
+      const files = (ev.dataTransfer && ev.dataTransfer.files) ? Array.from(ev.dataTransfer.files) : [];
+      if (!files.length) return;
+      const ok = files.filter(f => /\.(pptx?|docx?|pdf)$/i.test(f.name || ''));
+      if (ok.length < files.length) {
+        ingMsg((ingState.zh ? '⚠ 已略過不支援的格式（僅 ppt／word／pdf）：' : '⚠ Skipped unsupported (ppt/word/pdf only): ')
+          + files.filter(f => !/\.(pptx?|docx?|pdf)$/i.test(f.name || '')).map(f => f.name).join('、'), true);
+      }
+      ingAddPicked(ok);
+    });
+  }
+}
+// Append files to the ingest pick list (shared by picker + drag&drop).
+function ingAddPicked(files) {
+  if (!ingState || !files || !files.length) return;
+  const seen = new Set(ingState.picked.map(f => `${f.name}::${f.size}`));
+  files.forEach(f => {
+    const k = `${f.name}::${f.size}`;
+    if (!seen.has(k)) { seen.add(k); ingState.picked.push(f); }
+  });
+  ingRenderPicked();
+}
+function ingRenderPicked() {
+  const box = document.getElementById('ing-file-list');
+  if (!box || !ingState) return;
+  box.innerHTML = '';
+  // Filename follows the pick immediately (first file stem + 摘要), so the
+  // user never has to type it — manual edits are never clobbered.
+  const ni = document.getElementById('ing-name-input');
+  if (!ingState.picked.length) {
+    box.innerHTML = `<div style="font-size:13px;color:#8b949e;">${ingState.zh ? '（尚未選擇檔案）' : '(no files yet)'}</div>`;
+    if (ni && ni.value === (ingState._autoName || '')) { ni.value = ''; ingState._autoName = ''; }
+    return;
+  }
+  // Auto-name from the first picked file (only while the user hasn't typed).
+  const ni2 = document.getElementById('ing-name-input');
+  if (ni2 && !ni2.value) {
+    ni2.value = ingState.picked[0].name.replace(/\.[^.]+$/, '') + '摘要';
+    ingState._autoName = ni2.value;
+  }
+  ingState.picked.forEach((f, idx) => {
+    const d = document.createElement('div');
+    d.style.cssText = 'display:flex;gap:6px;align-items:center;font-size:16px;color:#c9d1d9;border:1px solid #21262d;border-radius:6px;padding:4px 8px;';
+    const tx = document.createElement('span');
+    tx.style.cssText = 'flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;';
+    tx.textContent = `📎 ${f.name} (${Math.round(f.size / 1024)} KB)`;
+    tx.title = f.name;
+    d.appendChild(tx);
+    const x = document.createElement('button');
+    x.textContent = '✕';
+    x.title = ingState.zh ? '移除' : 'Remove';
+    x.style.cssText = 'background:transparent;border:none;color:#8b949e;cursor:pointer;font-size:16px;padding:0 2px;';
+    x.onclick = () => { ingState.picked.splice(idx, 1); ingRenderPicked(); };
+    d.appendChild(x);
+    box.appendChild(d);
+  });
+}
+// Animated busy line for long ingest ops: spinning ◌ + elapsed seconds +
+// dialog-wide button lock (no double-submit). Returns stop(); idempotent.
+function ingProgress(label) {
+  const st = ingState;
+  const m = document.getElementById('ing-msg');
+  const t0 = Date.now();
+  const lock = (on) => {
+    ['ing-btn-sum', 'ing-btn-save'].forEach(id => {
+      const b = document.getElementById(id);
+      if (b) b.disabled = on;
+    });
+  };
+  lock(true);
+  const tick = () => {
+    if (!m) return;
+    const s = Math.floor((Date.now() - t0) / 1000);
+    m.style.color = '#58a6ff';
+    m.innerHTML = `<span class="ing-spin">◌</span> ${escapeHtml(label)}… ${s}s`;
+  };
+  tick();
+  const timer = setInterval(tick, 500);
+  let stopped = false;
+  return () => {
+    if (stopped) return;
+    stopped = true;
+    clearInterval(timer);
+    lock(false);
+    if (st && st._stop) st._stop = null;
+  };
+}
+function ingUpload(btn, done) {
+  const st = ingState;
+  if (!st) return;
+  const zh = st.zh;
+  if (!st.picked.length) { ingMsg(zh ? '請先選擇檔案' : 'Pick files first', true); return; }
+  setBusy(btn, true, '⏳…');
+  if (st._stop) st._stop();
+  st._stop = ingProgress(zh ? '上傳暫存中' : 'Staging upload');
+  const fd = new FormData();
+  fd.append('target_dir', st.dir);
+  fd.append('stage', '1');  // files wait in staging; Confirm moves them in
+  st.picked.forEach(f => fd.append('files', f, f.name));
+  fetch('/api/ingest/upload', { method: 'POST', body: fd })
+  .then(r => r.json().then(d => ({ status: r.status, body: d })))
+  .then(({ status, body }) => {
+    if (st._stop) st._stop();
+    setBusy(btn, false);
+    if (status === 200 && body.success) {
+      st.files = body.files || [];
+      // File set changed after a previous summary? Old preview is stale — reset it.
+      const newKey = st.files.map(f => f.path).join('\n');
+      if (st.sumPaths && st.sumPaths !== newKey) {
+        st.summary = ''; st.model = ''; st.sumPaths = '';
+        const edR = document.getElementById('ing-edit');
+        if (edR) edR.value = '';
+        ingShowTab('prev');
+      }
+      const box = document.getElementById('ing-file-list');
+      box.innerHTML = '';
+      st.files.forEach(f => {
+        const d = document.createElement('div');
+        d.style.cssText = 'font-size:16px;color:#3fb950;border:1px solid #21262d;border-radius:6px;padding:4px 8px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;';
+        d.textContent = `✅ ${f.name}`;
+        d.title = f.path || f.name;
+        box.appendChild(d);
+      });
+      const nameInput = document.getElementById('ing-name-input');
+      if (nameInput && !nameInput.value && st.files.length) {
+        const stem = st.files[0].name.replace(/\.[^.]+$/, '');
+        nameInput.value = stem + '摘要';
+      }
+      ingMsg(zh ? `已暫存 ${st.files.length} 個檔案（確認後與 md 一起寫入目標目錄）` : `Staged ${st.files.length} file(s) — written on confirm`);
+      if (typeof done === 'function') { const cb = done; done = null; cb(); }
+    } else {
+      if (st._stop) st._stop();
+      ingMsg('❌ ' + ((body && body.error) || status), true);
+    }
+  })
+  .catch(err => { if (st._stop) st._stop(); setBusy(btn, false); ingMsg('❌ ' + err, true); });
+}
+// Summary Preview / Edit tabs. Single source of truth ping-pongs between
+// st.summary and the editor; save() always reads the editor.
+function ingShowTab(which) {
+  const st = ingState;
+  if (!st) return;
+  const pv = document.getElementById('ing-preview');
+  const ed = document.getElementById('ing-edit');
+  const tp = document.getElementById('ing-tab-prev');
+  const te = document.getElementById('ing-tab-edit');
+  if (!pv || !ed || !tp || !te) return;
+  const on = 'background:#1f6feb44;border:1px solid #1f6feb;color:#58a6ff;border-radius:6px;padding:4px 12px;cursor:pointer;font-size:16px;';
+  const off = 'background:transparent;border:1px solid #30363d;color:#c9d1d9;border-radius:6px;padding:4px 12px;cursor:pointer;font-size:16px;';
+  if (which === 'edit') {
+    if (!ed.value) ed.value = st.summary || '';
+    pv.style.display = 'none';
+    ed.style.display = 'block';
+    tp.style.cssText = off;
+    te.style.cssText = on;
+    ed.focus();
+  } else {
+    if (ed.style.display === 'block') st.summary = ed.value;  // keep human edits
+    ed.style.display = 'none';
+    pv.style.display = 'block';
+    tp.style.cssText = on;
+    te.style.cssText = off;
+    const txt = (st.summary || '').trim();
+    if (!txt) {
+      pv.textContent = st.zh ? '（摘要會顯示在這裡）' : '(summary appears here)';
+      return;
+    }
+    try {
+      if (window.marked && typeof window.marked.parse === 'function') pv.innerHTML = window.marked.parse(txt);
+      else if (typeof window.marked === 'function') pv.innerHTML = window.marked(txt);
+      else pv.textContent = txt;
+    } catch (e) { pv.textContent = txt; }
+  }
+}
+function ingSummarize(btn) {
+  const st = ingState;
+  if (!st) return;
+  const zh = st.zh;
+  // One-click flow: picked but not uploaded yet -> upload first, then summarize.
+  if (!st.files.length) {
+    if (!st.picked.length) { ingMsg(zh ? '請先選擇檔案' : 'Pick files first', true); return; }
+    ingUpload(null, () => ingSummarize(document.getElementById('ing-btn-sum')));
+    return;
+  }
+  setBusy(btn, true, '⏳…');
+  if (st._stop) st._stop();
+  st._stop = ingProgress(zh ? `摘要生成中（${st.files.length} 個檔案，大檔請耐心等候）` : `Summarizing ${st.files.length} file(s)`);
+  const pv0 = document.getElementById('ing-preview');
+  if (pv0) pv0.innerHTML = `<span class="ing-spin">◌</span> ${zh ? 'LLM 生成中…' : 'Generating…'}`;
+  fetch('/api/ingest/summarize', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ paths: st.files.map(f => f.path) })
+  })
+  .then(r => r.json().then(d => ({ status: r.status, body: d })))
+  .then(({ status, body }) => {
+    if (st._stop) st._stop();
+    setBusy(btn, false);
+    if (status === 200 && body.success) {
+      st.summary = body.summary || '';
+      st.model = body.model || '';
+      st.sumPaths = st.files.map(f => f.path).join('\n');
+      const ed0 = document.getElementById('ing-edit');
+      if (ed0) ed0.value = st.summary;
+      ingShowTab('prev');  // rendered markdown preview; switch to Edit to revise
+      const notes = (body.notes || []).join('；');
+      ingMsg((zh ? `✅ 摘要完成（${st.model}）` : `✅ Done (${st.model})`) + (notes ? ` — ${notes}` : ''));
+    } else {
+      if (st._stop) st._stop();
+      // Don't leave a stale "Generating…" in the preview on failure.
+      if (pv0) pv0.textContent = zh ? '（摘要會顯示在這裡）' : '(summary appears here)';
+      ingMsg('❌ ' + ((body && body.error) || status), true);
+    }
+  })
+  .catch(err => { if (st._stop) st._stop(); setBusy(btn, false); ingMsg('❌ ' + err, true); });
+}
+function ingSave(btn) {
+  const st = ingState;
+  if (!st) return;
+  const zh = st.zh;
+  const nameInput = document.getElementById('ing-name-input');
+  const filename = (nameInput && nameInput.value.trim()) || '';
+  // The human-reviewed text lives in the editor — that is what gets saved.
+  const edEl = document.getElementById('ing-edit');
+  const finalSummary = ((edEl && edEl.value) || st.summary || '').trim();
+  if (!finalSummary) { ingMsg(zh ? '請先生成摘要' : 'Generate the summary first', true); return; }
+  if (!filename) { ingMsg(zh ? '請填摘要檔名' : 'Enter a filename', true); return; }
+  st.summary = finalSummary;
+  setBusy(btn, true, '⏳…');
+  if (st._stop) st._stop();
+  st._stop = ingProgress(zh ? '寫檔＋增量索引中' : 'Writing + indexing');
+  fetch('/api/ingest/save', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ target_dir: st.dir, filename, summary_md: finalSummary,
+                           source_paths: st.files.map(f => f.path), model: st.model })
+  })
+  .then(r => r.json().then(d => ({ status: r.status, body: d })))
+  .then(({ status, body }) => {
+    if (st._stop) st._stop();
+    setBusy(btn, false);
+    if (status === 200 && body.success) {
+      const rels = (body.source_rels || []).join('、');
+      showToast(zh ? `✅ 已產出：${body.md_path}` : `✅ Written: ${body.md_path}`);
+      ingMsg((zh ? `✅ md 與來源同目錄，內文已記錄相對路徑：${rels}` : `✅ md saved next to sources; rel paths recorded: ${rels}`));
+      loadProjects();
+      setTimeout(closeIngestDialog, 1200);
+    } else {
+      if (st._stop) st._stop();
+      ingMsg('❌ ' + ((body && body.error) || status), true);
+    }
+  })
+  .catch(err => { if (st._stop) st._stop(); setBusy(btn, false); ingMsg('❌ ' + err, true); });
 }
 
 function excludeRepo(path) {
@@ -1741,6 +2582,187 @@ async function browseDirectoryNative() {
   }
 }
 
+// ─── Explorer tree custom context menu (project / dir / file / heading) ───
+let treeCtxEl = null;
+function closeTreeCtxMenu() {
+  if (treeCtxEl) { treeCtxEl.remove(); treeCtxEl = null; }
+  document.removeEventListener('click', closeTreeCtxMenu);
+}
+function copyTextToClipboard(t, okMsg) {
+  const done = () => showToast(okMsg);
+  const fallback = () => {
+    try {
+      const ta = document.createElement('textarea');
+      ta.value = t; ta.style.cssText = 'position:fixed;opacity:0;';
+      document.body.appendChild(ta); ta.select();
+      document.execCommand('copy'); ta.remove(); done();
+    } catch (e) { showToast('❌ Copy failed ／ 複製失敗'); }
+  };
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(t).then(done).catch(fallback);
+  } else fallback();
+}
+// Resolve an absolute disk path for any tree node.
+function resolveTreeAbsPath(projName, treePath) {
+  const proj = (allProjectsList || []).find(p => p.name === projName);
+  let rel = (treePath || '').replace(/\\/g, '/').replace(/^\/+/, '');
+  if (!proj || !proj.path) return rel;
+  const root = proj.path.replace(/\\/g, '/').replace(/\/+$/, '');
+  if (/^[a-zA-Z]:\//.test(rel)) return rel.replace(/\//g, '\\');
+  if (rel.toLowerCase() === root.toLowerCase() ||
+      rel.toLowerCase().startsWith(root.toLowerCase() + '/')) {
+    return rel.replace(/\//g, '\\');
+  }
+  if (rel === projName) rel = '';
+  else if (rel.startsWith(projName + '/')) rel = rel.substring(projName.length + 1);
+  return (root + (rel ? '/' + rel : '')).replace(/\//g, '\\');
+}
+function findGraphNodeById(id) {
+  if (!id) return null;
+  const pools = [(masterGraphData && masterGraphData.nodes) || []];
+  try { if (typeof rawData !== 'undefined' && rawData && rawData.nodes) pools.push(rawData.nodes); } catch (e) { /* ignore */ }
+  for (const pool of pools) {
+    const hit = (pool || []).find(n => n && n.id === id);
+    if (hit) return hit;
+  }
+  return null;
+}
+function focusOnlyProject(projName) {
+  const zh = currentLanguage === 'zh';
+  selectedProjects.clear();
+  selectedProjects.add(projName);
+  persistSelectedProjects();
+  loadProjects({ preserve: true });
+  showToast(zh ? `🎯 只看：${projName}` : `🎯 Focus only: ${projName}`);
+}
+function focusGraphNodeById(id) {
+  const zh = currentLanguage === 'zh';
+  const n = findGraphNodeById(id);
+  if (!n) { showToast(zh ? '❌ 圖上找不到該節點' : '❌ Node not found in graph'); return; }
+  highlightScope('node', n);
+  focusOnNode(n);
+  selectActiveNode(n);
+  showToast(`🎯 ${n.name || id}`);
+}
+function initTreeCtxMenu() {
+  const c = document.getElementById('tree-container');
+  if (!c || c.dataset.ctxBound) return;
+  c.dataset.ctxBound = '1';
+  c.addEventListener('contextmenu', openTreeCtxMenu);
+}
+function openTreeCtxMenu(e) {
+  const el = e.target && e.target.closest ? e.target.closest('#tree-container .tree-node') : null;
+  if (!el) return;
+  e.preventDefault();
+  const zh = currentLanguage === 'zh';
+  let kind = null, proj = null, treePath = '', nodeId = null, headName = '';
+  if (el.hasAttribute('data-tree-src')) {
+    kind = 'source';
+    proj = el.getAttribute('data-tree-proj');
+    treePath = el.getAttribute('data-tree-file-path') || '';
+  } else if (el.hasAttribute('data-tree-file')) {
+    kind = 'file';
+    proj = el.getAttribute('data-tree-proj');
+    treePath = el.getAttribute('data-tree-file-path') || '';
+    nodeId = el.getAttribute('data-tree-node-id');
+  } else if (el.hasAttribute('data-tree-dir')) {
+    kind = 'dir';
+    const key = el.getAttribute('data-tree-dir') || '';
+    const ci = key.indexOf(':');
+    proj = ci >= 0 ? key.substring(0, ci) : key;
+    treePath = ci >= 0 ? key.substring(ci + 1) : '';
+  } else if (el.hasAttribute('data-tree-node-id')) {
+    kind = 'heading';
+    nodeId = el.getAttribute('data-tree-node-id');
+  } else if (el.hasAttribute('data-tree-proj')) {
+    kind = 'project';
+    proj = el.getAttribute('data-tree-proj');
+  } else return;
+
+  const projEntry = (allProjectsList || []).find(p => p.name === proj);
+  const bIndexed = !!(projEntry && (projEntry.status === 'ready' || projEntry.is_indexed || projEntry.has_db));
+  let absPath = '';
+  if (kind === 'project') {
+    absPath = (projEntry && projEntry.path) || '';
+  } else if (kind === 'heading') {
+    const n = findGraphNodeById(nodeId);
+    if (!n) { showToast(zh ? '❌ 圖上找不到該節點' : '❌ Node not found in graph'); return; }
+    proj = n.project || getNodeProject(n);
+    headName = n.name || '';
+    absPath = (n.abs_path || '').replace(/\//g, '\\') || resolveTreeAbsPath(proj, n.file || '');
+    nodeId = n.id;
+  } else {
+    absPath = resolveTreeAbsPath(proj, treePath);
+  }
+
+  const items = [];
+  const addCopyAbs = (label) => {
+    items.push({ label, fn: () => {
+      if (!absPath) { showToast(zh ? '❌ 無路徑可複製' : '❌ No path to copy'); return; }
+      const short = absPath.length > 70 ? '…' + absPath.slice(-69) : absPath;
+      copyTextToClipboard(absPath, `${zh ? '📋 已複製：' : '📋 Copied: '}${short}`);
+    }});
+  };
+  if (kind === 'project') {
+    if (bIndexed) {
+      items.push({ label: zh ? '🎯 只看此專案' : '🎯 Focus only this project', fn: () => focusOnlyProject(proj) });
+      items.push({ label: zh ? '⚡ 增量同步此 repo' : '⚡ Incremental sync this repo', fn: () => syncRepo(absPath) });
+    } else {
+      items.push({ label: zh ? '＋ 建立索引' : '＋ Create Index', fn: () => initRepo(absPath) });
+    }
+    // Project root is the only ingest entry when the repo has no subdirs yet
+    // (e.g. a freshly added empty directory) — same dialog as dir nodes.
+    items.push({ label: zh ? '＋ 新增文件…' : '＋ New document…', fn: () => {
+      if (typeof openIngestDialog === 'function') openIngestDialog(absPath);
+      else showToast(zh ? '⏳ 文件匯入即將推出' : '⏳ Document ingest coming soon');
+    }});
+    items.push({ label: zh ? '📁 新增資料夾…' : '📁 New folder…', fn: () => treeNewFolder(absPath) });
+    addCopyAbs(zh ? '📋 複製絕對路徑' : '📋 Copy absolute path');
+  } else if (kind === 'dir') {
+    items.push({ label: zh ? '＋ 新增文件…' : '＋ New document…', fn: () => {
+      if (typeof openIngestDialog === 'function') openIngestDialog(absPath);
+      else showToast(zh ? '⏳ 文件匯入即將推出' : '⏳ Document ingest coming soon');
+    }});
+    items.push({ label: zh ? '📁 新增資料夾…' : '📁 New folder…', fn: () => treeNewFolder(absPath) });
+    addCopyAbs(zh ? '📋 複製絕對路徑' : '📋 Copy absolute path');
+  } else if (kind === 'file') {
+    items.push({ label: zh ? '🎯 在圖上定位' : '🎯 Locate in graph', fn: () => focusGraphNodeById(nodeId) });
+    addCopyAbs(zh ? '📋 複製絕對路徑' : '📋 Copy absolute path');
+  } else if (kind === 'source') {
+    // Source child row under its md (never indexed): open + copy only.
+    const srcUrl = (projEntry && projEntry.path)
+      ? `/api/ingest/source?repo=${encodeURIComponent(projEntry.path)}&file=${encodeURIComponent(treePath)}` : '';
+    if (srcUrl) items.push({ label: zh ? '📂 開啟來源檔案' : '📂 Open source file', fn: () => window.open(srcUrl, '_blank', 'noopener') });
+    addCopyAbs(zh ? '📋 複製絕對路徑' : '📋 Copy absolute path');
+  } else {
+    items.push({ label: zh ? '🎯 定位此節' : '🎯 Locate this section', fn: () => focusGraphNodeById(nodeId) });
+    addCopyAbs(zh ? '📋 複製檔案絕對路徑' : '📋 Copy file absolute path');
+    if (headName) items.push({ label: zh ? '📝 複製標題文字' : '📝 Copy heading text', fn: () => copyTextToClipboard(headName, zh ? '📝 已複製標題' : '📝 Heading copied') });
+  }
+  if (!items.length) return;
+
+  closeTreeCtxMenu();
+  treeCtxEl = document.createElement('div');
+  treeCtxEl.style.cssText = 'position:fixed;z-index:1000004;min-width:200px;max-width:320px;background:#161b22;border:1px solid #30363d;border-radius:8px;padding:4px;box-shadow:0 8px 24px rgba(0,0,0,.55);font-size:12px;color:#e6edf3;zoom:1.16;';
+  items.forEach(it => {
+    const row = document.createElement('div');
+    row.textContent = it.label;
+    row.style.cssText = 'padding:7px 10px;border-radius:6px;cursor:pointer;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;';
+    row.onmouseenter = () => { row.style.background = '#1f6feb44'; };
+    row.onmouseleave = () => { row.style.background = ''; };
+    row.onclick = (ev) => { ev.stopPropagation(); closeTreeCtxMenu(); it.fn(); };
+    treeCtxEl.appendChild(row);
+  });
+  document.body.appendChild(treeCtxEl);
+  const mw = treeCtxEl.offsetWidth, mh = treeCtxEl.offsetHeight;
+  let x = e.clientX, y = e.clientY;
+  if (x + mw > window.innerWidth - 8) x = Math.max(8, window.innerWidth - mw - 8);
+  if (y + mh > window.innerHeight - 8) y = Math.max(8, window.innerHeight - mh - 8);
+  treeCtxEl.style.left = x + 'px';
+  treeCtxEl.style.top = y + 'px';
+  setTimeout(() => document.addEventListener('click', closeTreeCtxMenu), 0);
+}
+
 function showToast(msg) {
   const toast = document.getElementById('toast');
   if (!toast) return;
@@ -1749,12 +2771,70 @@ function showToast(msg) {
   setTimeout(() => { toast.style.display = 'none'; }, 2500);
 }
 
+function updateHealthIndicator() {
+  const el = document.getElementById('lbl-health');
+  if (!el) return;
+  const zh = currentLanguage === 'zh';
+  fetch('/api/health')
+    .then(r => { if (!r.ok) throw new Error('bad status'); return r.json(); })
+    .then(d => {
+      if (d && d.status === 'ok') {
+        el.textContent = zh ? '● 服務正常' : '● Server OK';
+        el.style.color = '#3fb950';
+      } else {
+        throw new Error('bad payload');
+      }
+    })
+    .catch(() => {
+      el.textContent = zh ? '● 離線' : '● Offline';
+      el.style.color = '#f85149';
+    });
+}
+
+// Explorer / repo-manager i18n (called on every language switch)
+function updateExplorerI18n() {
+  const zh = currentLanguage === 'zh';
+  const set = (id, txt) => { const el = document.getElementById(id); if (el) el.textContent = txt; };
+  const setAttr = (id, attr, txt) => { const el = document.getElementById(id); if (el) el.setAttribute(attr, txt); };
+
+  set('btn-repo-mgr', zh ? '⚙ 倉庫' : '⚙ Repos');
+  set('btn-sel-all', zh ? '全選' : 'Select All');
+  set('btn-sel-none', zh ? '取消選取' : 'Deselect');
+  set('btn-clear-filter', '✕');
+  setAttr('btn-clear-filter', 'title', zh ? '清除篩選' : 'Clear filter');
+
+  const treeSearch = document.getElementById('tree-search');
+  if (treeSearch) treeSearch.placeholder = zh ? '篩選文件樹…' : 'Filter documentation tree...';
+
+  const summary = document.getElementById('lbl-proj-summary');
+  if (summary) summary.innerText = `${selectedProjects.size} ${zh ? '個啟用' : 'Active'}`;
+
+  set('th-proj', zh ? '專案' : 'Project');
+  set('th-path', zh ? '目錄路徑' : 'Directory Path');
+  set('th-metrics', zh ? '指標' : 'Metrics');
+  set('th-status', zh ? '狀態' : 'Status');
+  set('th-actions', zh ? '操作' : 'Actions');
+
+  set('lbl-modal-title', zh ? '倉庫管理' : 'Repository Management');
+  set('lbl-add-dir', zh ? '掃描專案目錄：' : 'Scan Project Directory:');
+  set('lbl-repo-list', zh ? '已發現的倉庫：' : 'Discovered Repositories:');
+  set('btn-sync-all', zh ? '⚡ 全部同步' : '⚡ Sync all');
+  set('btn-sync-all-tree', zh ? '⚡ 全部同步' : '⚡ Sync all');
+  paintShowSourceBtn();
+
+  renderRepoTable(allProjectsList);
+}
+
 function toggleLanguage() {
   currentLanguage = currentLanguage === 'en' ? 'zh' : 'en';
   const b = document.getElementById('btn-lang');
   if (b) b.textContent = `Language: ${currentLanguage.toUpperCase()}`;
   updateSwapButtonI18n();
   updateControlsHelpI18n();
+  updateExplorerI18n();
+  // Re-render the LLM settings dialog labels if it is open
+  const dlg = document.getElementById('prov-dialog');
+  if (dlg && dlg.style.display !== 'none') renderProvDialogLabels();
   showToast(currentLanguage === 'zh' ? '語系切換：繁體中文' : 'Language switched to English');
 }
 
@@ -1769,6 +2849,9 @@ let isControlsHelpOpen = false;
 let navKeys = {};
 let flightVel = null;
 let flightTargetVel = null;
+// Screen-space flight basis: reuse last horizontal right when the view axis
+// goes vertical (cross would collapse to zero and kill A/D), see navFlightLoop.
+let lastFlightRight = new THREE.Vector3(1, 0, 0);
 let isMouseIn3DPane = false;
 
 function toggleControlsHelp(forceState) {
@@ -1847,6 +2930,11 @@ function init3DNavControls() {
     delete navKeys[e.code];
   });
 
+  // Clear keys on window blur so a missed keyup cannot leave flight stuck on
+  window.addEventListener('blur', () => {
+    navKeys = {};
+  });
+
   // Double click canvas to reset view
   canvasElem.addEventListener('dblclick', (e) => {
     e.preventDefault();
@@ -1867,7 +2955,7 @@ function navFlightLoop() {
 
       flightTargetVel.set(0, 0, 0);
 
-      // WASD for horizontal fly & strafe, QE for elevate up / down
+      // WASD fly along the view axis & strafe, E up / Q down (screen-relative)
       const hasMovement = navKeys['KeyW'] || navKeys['KeyS'] || navKeys['KeyA'] || navKeys['KeyD'] ||
                           navKeys['KeyQ'] || navKeys['KeyE'];
 
@@ -1878,8 +2966,24 @@ function navFlightLoop() {
         const dir = new THREE.Vector3();
         camera.getWorldDirection(dir);
 
-        const up = camera.up.clone().normalize();
-        const right = new THREE.Vector3().crossVectors(dir, up).normalize();
+        // Screen-space basis (same math as codegraph-galaxy):
+        //  right = view dir x world up -> horizontal screen-right; when the view
+        //  axis goes vertical the cross collapses, so reuse lastFlightRight.
+        //  up    = right x dir -> SCREEN up: equals world +Y when level, tilts
+        //  with the camera when pitched, horizontal pan at top-down (no zoom-out).
+        const right = new THREE.Vector3().crossVectors(dir, camera.up);
+        if (right.lengthSq() < 1e-10) {
+            right.copy(lastFlightRight);
+        } else {
+            right.normalize();
+            lastFlightRight.copy(right);
+        }
+        const up = new THREE.Vector3().crossVectors(right, dir);
+        if (up.lengthSq() < 1e-10) {
+            up.set(0, 1, 0);
+        } else {
+            up.normalize();
+        }
 
         // Forward / Backward (W / S)
         if (navKeys['KeyW']) flightTargetVel.addScaledVector(dir, baseSpeed);
@@ -1889,9 +2993,9 @@ function navFlightLoop() {
         if (navKeys['KeyA']) flightTargetVel.addScaledVector(right, -baseSpeed);
         if (navKeys['KeyD']) flightTargetVel.addScaledVector(right, baseSpeed);
 
-        // Elevate Up / Down (Q / E)
-        if (navKeys['KeyQ']) flightTargetVel.addScaledVector(up, baseSpeed * 0.9);
-        if (navKeys['KeyE']) flightTargetVel.addScaledVector(up, -baseSpeed * 0.9);
+        // Elevate Up / Down (E up / Q down, screen-relative)
+        if (navKeys['KeyE']) flightTargetVel.addScaledVector(up, baseSpeed * 0.9);
+        if (navKeys['KeyQ']) flightTargetVel.addScaledVector(up, -baseSpeed * 0.9);
       }
 
       flightVel.lerp(flightTargetVel, 0.18);
@@ -2025,4 +3129,370 @@ function updateControlsHelpI18n() {
     if (mDblT) mDblT.textContent = 'Double Click';
     if (mDblD) mDblD.textContent = 'Reset View to Center';
   }
+}
+
+// ==================== App-wide LLM Provider Settings Dialog ====================
+// Ported from codegraph-galaxy (galaxy.js provider dialog), re-rooted to
+// /api/llm/* — this provider serves the WHOLE app (ingest / chat / anything
+// that burns tokens), not just a chat panel. Backend: docgraphical/llm_provider.py.
+let provCurrentType = 'llamacpp';
+let provFetchedModels = [];
+
+function provT(key) {
+  const zh = currentLanguage === 'zh';
+  const dic = {
+    prov_title: zh ? 'LLM 模型供應商' : 'LLM Providers',
+    prov_note: zh ? '此供應商為整支 APP 共用（ingest 摘要、對話與所有 LLM 功能）。'
+                  : 'This provider is used by the whole app (ingest, chat, and all LLM features).',
+    prov_cur: zh ? '啟用模型' : 'Active model',
+    prov_add: zh ? '新增供應商' : 'Add provider',
+    prov_f_label: zh ? '名稱' : 'Label',
+    prov_f_base: zh ? 'Base URL' : 'Base URL',
+    prov_f_key: zh ? 'API 金鑰' : 'API key',
+    prov_f_models: zh ? '模型' : 'Models',
+    prov_fetch: zh ? '自動抓取' : 'Auto-fill',
+    prov_cancel: zh ? '取消' : 'Cancel',
+    prov_save: zh ? '儲存' : 'Save',
+    prov_test: zh ? '測試' : 'Test',
+    prov_models_empty: zh ? '尚無模型，請按自動抓取' : 'No models yet — hit Auto-fill',
+    prov_model_loading: zh ? '載入模型清單…' : 'Loading models…',
+    prov_model_unset: zh ? '（未指定）' : '(none)',
+    prov_ok_models: zh ? ((n, k) => `${n} 個模型（${k}）`) : ((n, k) => `${n} models (${k})`),
+    prov_fail: zh ? '連線失敗' : 'Connection failed',
+  };
+  const v = dic[key];
+  if (typeof v === 'function') return v;
+  return v !== undefined ? v : key;
+}
+
+function toggleProviderDialog(force) {
+  const dlg = document.getElementById('prov-dialog');
+  if (!dlg) return;
+  const show = typeof force === 'boolean' ? force : dlg.style.display === 'none';
+  dlg.style.display = show ? 'flex' : 'none';
+  if (show) {
+    renderProvDialogLabels();
+    renderProvPresets();
+    refreshProviderList();
+    loadProvActiveModel();
+  }
+}
+
+function renderProvDialogLabels() {
+  const set = (id, txt) => { const el = document.getElementById(id); if (el) el.textContent = txt; };
+  set('lbl-prov-title', provT('prov_title'));
+  set('lbl-prov-note', provT('prov_note'));
+  set('lbl-prov-cur', provT('prov_cur'));
+  set('lbl-prov-add', provT('prov_add'));
+  set('lbl-prov-f-label', provT('prov_f_label'));
+  set('lbl-prov-f-base', provT('prov_f_base'));
+  set('lbl-prov-f-key', provT('prov_f_key'));
+  set('lbl-prov-f-models', provT('prov_f_models'));
+  set('lbl-prov-fetch', provT('prov_fetch'));
+  set('lbl-prov-cancel', provT('prov_cancel'));
+  set('lbl-prov-save', provT('prov_save'));
+}
+
+function provTypes() {
+  // suggest must stay EMPTY: hardcoded model names shown as radio options
+  // before Auto-fill are stale fake data (a bad habit ported from galaxy).
+  // Real models only ever come from fetchProvModels() after Auto-fill.
+  return [
+    { id: 'llamacpp', label: 'llama.cpp / vLLM', base: 'http://172.22.20.125:8080/v1', key: 'EMPTY', urlMode: 'edit', keyMode: 'hide', suggest: [] },
+    { id: 'openai', label: 'OpenAI', base: 'https://api.openai.com/v1', key: '', urlMode: 'fixed', keyMode: 'require', suggest: [] },
+    { id: 'deepseek', label: 'DeepSeek', base: 'https://api.deepseek.com/v1', key: '', urlMode: 'fixed', keyMode: 'require', suggest: [] },
+    { id: 'gemini', label: 'Google Gemini', base: 'https://generativelanguage.googleapis.com/v1beta/openai/', key: '', urlMode: 'fixed', keyMode: 'require', suggest: [] },
+    { id: 'groq', label: 'Groq (Llama)', base: 'https://api.groq.com/openai/v1', key: '', urlMode: 'fixed', keyMode: 'require', suggest: [] },
+    { id: 'grok', label: 'xAI Grok', base: 'https://api.x.ai/v1', key: '', urlMode: 'fixed', keyMode: 'require', suggest: [] },
+    { id: 'custom', label: 'Custom URL', base: '', urlMode: 'edit', keyMode: 'optional', suggest: [] },
+  ];
+}
+
+function renderProvPresets() {
+  const box = document.getElementById('prov-types');
+  if (!box) return;
+  box.innerHTML = '';
+  for (const p of provTypes()) {
+    const b = document.createElement('button');
+    b.textContent = p.label;
+    b.dataset.typeId = p.id;
+    b.style.cssText = 'border:1px solid #30363d; background:#161b22; color:#c9d1d9; border-radius:999px; padding:4px 12px; font-size:15px; cursor:pointer;';
+    b.onclick = () => selectProvType(p.id);
+    box.appendChild(b);
+  }
+  selectProvType(provCurrentType);
+}
+
+function selectProvType(id) {
+  const tt = provTypes().find((p) => p.id === id) || provTypes()[0];
+  provCurrentType = tt.id;
+  provFetchedModels = [];
+  const box = document.getElementById('prov-types');
+  if (box) {
+    Array.from(box.children).forEach((b) => {
+      const on = b.dataset.typeId === tt.id;
+      b.style.borderColor = on ? '#1f6feb' : '#30363d';
+      b.style.color = on ? '#58a6ff' : '#c9d1d9';
+    });
+  }
+  const set = (elId, v) => { const el = document.getElementById(elId); if (el) el.value = v; };
+  set('chat-prov-label', tt.label);
+  const rowUrl = document.getElementById('prov-row-url');
+  const fixedUrl = document.getElementById('prov-fixed-url');
+  if (tt.urlMode === 'fixed') {
+    if (rowUrl) rowUrl.style.display = 'none';
+    if (fixedUrl) {
+      fixedUrl.style.display = 'block';
+      fixedUrl.textContent = tt.base;
+    }
+  } else {
+    if (fixedUrl) fixedUrl.style.display = 'none';
+    if (rowUrl) rowUrl.style.display = '';
+    set('chat-prov-base', tt.base);
+  }
+  const rowKey = document.getElementById('prov-row-key');
+  if (rowKey) rowKey.style.display = tt.keyMode === 'hide' ? 'none' : '';
+  set('chat-prov-key', tt.key || '');
+  const keyLabel = document.getElementById('lbl-prov-f-key');
+  if (keyLabel) keyLabel.textContent = provT('prov_f_key') + (tt.keyMode === 'require' ? ' *' : '');
+  renderProvModelList(tt.suggest || []);
+  const msg = document.getElementById('chat-prov-msg');
+  if (msg) msg.textContent = '';
+  if (tt.keyMode !== 'require') fetchProvModels();
+}
+
+function renderProvModelList(models) {
+  provFetchedModels = models || [];
+  const box = document.getElementById('prov-model-list');
+  if (!box) return;
+  box.innerHTML = '';
+  if (!provFetchedModels.length) {
+    const hint = document.createElement('div');
+    hint.style.cssText = 'color:#8b949e; font-size:15px;';
+    hint.textContent = provT('prov_models_empty');
+    box.appendChild(hint);
+    return;
+  }
+  provFetchedModels.forEach((m, idx) => {
+    const lab = document.createElement('label');
+    lab.dataset.modelName = (m || '').toLowerCase();
+    lab.style.cssText = 'display:flex; gap:8px; align-items:center; border:1px solid #21262d; border-radius:6px; padding:6px 10px; cursor:pointer; font-size:16px;';
+    const radio = document.createElement('input');
+    radio.type = 'radio';
+    radio.name = 'prov-model-pick';
+    radio.value = m;
+    if (idx === 0) radio.checked = true;
+    lab.appendChild(radio);
+    const span = document.createElement('span');
+    span.textContent = m;
+    span.style.cssText = 'overflow:hidden; text-overflow:ellipsis; white-space:nowrap;';
+    lab.appendChild(span);
+    box.appendChild(lab);
+  });
+}
+
+function provPickedModel() {
+  const checked = document.querySelector('input[name="prov-model-pick"]:checked');
+  return checked ? checked.value : '';
+}
+// Live-filter the (possibly 100+) fetched model radios by substring.
+function filterProvModelList(q) {
+  const box = document.getElementById('prov-model-list');
+  if (!box) return;
+  const needle = (q || '').trim().toLowerCase();
+  let visible = 0;
+  Array.from(box.children).forEach(lab => {
+    if (!lab.dataset || lab.dataset.modelName === undefined) return;
+    const hit = !needle || (lab.dataset.modelName || '').includes(needle);
+    lab.style.display = hit ? '' : 'none';
+    if (hit) visible++;
+  });
+  // If the checked radio got filtered out, check the first visible one.
+  const checked = box.querySelector('input[name="prov-model-pick"]:checked');
+  if (checked && checked.closest('label').style.display === 'none') {
+    checked.checked = false;
+    const first = box.querySelector('label:not([style*="none"]) input[name="prov-model-pick"]');
+    if (first) first.checked = true;
+  }
+}
+
+function provFormBase() {
+  const tt = provTypes().find((p) => p.id === provCurrentType) || {};
+  if (tt.urlMode === 'fixed') return tt.base;
+  const el = document.getElementById('chat-prov-base');
+  return el ? el.value.trim() : '';
+}
+
+function provFormKey() {
+  const tt = provTypes().find((p) => p.id === provCurrentType) || {};
+  if (tt.keyMode === 'hide') return tt.key || '';
+  const el = document.getElementById('chat-prov-key');
+  return el ? el.value.trim() : '';
+}
+
+function fetchProvModels() {
+  const msg = document.getElementById('chat-prov-msg');
+  if (msg) msg.textContent = '…';
+  fetch('/api/llm/providers/models', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ base: provFormBase(), key: provFormKey() }),
+  })
+    .then((res) => res.json())
+    .then((d) => {
+      if (d.ok && d.models && d.models.length) {
+        renderProvModelList(d.models.slice(0, 300));
+        if (msg) msg.textContent = `✅ ${provT('prov_ok_models')(d.models.length, d.kind || '')}`;
+      } else {
+        renderProvModelList([]);
+        if (msg) msg.textContent = `❌ ${(d && d.error) || 'empty'}`;
+      }
+    })
+    .catch(() => {
+      renderProvModelList([]);
+      if (msg) msg.textContent = '❌';
+    });
+}
+
+function refreshProviderList() {
+  const list = document.getElementById('chat-prov-list');
+  const msg = document.getElementById('chat-prov-msg');
+  if (!list) return;
+  fetch('/api/llm/providers')
+    .then((res) => res.json())
+    .then((data) => {
+      list.innerHTML = '';
+      for (const p of (data && data.providers) || []) {
+        const row = document.createElement('div');
+        row.style.cssText = 'display:flex; gap:6px; align-items:center; border:1px solid #21262d; border-radius:6px; padding:4px 8px;';
+        const label = document.createElement('span');
+        label.style.flex = '1';
+        label.style.cssText += ' overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:15px;';
+        label.textContent = `${p.label || p.id} [${(p.models || []).join(', ')}]${p.source === 'file' ? '' : ' 🔒'}`;
+        label.title = label.textContent;
+        row.appendChild(label);
+        const testBtn = document.createElement('button');
+        testBtn.textContent = provT('prov_test');
+        testBtn.style.cssText = 'background:transparent; border:1px solid #30363d; border-radius:6px; color:#c9d1d9; cursor:pointer; padding:2px 8px; font-size:15px;';
+        testBtn.onclick = () => {
+          if (msg) msg.textContent = '…';
+          fetch(`/api/llm/providers/${encodeURIComponent(p.id)}/test`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ strLang: (typeof currentLanguage !== 'undefined' && currentLanguage === 'zh') ? 'zh-TW' : 'en-US' }),
+          })
+            .then((r) => r.json())
+            .then((d) => { if (msg) msg.textContent = d.ok ? `✅ ${d.info || ''}` : `❌ ${d.error || ''}`; })
+            .catch(() => { if (msg) msg.textContent = '❌'; });
+        };
+        row.appendChild(testBtn);
+        if (p.source === 'file') {
+          const delBtn = document.createElement('button');
+          delBtn.textContent = '✕';
+          delBtn.style.cssText = 'background:transparent; border:1px solid #30363d; border-radius:6px; color:#f85149; cursor:pointer; padding:2px 8px; font-size:15px;';
+          delBtn.onclick = () => {
+            const lang = (typeof currentLanguage !== 'undefined' && currentLanguage === 'zh') ? 'zh-TW' : 'en-US';
+            fetch(`/api/llm/providers/${encodeURIComponent(p.id)}?strLang=${encodeURIComponent(lang)}`, { method: 'DELETE' })
+              .then(() => { refreshProviderList(); loadProvActiveModel(); })
+              .catch(() => { /* ignore */ });
+          };
+          row.appendChild(delBtn);
+        }
+        list.appendChild(row);
+      }
+    })
+    .catch(() => { /* ignore */ });
+}
+
+function addChatProvider() {
+  const msg = document.getElementById('chat-prov-msg');
+  const val = (id) => { const el = document.getElementById(id); return el ? el.value.trim() : ''; };
+  const picked = provPickedModel();
+  if (!provFetchedModels.length || !picked) {
+    if (msg) msg.textContent = `❌ ${provT('prov_models_empty')}`;
+    return;
+  }
+  const payload = {
+    label: val('chat-prov-label'),
+    base: provFormBase(),
+    key: provFormKey(),
+    models: provFetchedModels,
+    strLang: (typeof currentLanguage !== 'undefined' && currentLanguage === 'zh') ? 'zh-TW' : 'en-US',
+  };
+  fetch('/api/llm/providers', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  })
+    .then((res) => res.json().then((d) => ({ status: res.status, body: d })))
+    .then(({ status, body }) => {
+      if (status === 200 && body.bSuccess) {
+        const newId = body.provider.id;
+        // Make it the app-wide active LLM immediately (server-persisted truth).
+        fetch('/api/llm/active', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ provider: newId, model: picked }),
+        }).catch(() => { /* best-effort */ });
+        try { localStorage.setItem('docgraphical-llm-model', JSON.stringify({ provider: newId, model: picked })); } catch (e) { /* ignore */ }
+        if (msg) msg.textContent = `✅ ${newId} → ${picked}`;
+        refreshProviderList();
+        loadProvActiveModel();
+        toggleProviderDialog(false);
+      } else if (msg) {
+        msg.textContent = `❌ ${(body && body.strError) || status}`;
+      }
+    })
+    .catch(() => { if (msg) msg.textContent = '❌'; });
+}
+
+// ---- Active model selector (app-wide current LLM, persisted server-side) ----
+function loadProvActiveModel() {
+  const sel = document.getElementById('prov-current-model');
+  if (!sel) return;
+  sel.innerHTML = '';
+  const loading = document.createElement('option');
+  loading.textContent = provT('prov_model_loading');
+  sel.appendChild(loading);
+  fetch('/api/llm/providers')
+    .then((res) => res.json())
+    .then((data) => {
+      sel.innerHTML = '';
+      const current = (data && data.current) || {};
+      let saved = null;
+      try { saved = JSON.parse(localStorage.getItem('docgraphical-llm-model') || 'null'); } catch (e) { /* ignore */ }
+      const wantProvider = (saved && saved.provider) || current.provider || '';
+      const wantModel = (saved && saved.model) || current.model || '';
+      for (const p of (data && data.providers) || []) {
+        const group = document.createElement('optgroup');
+        group.label = (p.available === false ? '⚠ ' : '') + (p.label || p.id);
+        for (const m of p.models || []) {
+          const opt = document.createElement('option');
+          opt.value = `${p.id}:${m}`;
+          opt.textContent = m;
+          if (p.id === wantProvider && m === wantModel) opt.selected = true;
+          group.appendChild(opt);
+        }
+        sel.appendChild(group);
+      }
+      if (!sel.value && sel.options.length) sel.selectedIndex = 0;
+    })
+    .catch(() => {
+      sel.innerHTML = '';
+      const opt = document.createElement('option');
+      opt.textContent = provT('prov_model_unset');
+      sel.appendChild(opt);
+    });
+  sel.onchange = () => {
+    const idx = sel.value.indexOf(':');
+    if (idx < 0) return;
+    const pick = { provider: sel.value.substring(0, idx), model: sel.value.substring(idx + 1) };
+    try { localStorage.setItem('docgraphical-llm-model', JSON.stringify(pick)); } catch (e) { /* ignore */ }
+    // Server-side persist so background jobs (ingest) resolve the same target.
+    fetch('/api/llm/active', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(pick),
+    }).catch(() => { /* ignore */ });
+  };
 }
