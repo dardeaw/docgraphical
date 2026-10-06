@@ -35,25 +35,25 @@ In one line: **CPU decides which cuts to read; the LLM only reads those cuts int
 
 ## What works today
 
-### 📥 Document ingest pipeline (Explorer right-click → ＋ New document…)
+### Document ingest pipeline (Explorer right-click → ＋ New document…)
 - **Drag & drop upload** for Office/PDF (ppt/pptx/doc/docx/pdf); files stage until confirm, then land with the summary
 - **One-click summarize**: upload → LLM summary → preview/edit → confirm, fully chained; filename auto-follows
 - **Vision for image-only docs**: zero-text scanned PDFs / image PPTs route to a vision model automatically (needs a vision model, e.g. gpt-5 series)
 - Summary md lives **next to its sources**, header mandatorily records source relative paths, save triggers incremental index
 - Human-readable errors for encrypted PDFs / corrupt files / legacy binaries — one bad file never kills the batch
 
-### 🌳 Knowledge tree (Explorer)
+### Knowledge tree (Explorer)
 - Four levels: project / folder / md / heading, long names truncated with hover, file-count badges
 - Inline **＋** on folder rows (new document) / inline **−** on md rows (delete md + sources + index, with confirm)
 - Right-click menu: new document, **new folder** (empty dirs visible too), copy absolute path, locate in graph, sync
-- **👁 Source toggle** (default ON): each source hangs under its own md; orphans recorded in no md header are hidden
-- Live filter box (with ancestor expansion), ⚡ Sync all incremental sync, empty-repo auto-guide
+- **Source toggle** (default ON): each source hangs under its own md; orphans recorded in no md header are hidden
+- Live filter box (with ancestor expansion), Sync all incremental sync, empty-repo auto-guide
 
-### 📖 Markdown viewer
+### Markdown viewer
 - Source lines are **clickable links** (PDF renders inline, Office downloads); right-click menu: copy selection / copy section / copy for Agent / open source / copy source paths
 - Full-area drag-select + Ctrl+C; heading clicks are true slices (top-right savings badge is real), honest 404/stale-node notices
 
-### 🗄️ Deterministic foundation (unchanged)
+### Deterministic foundation (unchanged)
 - `parser.py` (AST/state machine, fenced-code protection), `scanner.py` (traversal/relations), `db.py` (SQLite index)
 - MCP stdio five tools: `toc / section / search / graph / index` for external agents
 - REST API: `/api/browse` + `/api/browse/mkdir`, `/api/ingest/{upload,summarize,save,delete,source}`, `/api/sync*`, `/api/doc/section` (slicing + `full_chars` true denominator)
@@ -79,12 +79,12 @@ Raw originals (immutable raw layer: md / pdf / ppt / word)
 
 | Phase | Content | Status |
 |---|---|---|
-| Phase 0 decisions | LLM endpoint (O1), hard-link semantics (O4), KB location (O5) | ⏳ Pending |
-| Phase 1 multi-format ingest (M5) | CPU extract → LLM summarize → store → rescan; web dialog landed | 🚧 In progress |
-| Phase 2 dialogue backend (M1) | `/api/chat` SSE + tool loop + human gate | ⬜ Not started |
-| Phase 3 chat UI (M2+M3) | chat-about-this-section, candidate list, streaming panel, citation jumps | ⬜ Not started |
-| Phase 4 slice-aggregation QA | Cross-doc search → aggregate → one read-through answer (dogma 3) | ⬜ Not started |
-| Phase 5 wiki cache layer (M4, stage 2) | Answer write-back + fingerprint invalidation + lint-lite | ⬜ Stage 2 |
+| Phase 0 decisions | LLM endpoint (O1), hard-link semantics (O4), KB location (O5) | Pending |
+| Phase 1 multi-format ingest (M5) | CPU extract → LLM summarize → store → rescan; web dialog landed | In progress |
+| Phase 2 dialogue backend (M1) | `/api/chat` SSE + tool loop + human gate | Not started |
+| Phase 3 chat UI (M2+M3) | chat-about-this-section, candidate list, streaming panel, citation jumps | Not started |
+| Phase 4 slice-aggregation QA | Cross-doc search → aggregate → one read-through answer (dogma 3) | Not started |
+| Phase 5 wiki cache layer (M4, stage 2) | Answer write-back + fingerprint invalidation + lint-lite | Stage 2 |
 
 **Explicitly not doing**: vector embeddings / fuzzy semantic retrieval, LLM-maintained prose truth layer, whole-corpus automatic RAG QA, rushing a GitHub release.
 

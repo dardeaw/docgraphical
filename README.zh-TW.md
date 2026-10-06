@@ -35,25 +35,25 @@
 
 ## 現在能用什麼
 
-### 📥 文件入庫管線（Explorer 右鍵 → ＋新增文件…）
+### 文件入庫管線（Explorer 右鍵 → ＋新增文件…）
 - Office／PDF **拖拉上傳**（ppt／pptx／doc／docx／pdf），暫存等待確認，Confirm 才與摘要一起寫入目標目錄
 - **一鍵摘要**：上傳→LLM 摘要→預覽／編輯→確認，全程自動串接；檔名自動跟隨
 - **圖片型文件開眼**：零文字的掃描 PDF／圖片 PPT 自動轉走 vision 模型看圖摘要（需 vision 模型，如 gpt-5 系列）
 - 摘要 md 與原檔**並存同目錄**，header 強制記錄來源相對路徑，存檔即增量索引
 - 加密 PDF／損毀檔／舊版二進位給人話錯誤訊息，不整批陪葬
 
-### 🌳 知識樹（Explorer）
+### 知識樹（Explorer）
 - project／folder／md／heading 四層，長檔名截斷＋hover 全名，file count 徽章
 - folder 列 inline **＋**（新增文件）／md 列 inline **−**（刪 md＋來源＋索引，需確認框）
 - 右鍵選單：新增文件、**新增資料夾**（空目錄亦可見）、複製絕對路徑、圖上定位、同步
-- **👁 Source 開關**（預設開）：每個來源檔掛在自己的 md 底下；沒被任何 md 記載的孤兒檔不顯示
-- 篩選框即時過濾（含祖先展開）、⚡ Sync all 增量同步、空 repo 自動引導
+- **Source 開關**（預設開）：每個來源檔掛在自己的 md 底下；沒被任何 md 記載的孤兒檔不顯示
+- 篩選框即時過濾（含祖先展開）、Sync all 增量同步、空 repo 自動引導
 
-### 📖 md 瀏覽器
+### md 瀏覽器
 - 來源檔行是**可點超連結**（pdf inline 渲染、office 下載），右鍵選單：複製選取／複製本節／複製給 Agent／開啟來源／複製來源路徑
 - 全區可拖選＋Ctrl+C；heading 點選＝真切片（右上節省徽章是實數），404／幽靈節點誠實提示
 
-### 🗄️ 確定性地基（維持不變）
+### 確定性地基（維持不變）
 - `parser.py`（AST／狀態機，程式碼圍欄保護）、`scanner.py`（遍歷／關聯）、`db.py`（SQLite 索引）
 - MCP stdio 五工具：`toc／section／search／graph／index`，供外部 agent 使用
 - REST API：`/api/browse`＋`/api/browse/mkdir`、`/api/ingest/{upload,summarize,save,delete,source}`、`/api/sync*`、`/api/doc/section`（切片＋`full_chars` 真分母）
@@ -79,12 +79,12 @@ MCP 知識層（既有：toc／section／search／graph／index）
 
 | Phase | 內容 | 狀態 |
 |---|---|---|
-| Phase 0 前置決策 | LLM 端點（O1）、硬連結語意（O4）、知識庫位置（O5） | ⏳ 待拍板 |
-| Phase 1 多格式 Ingest（M5） | CPU 抽取→LLM 摘要→入庫→重掃；Web 對話框已落地 | 🚧 進行中 |
-| Phase 2 對話後端（M1） | `/api/chat` SSE＋工具迴圈＋人審閘 | ⬜ 未開始 |
-| Phase 3 Chat UI（M2＋M3） | 跟這段對話、候選清單、串流面板、出處跳轉 | ⬜ 未開始 |
-| Phase 4 切片聚合問答 | 跨文件 search→聚合→一次讀答（教條三） | ⬜ 未開始 |
-| Phase 5 wiki 快取層（M4，二期） | 答案存回＋指紋失效＋lint-lite | ⬜ 二期 |
+| Phase 0 前置決策 | LLM 端點（O1）、硬連結語意（O4）、知識庫位置（O5） | 待拍板 |
+| Phase 1 多格式 Ingest（M5） | CPU 抽取→LLM 摘要→入庫→重掃；Web 對話框已落地 | 進行中 |
+| Phase 2 對話後端（M1） | `/api/chat` SSE＋工具迴圈＋人審閘 | 未開始 |
+| Phase 3 Chat UI（M2＋M3） | 跟這段對話、候選清單、串流面板、出處跳轉 | 未開始 |
+| Phase 4 切片聚合問答 | 跨文件 search→聚合→一次讀答（教條三） | 未開始 |
+| Phase 5 wiki 快取層（M4，二期） | 答案存回＋指紋失效＋lint-lite | 二期 |
 
 **明確不做**：向量嵌入／模糊語義檢索、LLM 常駐維護的散文真相層、全庫自動 RAG 問答、急於發佈 GitHub。
 
