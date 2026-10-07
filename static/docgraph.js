@@ -2247,10 +2247,10 @@ function openIngestDialog(absDir) {
     <div style="font-size:15px;color:#8b949e;margin-bottom:10px;word-break:break-all;">${zh ? '目標目錄：' : 'Target: '}${escapeHtml(absDir)}${projName ? ` &nbsp;·&nbsp; ${escapeHtml(projName)}` : ''}</div>
     <div style="display:flex;gap:12px;flex:1;min-height:0;">
       <div style="flex:0 1 330px;min-width:250px;display:flex;flex-direction:column;gap:8px;">
-        <div style="font-size:16px;font-weight:600;color:#c9d1d9;">${zh ? '① 選擇檔案（ppt／word／pdf，可拖拉）' : '① Pick files (ppt/word/pdf, drag & drop)'}</div>
+        <div style="font-size:16px;font-weight:600;color:#c9d1d9;">${zh ? '① 選擇檔案（文件／試算／郵件／圖片，可拖拉）' : '① Pick files (docs/sheets/mail/images, drag & drop)'}</div>
         <div id="ing-drop" style="border:1.5px dashed #30363d;border-radius:8px;padding:20px 12px;text-align:center;color:#8b949e;font-size:16px;cursor:pointer;transition:border-color .15s,background .15s;">
           ${zh ? '🖱️ 把檔案拖到這裡放開，或點此選擇檔案' : '🖱️ Drag files here, or click to browse'}
-          <input type="file" id="ing-file-input" multiple accept=".pptx,.ppt,.docx,.doc,.pdf" style="display:none;" />
+          <input type="file" id="ing-file-input" multiple accept=".pptx,.ppt,.docx,.doc,.pdf,.txt,.md,.markdown,.csv,.html,.htm,.eml,.jpg,.jpeg,.png,.webp,.bmp,.tiff,.tif" style="display:none;" />
         </div>
         <div id="ing-file-list" style="display:flex;flex-direction:column;gap:4px;flex:1;min-height:100px;overflow-y:auto;"></div>
       </div>
@@ -2296,10 +2296,10 @@ function openIngestDialog(absDir) {
     dz.addEventListener('drop', (ev) => {
       const files = (ev.dataTransfer && ev.dataTransfer.files) ? Array.from(ev.dataTransfer.files) : [];
       if (!files.length) return;
-      const ok = files.filter(f => /\.(pptx?|docx?|pdf)$/i.test(f.name || ''));
+      const ok = files.filter(f => /\.(pptx?|docx?|pdf|txt|md|markdown|csv|html?|eml|jpe?g|png|webp|bmp|tiff?)$/i.test(f.name || ''));
       if (ok.length < files.length) {
-        ingMsg((ingState.zh ? '⚠ 已略過不支援的格式（僅 ppt／word／pdf）：' : '⚠ Skipped unsupported (ppt/word/pdf only): ')
-          + files.filter(f => !/\.(pptx?|docx?|pdf)$/i.test(f.name || '')).map(f => f.name).join('、'), true);
+        ingMsg((ingState.zh ? '⚠ 已略過不支援的格式：' : '⚠ Skipped unsupported: ')
+          + files.filter(f => !/\.(pptx?|docx?|pdf|txt|md|markdown|csv|html?|eml|jpe?g|png|webp|bmp|tiff?)$/i.test(f.name || '')).map(f => f.name).join('、'), true);
       }
       ingAddPicked(ok);
     });

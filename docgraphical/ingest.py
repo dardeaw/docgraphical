@@ -16,8 +16,16 @@ import re
 from typing import Any, Dict, List, Optional
 
 MAX_TEXT_CHARS = 12000  # per-file truncation budget for the LLM prompt
-ALLOWED_EXTS = {".pptx", ".ppt", ".docx", ".doc", ".pdf"}
+ALLOWED_EXTS = {".pptx", ".ppt", ".docx", ".doc", ".pdf",
+                ".txt", ".md", ".markdown", ".csv", ".html", ".htm",
+                ".eml", ".jpg", ".jpeg", ".png", ".webp", ".bmp",
+                ".tiff", ".tif"}
 PARSEABLE_EXTS = {".pptx", ".docx", ".pdf"}
+# Direct-to-vision: no text layer to extract, skip straight to eyes.
+IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".webp", ".bmp", ".tiff", ".tif"}
+# Plain-text readable without special libs.
+TEXT_EXTS = {".txt", ".md", ".markdown", ".csv", ".html", ".htm", ".eml"}
+CSV_MAX_ROWS = 200  # spreadsheet rows kept before truncation note
 # Vision fallback ("open the LLM's eyes"): page/slide images for image-only docs.
 VISION_MAX_PAGES = 12   # per file
 VISION_MAX_TOTAL = 16   # per summarize call
@@ -69,11 +77,14 @@ def FnFindOwningRepo(target_dir: str, repos: Dict[str, str]) -> Optional[str]:
 
 
 def FnExtractText(path: str) -> Dict[str, Any]:
-    """Extract plain text from pptx/docx/pdf. Old .ppt/.doc binaries rejected."""
+    """Extract plain text: office/pdf + txt/md/csv/html/eml. Old .ppt/.doc
+    binaries rejected; image formats skip text entirely (vision path)."""
     ext = os.path.splitext(path or "")[1].lower()
     if ext not in ALLOWED_EXTS:
         return {"ok": False, "error": "不支援的格式: %s" % ext}
-    if ext not in PARSEABLE_EXTS:
+    if ext in IMAGE_EXTS:
+        return {"ok": False, "error": "__IMAGE__"}
+    if ext not in PARSEABLE_EXTS and ext not in TEXT_EXTS:
         return {"ok": False,
                 "error": "舊版二進位格式 (%s) 無法解析，請用 Office 另存為 .pptx/.docx 後再上傳" % ext}
     try:
@@ -109,6 +120,88 @@ def FnExtractText(path: str) -> Dict[str, Any]:
                     if cells:
                         chunks.append(" | ".join(cells))
             text = "\n".join(chunks)
+        elif ext in (".txt", ".md", ".markdown"):
+            with open(path, "r", encoding="utf-8", errors="replace") as f:
+                text = f.read()
+        elif ext == ".csv":
+            import csv as _csv
+            _rows = []
+            with open(path, "r", encoding="utf-8-sig", errors="replace", newline="") as f:
+                for i, row in enumerate(_csv.reader(f)):
+                    if i >= CSV_MAX_ROWS:
+                        _rows.append("…（僅取前 %d 列）" % CSV_MAX_ROWS)
+                        break
+                    _rows.append("| " + " | ".join((c or "").strip() for c in row) + " |")
+            text = "\n".join(_rows)
+        elif ext in (".html", ".htm"):
+            with open(path, "r", encoding="utf-8", errors="replace") as f:
+                raw = f.read()
+            try:
+                from bs4 import BeautifulSoup as _Soup
+                _soup = _Soup(raw, "html.parser")
+                for _tag in _soup(["script", "style", "noscript"]):
+                    _tag.decompose()
+                _t = "\n".join(ln.strip() for ln in _soup.get_text(separator="\n").splitlines() if ln.strip())
+                _title = (_soup.title.string.strip() if _soup.title and _soup.title.string else "")
+                text = (("# " + _title + "\n\n") if _title else "") + _t
+            except Exception:
+                _t = re.sub(r"(?s)<script.*?</script>|<style.*?</style>|<[^>]+>", " ", raw)
+                text = "\n".join(ln.strip() for ln in re.sub(r"[ \t]+", " ", _t).splitlines() if ln.strip())
+        elif ext == ".eml":
+            import email as _email
+            import email.policy as _epolicy
+            with open(path, "rb") as f:
+                _msg = _email.message_from_binary_file(f, policy=_epolicy.default)
+            _head = []
+            _subj = str(_msg.get("Subject", "") or "").strip()
+            if _subj:
+                _head.append("Subject: " + _subj)
+            for _k in ("From", "To", "Cc", "Date"):
+                _v = str(_msg.get(_k, "") or "").strip()
+                if _v:
+                    _head.append("%s: %s" % (_k, _v))
+            _body, _atts = "", []
+            if _msg.is_multipart():
+                for _part in _msg.walk():
+                    if (_part.get_content_disposition() or "") == "attachment":
+                        _atts.append(str(_part.get_filename() or "unnamed"))
+                        continue
+                    if _part.get_content_type() == "text/plain" and not _body:
+                        try:
+                            _body = _part.get_content().strip()
+                        except Exception:
+                            pass
+                if not _body:
+                    for _part in _msg.walk():
+                        if _part.get_content_type() == "text/html":
+                            try:
+                                _h = _part.get_content()
+                            except Exception:
+                                continue
+                            try:
+                                from bs4 import BeautifulSoup as _Soup2
+                                _s2 = _Soup2(_h, "html.parser")
+                                for _t2 in _s2(["script", "style"]):
+                                    _t2.decompose()
+                                _body = _s2.get_text(separator="\n").strip()
+                            except Exception:
+                                _body = re.sub(r"<[^>]+>", " ", _h).strip()
+                            if _body:
+                                break
+            else:
+                try:
+                    _c = _msg.get_content()
+                    _body = (_c if isinstance(_c, str) else "").strip()
+                except Exception:
+                    _body = ""
+            _segs = []
+            if _head:
+                _segs.append("\n".join(_head))
+            if _body:
+                _segs.append(_body)
+            if _atts:
+                _segs.append("Attachments: " + "、".join(_atts))
+            text = "\n\n".join(_segs)
         else:  # .pdf
             from pypdf import PdfReader
             reader = PdfReader(path)
@@ -213,6 +306,16 @@ def FnExtractImages(path: str) -> Dict[str, Any]:
     import io as _io
     ext = os.path.splitext(path or "")[1].lower()
     images: List[Dict[str, str]] = []
+    # Standalone photos/scans go straight to eyes (no page rendering).
+    if ext in IMAGE_EXTS:
+        try:
+            img = Image.open(path)
+            url = _FnPilToDataUrl(img)
+        except Exception as e:
+            return {"ok": False, "error": "%s: %s" % (type(e).__name__, e)}
+        if not url:
+            return {"ok": False, "error": "圖片太小或無法辨識"}
+        return {"ok": True, "images": [{"label": "[Image]", "data_url": url}], "note": ""}
     try:
         if ext == ".pdf":
             import fitz

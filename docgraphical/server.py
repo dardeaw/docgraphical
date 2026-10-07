@@ -18,7 +18,7 @@ from .llm_provider import (
     FnListRemoteModels, FnGetActiveLLM, FnSetActiveLLM,
 )
 from .ingest import (
-    ALLOWED_EXTS, FnSanitizeFilename, FnIngestDirOk, FnFindOwningRepo,
+    ALLOWED_EXTS, IMAGE_EXTS, FnSanitizeFilename, FnIngestDirOk, FnFindOwningRepo,
     FnExtractText, FnChatSummarize, FnExtractImages, FnVisionSummarize,
     VISION_MAX_TOTAL, FnUniqueMdPath, FnBuildMd,
 )
@@ -476,7 +476,7 @@ def create_app(initial_paths: Optional[List[str]] = None, search_roots: Optional
             ext = os.path.splitext(name)[1].lower()
             if not name or ext not in ALLOWED_EXTS:
                 return jsonify({"success": False,
-                                "error": "不支援的格式: %s（僅 pptx/ppt/docx/doc/pdf）" % (raw or "?")}), 400
+                                "error": "不支援的格式: %s（文件：pptx/ppt/docx/doc/pdf/txt/md/csv/html/eml；圖片：jpg/png/webp/bmp/tiff）" % (raw or "?")}), 400
             dest = os.path.join(dest_dir, name)
             if os.path.exists(dest):
                 base, e = os.path.splitext(name)
@@ -506,6 +506,10 @@ def create_app(initial_paths: Optional[List[str]] = None, search_roots: Optional
         for p in paths:
             name = os.path.basename(p)
             ext = os.path.splitext(p)[1].lower()
+            # Standalone photos/scans: no text layer, straight to eyes.
+            if ext in IMAGE_EXTS:
+                vision_paths.append(p)
+                continue
             try:
                 r = FnExtractText(p)
             except Exception as e:
@@ -522,7 +526,7 @@ def create_app(initial_paths: Optional[List[str]] = None, search_roots: Optional
             if ext in (".pdf", ".pptx"):
                 vision_paths.append(p)
             else:
-                notes.append("%s：抽不到文字（僅 pdf／pptx 可改走圖片辨識）" % name)
+                notes.append("%s：抽不到文字（僅 pdf／pptx／圖片可改走圖片辨識）" % name)
         if texts:
             for p in vision_paths:
                 notes.append("%s：無文字未納入本次摘要（圖片型請單批上傳走 vision）"
@@ -614,6 +618,9 @@ def create_app(initial_paths: Optional[List[str]] = None, search_roots: Optional
         if repo_root:
             try:
                 index_res = index_repository(repo_root, incremental=True)
+                record_log(repo_root, "SAVE_INGEST_MD", target_file=md_path,
+                           source_material=", ".join(src_paths),
+                           summary=summary[:300])
             except Exception as e:
                 index_res = {"success": False, "error": str(e)}
         return jsonify({"success": True, "md_path": md_path,
@@ -706,6 +713,9 @@ def create_app(initial_paths: Optional[List[str]] = None, search_roots: Optional
         if repo_root:
             try:
                 index_res = index_repository(repo_root, incremental=True)
+                record_log(repo_root, "DELETE_MD_FILE", target_file=a,
+                           source_material=", ".join(rels),
+                           summary=f"Deleted {len(deleted)} files")
             except Exception as e:
                 index_res = {"success": False, "error": str(e)}
         return jsonify({"success": True, "deleted": deleted,
