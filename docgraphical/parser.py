@@ -207,3 +207,49 @@ def search_doc(
 
     header = f"=== [DocGraphical Search] Matches for '{query}' ({len(results)} found) ===\n"
     return header + "\n".join(results)
+
+@dataclass
+class WikiLinkNode:
+    concept: str
+    alias: str
+    line_number: int
+    raw_match: str
+
+
+def extract_wikilinks(file_path_or_content: str, is_content: bool = False) -> List[WikiLinkNode]:
+    """Extract all [[Concept]] and [[Concept|Alias]] occurrences outside code blocks."""
+    if is_content:
+        lines = file_path_or_content.splitlines(keepends=True)
+    else:
+        if not os.path.exists(file_path_or_content):
+            return []
+        with open(file_path_or_content, "r", encoding="utf-8", errors="replace") as f:
+            lines = f.readlines()
+
+    wikilinks: List[WikiLinkNode] = []
+    in_code_block = False
+    pattern = re.compile(r'\[\[([^\]|#\n]+)(?:#[^\]|\n]+)?(?:\|([^\]\n]+))?\]\]')
+
+    for idx, line in enumerate(lines, 1):
+        stripped = line.strip()
+        if stripped.startswith("```") or stripped.startswith("~~~"):
+            in_code_block = not in_code_block
+            continue
+        if in_code_block:
+            continue
+
+        line_clean = re.sub(r'`[^`\n]+`', '', line)
+
+        for m in pattern.finditer(line_clean):
+            concept = m.group(1).strip()
+            alias = (m.group(2) or "").strip()
+            if not concept or len(concept) > 60:
+                continue
+            wikilinks.append(WikiLinkNode(
+                concept=concept,
+                alias=alias,
+                line_number=idx,
+                raw_match=m.group(0)
+            ))
+
+    return wikilinks

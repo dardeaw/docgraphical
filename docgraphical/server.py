@@ -12,6 +12,8 @@ from .parser import extract_toc, extract_section, search_doc, parse_headings
 from .db import (
     index_repository, fetch_graph_data, fetch_graph_merged, fts_search,
     get_db_path, get_db_stats, get_indexed_file_set, uninit_repository,
+    record_log, get_concepts_tree, get_concept_linked_files, save_concept,
+    merge_concepts, delete_concept, unlink_concept_file, attach_concept_to_file, list_repo_markdown_files, get_concept_tag_page, save_concept_tag_page,
 )
 from .llm_provider import (
     FnListProviders, FnAddProvider, FnDeleteProvider, FnTestProvider,
@@ -618,11 +620,15 @@ def create_app(initial_paths: Optional[List[str]] = None, search_roots: Optional
         if repo_root:
             try:
                 index_res = index_repository(repo_root, incremental=True)
+            except Exception as e:
+                index_res = {"success": False, "error": str(e)}
+            # Logging must never break the index response: own try block.
+            try:
                 record_log(repo_root, "SAVE_INGEST_MD", target_file=md_path,
                            source_material=", ".join(src_paths),
                            summary=summary[:300])
-            except Exception as e:
-                index_res = {"success": False, "error": str(e)}
+            except Exception:
+                pass
         return jsonify({"success": True, "md_path": md_path,
                         "source_rels": rels, "index": index_res})
 
@@ -713,18 +719,71 @@ def create_app(initial_paths: Optional[List[str]] = None, search_roots: Optional
         if repo_root:
             try:
                 index_res = index_repository(repo_root, incremental=True)
+            except Exception as e:
+                index_res = {"success": False, "error": str(e)}
+            # Logging must never break the index response: own try block.
+            try:
                 record_log(repo_root, "DELETE_MD_FILE", target_file=a,
                            source_material=", ".join(rels),
                            summary=f"Deleted {len(deleted)} files")
-            except Exception as e:
-                index_res = {"success": False, "error": str(e)}
+            except Exception:
+                pass
         return jsonify({"success": True, "deleted": deleted,
                         "missing": missing, "index": index_res})
+
+    @app.route("/api/browse/delete-dir", methods=["POST"])
+    def browse_delete_dir():
+        '''Recursively delete a directory under an authorized search root, then re-index repo.
+
+        Body: {path: abs dir path}. Refuses repo root itself or paths outside roots.
+        '''
+        import shutil
+        data = request.get_json(silent=True) or {}
+        target = (data.get("path") or "").strip()
+        roots = get_search_roots(search_roots)
+        if not target:
+            return jsonify({"success": False, "error": "缺少目錄路徑"}), 400
+        a = os.path.realpath(target)
+        if not os.path.isdir(a):
+            return jsonify({"success": False, "error": "目錄不存在"}), 404
+        real_roots = [os.path.realpath(r) for r in roots if r and os.path.isdir(r)]
+        # Must be strictly under at least one search root (not equal to root itself)
+        if not any(a.startswith(r + os.sep) for r in real_roots):
+            return jsonify({"success": False, "error": "不可刪除專案根目錄或搜尋範圍外目錄"}), 400
+        repos = scan_doc_repositories(roots)
+        repo_root = FnFindOwningRepo(a, repos)
+        repo_real = os.path.realpath(repo_root) if repo_root else None
+        if repo_real and a == repo_real:
+            return jsonify({"success": False, "error": "禁止刪除整個專案倉庫根目錄"}), 400
+
+        try:
+            shutil.rmtree(a)
+        except OSError as e:
+            return jsonify({"success": False, "error": f"刪除目錄失敗: {e}"}), 500
+
+        index_res = None
+        if repo_root:
+            try:
+                index_res = index_repository(repo_root, incremental=True)
+            except Exception as e:
+                index_res = {"success": False, "error": str(e)}
+            try:
+                record_log(repo_root, "DELETE_DIR", target_file=a,
+                           source_material="",
+                           summary=f"Recursively deleted folder {os.path.basename(a)}")
+            except Exception:
+                pass
+        return jsonify({"success": True, "deleted": a, "index": index_res})
 
     # ---------------- app-wide LLM provider API (/api/llm/*) ----------------
     # Serves the settings dialog AND any future app feature (ingest, chat).
     # Note: FnResolveActiveLLM intentionally has NO route — raw API keys never
     # leave the backend.
+
+    @app.route("/api/llm/opencode-presets", methods=["GET"])
+    def llm_opencode_presets():
+        from .llm_provider import FnGetOpencodePresets
+        return jsonify(FnGetOpencodePresets())
 
     @app.route("/api/llm/providers", methods=["GET"])
     def llm_providers():
@@ -758,7 +817,7 @@ def create_app(initial_paths: Optional[List[str]] = None, search_roots: Optional
     @app.route("/api/llm/providers/models", methods=["POST"])
     def llm_remote_models():
         data = request.get_json(silent=True) or {}
-        return jsonify(FnListRemoteModels(data.get("base", ""), data.get("key", "")))
+        return jsonify(FnListRemoteModels(data.get("base", ""), data.get("key", ""), data.get("strLang", "zh")))
 
     @app.route("/api/llm/active", methods=["GET"])
     def llm_active_get():
@@ -768,5 +827,191 @@ def create_app(initial_paths: Optional[List[str]] = None, search_roots: Optional
     def llm_active_set():
         data = request.get_json(silent=True) or {}
         return jsonify(FnSetActiveLLM(data.get("provider", ""), data.get("model", "")))
+
+    
+
+    # ─── Concepts Registry RESTful Endpoints ──────────────────────────
+
+    def _resolve_repo(repo_val: str, target_file: str = "") -> str:
+        repos = scan_doc_repositories(get_search_roots())
+        repo_list = []
+        if repo_val and repo_val.strip():
+            # If comma-separated, split candidates
+            parts = [p.strip() for p in repo_val.split(",") if p.strip()]
+            for p in parts:
+                if os.path.isdir(p):
+                    repo_list.append(os.path.realpath(p))
+        if not repo_list:
+            if isinstance(repos, dict) and repos:
+                for v in repos.values():
+                    p = v.get("path", "") if isinstance(v, dict) else str(v)
+                    if p and os.path.isdir(p):
+                        repo_list.append(os.path.realpath(p))
+            elif isinstance(repos, list) and repos:
+                for v in repos:
+                    p = v.get("path", "") if isinstance(v, dict) else str(v)
+                    if p and os.path.isdir(p):
+                        repo_list.append(os.path.realpath(p))
+
+        if target_file and repo_list:
+            clean_tf = target_file.strip().replace("/", os.sep).replace("\\", os.sep)
+            # If target_file is absolute
+            if os.path.isabs(clean_tf) and os.path.exists(clean_tf):
+                real_tf = os.path.realpath(clean_tf)
+                for r in repo_list:
+                    if real_tf == r or real_tf.startswith(r + os.sep):
+                        return r
+            # If target_file is relative, test which repo contains it
+            for r in repo_list:
+                candidate = os.path.realpath(os.path.join(r, clean_tf))
+                if os.path.exists(candidate):
+                    return r
+
+        return repo_list[0] if repo_list else (repo_val.split(",")[0].strip() if repo_val else "")
+
+    @app.route("/api/concepts", methods=["GET"])
+    def api_get_concepts():
+        repo_arg = request.args.get("repo", "").strip()
+        repos_list = []
+        if repo_arg:
+            repos_list = [r.strip() for r in repo_arg.split(",") if r.strip()]
+        else:
+            # Gather all scanned repos
+            all_r = scan_doc_repositories(get_search_roots())
+            if isinstance(all_r, dict):
+                for k, v in all_r.items():
+                    p = v.get("path", "") if isinstance(v, dict) else str(v)
+                    if p: repos_list.append(p)
+            elif isinstance(all_r, list):
+                for v in all_r:
+                    p = v.get("path", "") if isinstance(v, dict) else str(v)
+                    if p: repos_list.append(p)
+
+        if not repos_list:
+            return jsonify({"ok": True, "tree": {}, "candidates": [], "counts": {"official": 0, "candidates": 0}})
+
+        # Aggregate concepts across repos
+        merged_tree = {}
+        merged_candidates = []
+        seen_names = set()
+
+        for rp in repos_list:
+            res = get_concepts_tree(rp)
+            if not res or not res.get("ok"):
+                continue
+            for cat, items in (res.get("tree") or {}).items():
+                if cat not in merged_tree:
+                    merged_tree[cat] = []
+                for it in items:
+                    if it["name"] not in seen_names:
+                        seen_names.add(it["name"])
+                        merged_tree[cat].append(it)
+            for cand in (res.get("candidates") or []):
+                if cand["name"] not in seen_names:
+                    seen_names.add(cand["name"])
+                    merged_candidates.append(cand)
+
+        total_official = sum(len(v) for v in merged_tree.values())
+        return jsonify({
+            "ok": True,
+            "tree": merged_tree,
+            "candidates": merged_candidates,
+            "counts": {"official": total_official, "candidates": len(merged_candidates)}
+        })
+
+    @app.route("/api/concepts", methods=["POST"])
+    def api_save_concept():
+        data = request.get_json(silent=True) or {}
+        repo = _resolve_repo(data.get("repo") or "")
+        name = (data.get("name") or "").strip()
+        raw_cat = (data.get("category") or "").strip()
+        category = "Uncategorized" if (not raw_cat or raw_cat in ("未分類", "Uncategorized")) else raw_cat
+        aliases = (data.get("aliases") or "").strip()
+        status = (data.get("status") or "official").strip()
+        if not repo or not name:
+            return jsonify({"ok": False, "error": "Repo and concept name are required"}), 400
+        res = save_concept(repo, name, category, aliases, status)
+        return jsonify(res)
+
+    @app.route("/api/concepts/files", methods=["GET"])
+    def api_get_concept_files():
+        repo_raw = request.args.get("repo", "").strip()
+        repo = repo_raw if repo_raw else _resolve_repo("")
+        name = request.args.get("name", "").strip()
+        if not name:
+            return jsonify({"ok": False, "error": "Concept name is required"}), 400
+        return jsonify(get_concept_linked_files(repo, name))
+
+    @app.route("/api/concepts/delete", methods=["POST"])
+    def api_delete_concept():
+        data = request.get_json(silent=True) or {}
+        repo = _resolve_repo(data.get("repo") or "")
+        name = (data.get("name") or "").strip()
+        clean_disk = data.get("cleanDisk", True)
+        if not repo or not name:
+            return jsonify({"ok": False, "error": "Repo and concept name are required"}), 400
+        return jsonify(delete_concept(repo, name, clean_disk))
+
+    @app.route("/api/concepts/merge", methods=["POST"])
+    def api_merge_concepts():
+        data = request.get_json(silent=True) or {}
+        repo = _resolve_repo(data.get("repo") or "")
+        src = (data.get("source") or "").strip()
+        tgt = (data.get("target") or "").strip()
+        add_alias = data.get("addAsAlias", True)
+        if not repo or not src or not tgt:
+            return jsonify({"ok": False, "error": "Repo, source and target are required"}), 400
+        return jsonify(merge_concepts(repo, src, tgt, add_alias))
+
+    
+    @app.route("/api/repo/doc-files", methods=["GET"])
+    def api_get_repo_doc_files():
+        repo = _resolve_repo(request.args.get("repo", ""))
+        if not repo:
+            return jsonify({"ok": False, "error": "No repo found"}), 400
+        return jsonify({"ok": True, "repo": repo, "files": list_repo_markdown_files(repo)})
+
+    @app.route("/api/concepts/attach", methods=["POST"])
+    def api_attach_concept():
+        data = request.get_json(silent=True) or {}
+        file_path = (data.get("filePath") or "").strip()
+        repo = _resolve_repo(data.get("repo") or "", target_file=file_path)
+        name = (data.get("name") or "").strip()
+        file_path = (data.get("filePath") or "").strip()
+        heading = (data.get("heading") or "").strip()
+        if not repo or not name or not file_path:
+            return jsonify({"ok": False, "error": "Repo, concept name and filePath required"}), 400
+        res = attach_concept_to_file(repo, name, file_path, heading=heading)
+        return jsonify(res)
+
+    @app.route("/api/concepts/tag-page", methods=["GET"])
+    def api_get_concept_tag_page():
+        repo_raw = request.args.get("repo", "").strip()
+        repo = repo_raw if repo_raw else _resolve_repo("")
+        name = request.args.get("name", "").strip()
+        if not name:
+            return jsonify({"ok": False, "error": "Concept name is required"}), 400
+        return jsonify(get_concept_tag_page(repo, name))
+
+    @app.route("/api/concepts/tag-page", methods=["POST"])
+    def api_save_concept_tag_page():
+        data = request.get_json(silent=True) or {}
+        repo = _resolve_repo(data.get("repo") or "")
+        name = (data.get("name") or "").strip()
+        content = data.get("content", "")
+        if not repo or not name:
+            return jsonify({"ok": False, "error": "Repo and concept name required"}), 400
+        return jsonify(save_concept_tag_page(repo, name, content))
+
+    @app.route("/api/concepts/unlink", methods=["POST"])
+    def api_unlink_concept():
+        data = request.get_json(silent=True) or {}
+        repo = _resolve_repo(data.get("repo") or "")
+        name = (data.get("name") or "").strip()
+        file_path = (data.get("filePath") or "").strip()
+        rewrite_disk = data.get("rewriteDisk", True)
+        if not repo or not name or not file_path:
+            return jsonify({"ok": False, "error": "Repo, concept name and filePath are required"}), 400
+        return jsonify(unlink_concept_file(repo, name, file_path, rewrite_disk))
 
     return app

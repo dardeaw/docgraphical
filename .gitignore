@@ -28,3 +28,17 @@ ENV/
 
 node_modules/
 dist/
+
+# SQLite Databases
+*.db
+*.db-wal
+*.db-shm
+*.db-journal
+.docgraphical/
+.docgraph/
+
+log.md
+LOG.md
+
+# Private planning docs (never publish)
+TODO_LLM_WIKI_ROADMAP.md

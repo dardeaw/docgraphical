@@ -215,23 +215,93 @@ def FnTestProvider(str_id: str, str_lang: str = "") -> Dict[str, Any]:
 
 
 def FnListRemoteModels(str_base: str, str_key: str = "") -> Dict[str, Any]:
-    """Fetch model ids from an OpenAI-compatible GET <base>/models endpoint.
-
-    Powers the settings dialog's auto-fill so users never type blind model names.
-    """
+    """Fetch model ids from an OpenAI or Anthropic compatible GET <base>/models endpoint."""
     strBase = (str_base or "").rstrip("/")
     if not strBase:
-        return {"ok": False, "error": "Base URL 不可為空"}
-    dicHeaders = {}
+        return {"ok": False, "error": "Base URL 不可為空" if (str_lang or "").startswith("zh") else "Base URL cannot be empty"}
+    
+    # Auto detect protocol & headers
+    dicHeaders = {"User-Agent": "DocGraphical/1.0"}
+    is_anthropic = "anthropic.com" in strBase or "claude" in strBase.lower()
+    
     if str_key:
-        dicHeaders["Authorization"] = "Bearer " + str_key
-    try:
-        oReq = urllib.request.Request(strBase + "/models", headers=dicHeaders, method="GET")
-        with urllib.request.urlopen(oReq, timeout=10) as oRes:
-            dicData = json.loads(oRes.read().decode("utf-8"))
-        vModels = [m.get("id") for m in (dicData.get("data") or []) if m.get("id")]
-        if vModels:
-            return {"ok": True, "models": vModels, "kind": "openai"}
-        return {"ok": False, "error": "empty list"}
-    except Exception as oErr:
-        return {"ok": False, "error": f"/models: {type(oErr).__name__}"}
+        if is_anthropic:
+            dicHeaders["x-api-key"] = str_key
+            dicHeaders["anthropic-version"] = "2023-06-01"
+        else:
+            dicHeaders["Authorization"] = "Bearer " + str_key
+
+    # Try 1: Standard /models
+    url1 = strBase + "/models" if not strBase.endswith("/models") else strBase
+    # Try 2: If base lacks /v1 and failed, test /v1/models
+    url2 = strBase + "/v1/models" if not strBase.endswith("/v1") and not strBase.endswith("/models") else url1
+
+    for target_url in [url1, url2]:
+        try:
+            oReq = urllib.request.Request(target_url, headers=dicHeaders, method="GET")
+            with urllib.request.urlopen(oReq, timeout=10) as oRes:
+                dicData = json.loads(oRes.read().decode("utf-8"))
+            
+            # OpenAI style { "data": [{"id": ...}] }
+            vModels = [m.get("id") for m in (dicData.get("data") or []) if m.get("id")]
+            # Anthropic style { "models": [{"id": ...}] } or direct list
+            if not vModels and "models" in dicData:
+                vModels = [m.get("id") or m.get("name") for m in dicData.get("models") if m]
+            
+            if vModels:
+                return {"ok": True, "models": vModels, "kind": "anthropic" if is_anthropic else "openai"}
+        except Exception:
+            continue
+
+    # Fallback preset list for official Anthropic if /models is restricted
+    if is_anthropic:
+        return {
+            "ok": True,
+            "models": [
+                "claude-3-7-sonnet-latest",
+                "claude-3-5-sonnet-latest",
+                "claude-3-5-haiku-latest",
+                "claude-3-opus-latest"
+            ],
+            "kind": "anthropic"
+        }
+
+    return {"ok": False, "error": "無法取得模型清單，請確認 URL 與 API 金鑰"}
+
+
+def FnGetOpencodePresets() -> List[Dict[str, Any]]:
+    """Parse local opencode config to discover configured providers & models."""
+    presets: List[Dict[str, Any]] = []
+    p_jsonc = os.path.expanduser("~/.config/opencode/opencode.jsonc")
+    p_json = os.path.expanduser("~/.config/opencode/opencode.json")
+    target = p_jsonc if os.path.exists(p_jsonc) else (p_json if os.path.exists(p_json) else None)
+    if target:
+        try:
+            with open(target, "r", encoding="utf-8") as f:
+                c = f.read()
+            lines = [l for l in c.splitlines() if not l.strip().startswith("//")]
+            clean_text = "\n".join(lines)
+            clean_text = re.sub(r'/\*.*?\*/', '', clean_text, flags=re.DOTALL)
+            clean_text = re.sub(r',\s*([\]}])', r'\1', clean_text)
+            data = json.loads(clean_text, strict=False)
+            for pid, pdata in data.get("provider", {}).items():
+                name = pdata.get("name") or pid
+                opts = pdata.get("options", {})
+                base = opts.get("baseURL") or opts.get("base") or ""
+                key = opts.get("apiKey") or opts.get("key") or ""
+                models = list((pdata.get("models") or {}).keys())
+                presets.append({
+                    "id": f"opencode_{pid}",
+                    "label": f"{name} (Opencode)",
+                    "category": "Local",
+                    "base": base,
+                    "key": key,
+                    "models": models,
+                    "suggest": models,
+                    "urlMode": "edit",
+                    "keyMode": "optional",
+                    "source": "opencode"
+                })
+        except Exception as e:
+            pass
+    return presets

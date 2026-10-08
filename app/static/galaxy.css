@@ -1,3 +1,7 @@
+:root {
+  color-scheme: dark;
+}
+
 * { margin: 0; padding: 0; box-sizing: border-box; }
 html, body {
   width: 100%;
@@ -323,15 +327,22 @@ html, body {
 }
 .tree-children.open { display: flex; }
 
-.node-kind-tag {
-  font-size: 9px;
-  padding: 0 4px;
-  border-radius: 3px;
-  background: #30363d;
-  color: #8b949e;
-  text-transform: uppercase;
-  margin-left: auto;
-  flex-shrink: 0;
+.node-kind-tag,
+#d-kind-badge {
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  font-size: 10px !important;
+  font-weight: 700 !important;
+  color: #ffffff !important;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.7) !important;
+  padding: 1px 7px !important;
+  border-radius: 4px !important;
+  letter-spacing: 0.5px !important;
+  text-transform: uppercase !important;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3) !important;
+  border: 1px solid rgba(255, 255, 255, 0.2) !important;
+  flex-shrink: 0 !important;
 }
 
 /* Pending Sync / Delta Badge */
@@ -721,7 +732,7 @@ html, body {
   align-items: center;
   justify-content: center;
 }
-#path-modal.show { display: flex; }
+#path-modal.show, #settings-modal.show, .modal-overlay.show { display: flex !important; }
 
 .modal-header {
   padding: 12px 16px;
@@ -1162,22 +1173,6 @@ html, body {
   white-space: nowrap;
 }
 
-.doc-token-bar {
-  margin-bottom: 8px;
-}
-
-.token-fill-track {
-  height: 6px;
-  background: #21262d;
-  border-radius: 3px;
-  overflow: hidden;
-}
-
-.token-fill-bar {
-  height: 100%;
-  background: linear-gradient(90deg, #00ffaa, #58a6ff);
-  transition: width 0.3s ease;
-}
 
 .doc-action-bar {
   display: flex;
@@ -1893,5 +1888,1161 @@ html, body {
 .controls-modal-body,
 #toast {
   zoom: 1.16;
+}
+
+
+
+/* Markdown Viewer Hierarchical List Styles */
+.doc-content-viewer ul, #d-code-markdown ul {
+  list-style-type: disc;
+  margin: 8px 0 8px 0;
+  padding-left: 24px !important;
+}
+
+.doc-content-viewer ul ul, #d-code-markdown ul ul {
+  list-style-type: circle;
+  margin: 4px 0 4px 0;
+  padding-left: 22px !important;
+}
+
+.doc-content-viewer ul ul ul, #d-code-markdown ul ul ul {
+  list-style-type: square;
+  margin: 3px 0 3px 0;
+  padding-left: 20px !important;
+}
+
+.doc-content-viewer ul ul ul ul, #d-code-markdown ul ul ul ul {
+  list-style-type: disc;
+  margin: 2px 0 2px 0;
+  padding-left: 18px !important;
+}
+
+.doc-content-viewer li, #d-code-markdown li {
+  margin: 4px 0;
+  line-height: 1.6;
+}
+
+
+/* ─── Hierarchical Heading Colors & Drill-Down Interactive Styling (Aligned with 3D Galaxy Balls) ─── */
+.doc-content-viewer h1, #d-code-markdown h1 {
+  color: #58a6ff !important; /* H1 Electric Blue */
+  font-size: 22px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+.doc-content-viewer h2, #d-code-markdown h2 {
+  color: #3fb950 !important; /* H2 Emerald Green */
+  font-size: 18px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+.doc-content-viewer h3, #d-code-markdown h3 {
+  color: #bc8cff !important; /* H3 Vivid Purple */
+  font-size: 15px;
+  border-bottom: none;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+.doc-content-viewer h4, #d-code-markdown h4 {
+  color: #ff7bba !important; /* H4 Rose Pink */
+  font-size: 13px;
+  border-bottom: none;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+.doc-content-viewer h5, #d-code-markdown h5 {
+  color: #00d2d3 !important; /* H5 Cyan */
+  font-size: 12px;
+  cursor: pointer;
+}
+.doc-content-viewer h6, #d-code-markdown h6 {
+  color: #ffd700 !important; /* H6 Gold */
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.doc-content-viewer h1:hover, .doc-content-viewer h2:hover, .doc-content-viewer h3:hover, .doc-content-viewer h4:hover,
+#d-code-markdown h1:hover, #d-code-markdown h2:hover, #d-code-markdown h3:hover, #d-code-markdown h4:hover {
+  filter: brightness(1.25);
+  text-shadow: 0 0 10px currentColor;
+  padding-left: 6px;
+}
+
+.doc-content-viewer h1::after, .doc-content-viewer h2::after, .doc-content-viewer h3::after, .doc-content-viewer h4::after,
+#d-code-markdown h1::after, #d-code-markdown h2::after, #d-code-markdown h3::after, #d-code-markdown h4::after {
+  content: ' 🔍 Drill Down';
+  font-size: 10px;
+  opacity: 0;
+  margin-left: 10px;
+  color: #8b949e;
+  font-weight: 400;
+  vertical-align: middle;
+  transition: opacity 0.2s ease;
+}
+
+.doc-content-viewer h1:hover::after, .doc-content-viewer h2:hover::after, .doc-content-viewer h3:hover::after, .doc-content-viewer h4:hover::after,
+#d-code-markdown h1:hover::after, #d-code-markdown h2:hover::after, #d-code-markdown h3:hover::after, #d-code-markdown h4:hover::after {
+  opacity: 0.8;
+}
+
+
+/* ─── Connected Relations Tabular Row Classes (Clean Decoupled Architecture) ─── */
+.rel-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 6px;
+  border-radius: 5px;
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+.rel-row:hover {
+  background: #161b22;
+}
+.rel-kind-capsule {
+  width: 108px;
+  flex-shrink: 0;
+  background: rgba(110, 118, 129, 0.12);
+  color: #8b949e;
+  border: 1px solid rgba(110, 118, 129, 0.28);
+  font-weight: 500;
+  font-size: 11px;
+  padding: 2px 6px;
+  border-radius: 4px;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  white-space: nowrap;
+  box-sizing: border-box;
+}
+.rel-kind-capsule strong {
+  font-size: 12px;
+  margin-right: 2px;
+  opacity: 0.9;
+}
+.rel-node-tag {
+  width: 40px;
+  flex-shrink: 0;
+  text-align: center;
+  font-size: 10px;
+  font-weight: 600;
+  padding: 1px 0;
+  border-radius: 3px;
+  box-sizing: border-box;
+}
+.rel-target-name {
+  flex: 1;
+  min-width: 0;
+  color: #e6edf3;
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+
+/* ==========================================================================
+   VS Code Style Activity Bar & Collapsible Drawer System
+   ========================================================================== */
+
+#activity-bar {
+  width: 48px;
+  min-width: 48px;
+  height: 100%;
+  background: #0d1117;
+  border-right: 1px solid #21262d;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  align-items: center;
+  padding: 6px 0;
+  z-index: 15;
+  user-select: none;
+}
+
+.activity-top, .activity-bottom {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+}
+
+.activity-tab {
+  width: 44px;
+  height: 44px;
+  border: none;
+  background: transparent;
+  color: #8b949e;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+  border-radius: 6px;
+  transition: all 0.15s ease;
+  padding: 0;
+}
+
+.activity-tab:hover {
+  color: #c9d1d9;
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.activity-tab.active {
+  color: #58a6ff;
+  background: rgba(88, 166, 255, 0.08);
+}
+
+.activity-tab.active::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 6px;
+  bottom: 6px;
+  width: 3px;
+  background: #58a6ff;
+  border-radius: 0 2px 2px 0;
+}
+
+.activity-badge {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  background: #d29922;
+  color: #0d1117;
+  font-size: 10px;
+  font-weight: 700;
+  padding: 1px 4px;
+  border-radius: 10px;
+  line-height: 1;
+}
+
+/* Left Sidebar Drawer Container (Collapsible) */
+#left-sidebar-drawer {
+  position: static !important;
+  width: 280px;
+  min-width: 200px;
+  max-width: 500px;
+  height: 100%;
+  background: #0d1117;
+  border-right: 1px solid #30363d;
+  display: flex;
+  flex-direction: column;
+  flex-shrink: 0;
+  z-index: 10;
+  transition: width 0.15s ease;
+  overflow: hidden;
+}
+
+#left-sidebar-drawer.collapsed {
+  display: none !important;
+}
+
+.drawer-panel {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.drawer-title {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  color: #8b949e;
+  text-transform: uppercase;
+}
+
+/* Concepts Manager UI */
+.concepts-tabs-bar {
+  display: flex;
+  border-bottom: 1px solid #21262d;
+  background: #161b22;
+  padding: 2px 6px 0;
+  gap: 4px;
+}
+
+.concept-tab-btn {
+  background: transparent;
+  border: none;
+  border-bottom: 2px solid transparent;
+  color: #8b949e;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 6px 10px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.concept-tab-btn:hover {
+  color: #c9d1d9;
+}
+
+.concept-tab-btn.active {
+  color: #58a6ff;
+  border-bottom-color: #58a6ff;
+}
+
+.concepts-list-container {
+  flex: 1;
+  overflow-y: auto;
+  padding: 8px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.concept-card {
+  background: #161b22;
+  border: 1px solid #30363d;
+  border-radius: 6px;
+  padding: 8px 10px;
+  transition: border-color 0.15s ease, background 0.15s ease;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.concept-card:hover {
+  border-color: #58a6ff;
+  background: #1c2128;
+}
+
+.concept-card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.concept-name-badge {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+  font-weight: 700;
+  color: #f0f6fc;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.concept-status-pill {
+  font-size: 10px;
+  padding: 1px 6px;
+  border-radius: 10px;
+  font-weight: 600;
+}
+
+.concept-status-pill.official {
+  background: rgba(88, 166, 255, 0.15);
+  color: #58a6ff;
+  border: 1px solid rgba(88, 166, 255, 0.3);
+}
+
+.concept-status-pill.candidate {
+  background: rgba(210, 153, 34, 0.15);
+  color: #d29922;
+  border: 1px solid rgba(210, 153, 34, 0.3);
+}
+
+.concept-aliases-text {
+  font-size: 11px;
+  color: #8b949e;
+  line-height: 1.4;
+}
+
+.concept-card-actions {
+  display: flex;
+  gap: 4px;
+  justify-content: flex-end;
+  margin-top: 4px;
+}
+
+.concept-action-btn {
+  background: #21262d;
+  border: 1px solid #30363d;
+  color: #c9d1d9;
+  font-size: 10px;
+  padding: 2px 6px;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: all 0.12s ease;
+}
+
+.concept-action-btn:hover {
+  background: #30363d;
+  color: #fff;
+  border-color: #58a6ff;
+}
+
+
+/* ==========================================================================
+   Unified Settings Modal (VS Code Left-Nav 2-Column Layout)
+   ========================================================================== */
+
+.settings-dialog-card {
+  width: 980px !important;
+  max-width: 95vw !important;
+  height: 680px !important;
+  max-height: 90vh !important;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.settings-modal-body {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  background: #0d1117;
+}
+
+/* Left Nav Sidebar */
+.settings-nav-sidebar {
+  width: 200px;
+  min-width: 200px;
+  background: #161b22;
+  border-right: 1px solid #30363d;
+  display: flex;
+  flex-direction: column;
+  padding: 10px 8px;
+  gap: 4px;
+  user-select: none;
+}
+
+.settings-nav-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 12px;
+  background: transparent;
+  border: none;
+  border-radius: 6px;
+  color: #8b949e;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  text-align: left;
+  transition: all 0.15s ease;
+}
+
+.settings-nav-item:hover {
+  background: rgba(255, 255, 255, 0.05);
+  color: #c9d1d9;
+}
+
+.settings-nav-item.active {
+  background: rgba(88, 166, 255, 0.12);
+  color: #58a6ff;
+  font-weight: 600;
+}
+
+.stg-icon {
+  font-size: 16px;
+}
+
+/* Right Content Area */
+.settings-content-area {
+  flex: 1;
+  min-width: 0;
+  padding: 16px 20px;
+  overflow-y: auto;
+  background: #0d1117;
+}
+
+.settings-page {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.stg-page-header {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 8px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid #21262d;
+}
+
+.stg-page-title {
+  font-size: 16px;
+  font-weight: 600;
+  color: #58a6ff;
+}
+
+.stg-page-desc {
+  font-size: 12px;
+  color: #8b949e;
+  line-height: 1.4;
+}
+
+/* Language Selection Grid */
+.lang-selection-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 14px;
+  margin-top: 6px;
+}
+
+.lang-option-card {
+  background: #161b22;
+  border: 1px solid #30363d;
+  border-radius: 8px;
+  padding: 14px 16px;
+  cursor: pointer;
+  transition: all 0.18s ease;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  position: relative;
+}
+
+.lang-option-card:hover {
+  border-color: #58a6ff;
+  background: #1c2128;
+  transform: translateY(-2px);
+  box-shadow: 0 4px 14px rgba(0,0,0,0.4);
+}
+
+.lang-option-card.active {
+  border-color: #58a6ff;
+  background: rgba(88, 166, 255, 0.08);
+  box-shadow: 0 0 0 1px #58a6ff;
+}
+
+.lang-card-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.lang-flag {
+  font-size: 20px;
+}
+
+.lang-title {
+  font-size: 15px;
+  font-weight: 700;
+  color: #f0f6fc;
+}
+
+.lang-check {
+  margin-left: auto;
+  font-size: 14px;
+  color: #58a6ff;
+  font-weight: 800;
+  display: none;
+}
+
+.lang-option-card.active .lang-check {
+  display: inline-block;
+}
+
+.lang-sub {
+  font-size: 11px;
+  color: #8b949e;
+  font-family: ui-monospace, monospace;
+}
+
+.lang-desc {
+  font-size: 12px;
+  color: #c9d1d9;
+  line-height: 1.4;
+  margin-top: 4px;
+}
+
+/* ── Transplanted from static/docgraph.css (unloaded legacy file) ──
+   These rules were live nowhere until moved here. Drawer width carries
+   the original "+80px wider explorer" intent onto the current layout. */
+/* Explorer drawer: default expanded +80px (was 280px) */
+#left-sidebar-drawer {
+  width: 360px;
+  min-width: 240px;
+  max-width: 700px;
+}
+/* Inner panel always fills the drawer (kills the legacy 270px pin that
+   split drawer from panel and left a dead gap when dragging). */
+#left-sidebar-drawer > #tree-panel {
+  width: 100%;
+  min-width: 0;
+  max-width: none;
+}
+
+/* Markdown Viewer Hierarchical List Styles */
+.doc-content-viewer ul, #d-code-markdown ul {
+  list-style-type: disc;
+  margin: 8px 0 8px 0;
+  padding-left: 24px !important;
+}
+
+.doc-content-viewer ul ul, #d-code-markdown ul ul {
+  list-style-type: circle;
+  margin: 4px 0 4px 0;
+  padding-left: 22px !important;
+}
+
+.doc-content-viewer ul ul ul, #d-code-markdown ul ul ul {
+  list-style-type: square;
+  margin: 3px 0 3px 0;
+  padding-left: 20px !important;
+}
+
+.doc-content-viewer ul ul ul ul, #d-code-markdown ul ul ul ul {
+  list-style-type: disc;
+  margin: 2px 0 2px 0;
+  padding-left: 18px !important;
+}
+
+.doc-content-viewer li, #d-code-markdown li {
+  margin: 4px 0;
+  line-height: 1.6;
+}
+
+/* Hierarchical Heading Colors & Drill-Down Interactive Styling (Aligned with 3D Galaxy Balls) */
+.doc-content-viewer h1, #d-code-markdown h1 {
+  color: #58a6ff !important; /* H1 Electric Blue */
+  font-size: 22px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+.doc-content-viewer h2, #d-code-markdown h2 {
+  color: #3fb950 !important; /* H2 Emerald Green */
+  font-size: 18px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+.doc-content-viewer h3, #d-code-markdown h3 {
+  color: #bc8cff !important; /* H3 Vivid Purple */
+  font-size: 15px;
+  border-bottom: none;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+.doc-content-viewer h4, #d-code-markdown h4 {
+  color: #ff7bba !important; /* H4 Rose Pink */
+  font-size: 13px;
+  border-bottom: none;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+.doc-content-viewer h5, #d-code-markdown h5 {
+  color: #00d2d3 !important; /* H5 Cyan */
+  font-size: 12px;
+  cursor: pointer;
+}
+.doc-content-viewer h6, #d-code-markdown h6 {
+  color: #ffd700 !important; /* H6 Gold */
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.doc-content-viewer h1:hover, .doc-content-viewer h2:hover, .doc-content-viewer h3:hover, .doc-content-viewer h4:hover,
+#d-code-markdown h1:hover, #d-code-markdown h2:hover, #d-code-markdown h3:hover, #d-code-markdown h4:hover {
+  filter: brightness(1.25);
+  text-shadow: 0 0 10px currentColor;
+  padding-left: 6px;
+}
+
+.doc-content-viewer h1::after, .doc-content-viewer h2::after, .doc-content-viewer h3::after, .doc-content-viewer h4::after,
+#d-code-markdown h1::after, #d-code-markdown h2::after, #d-code-markdown h3::after, #d-code-markdown h4::after {
+  content: ' 🔍 Drill Down';
+  font-size: 10px;
+  opacity: 0;
+  margin-left: 10px;
+  color: #8b949e;
+  font-weight: 400;
+  vertical-align: middle;
+  transition: opacity 0.2s ease;
+}
+
+.doc-content-viewer h1:hover::after, .doc-content-viewer h2:hover::after, .doc-content-viewer h3:hover::after, .doc-content-viewer h4:hover::after,
+#d-code-markdown h1:hover::after, #d-code-markdown h2:hover::after, #d-code-markdown h3:hover::after, #d-code-markdown h4:hover::after {
+  opacity: 0.8;
+}
+
+
+/* ─── Explorer Tree Concept Badges (Pill) ────────────────────────── */
+.tree-concept-pill {
+  margin-left: 6px;
+  padding: 1px 7px;
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 14px;
+  background: rgba(137, 87, 229, 0.25);
+  border: 1px solid #8957e5;
+  color: #d2a8ff;
+  border-radius: 10px;
+  cursor: pointer;
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  flex-shrink: 0;
+  user-select: none;
+  box-shadow: 0 0 4px rgba(137, 87, 229, 0.25);
+}
+
+.tree-concept-pill:hover {
+  background: rgba(137, 87, 229, 0.55);
+  border-color: #bc8cff;
+  color: #ffffff;
+  box-shadow: 0 0 10px rgba(137, 87, 229, 0.75);
+  transform: scale(1.06);
+}
+
+
+
+/* ==========================================================================
+   Unified Settings & Preferences Dialog (Galaxy Theme)
+   ========================================================================== */
+#settings-modal.modal-overlay,
+.modal-overlay {
+  display: none;
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100vw;
+  height: 100vh;
+  background: rgba(0, 0, 0, 0.78);
+  backdrop-filter: blur(5px);
+  -webkit-backdrop-filter: blur(5px);
+  z-index: 10000;
+  align-items: center;
+  justify-content: center;
+}
+
+#settings-modal.show,
+.modal-overlay.show {
+  display: flex !important;
+}
+
+.settings-modal-dialog,
+.settings-dialog-card {
+  width: 980px !important;
+  max-width: 95vw !important;
+  height: 660px !important;
+  max-height: 90vh !important;
+  display: flex !important;
+  flex-direction: column !important;
+  background: #161b22 !important;
+  border: 1px solid #30363d !important;
+  border-radius: 12px !important;
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.85) !important;
+  overflow: hidden !important;
+  box-sizing: border-box !important;
+}
+
+.settings-top-bar {
+  display: flex !important;
+  justify-content: space-between !important;
+  align-items: center !important;
+  padding: 12px 18px !important;
+  background: #0d1117 !important;
+  border-bottom: 1px solid #30363d !important;
+  flex-shrink: 0 !important;
+}
+
+.settings-close-btn {
+  background: none !important;
+  border: none !important;
+  color: #8b949e !important;
+  font-size: 18px !important;
+  cursor: pointer !important;
+  padding: 2px 8px !important;
+  line-height: 1 !important;
+  border-radius: 4px !important;
+  transition: all 0.15s ease !important;
+}
+
+.settings-close-btn:hover {
+  background: rgba(255, 255, 255, 0.08) !important;
+  color: #e6edf3 !important;
+}
+
+.settings-content-wrap,
+.settings-modal-body {
+  display: flex !important;
+  flex: 1 !important;
+  min-height: 0 !important;
+  overflow: hidden !important;
+  background: #0d1117 !important;
+}
+
+/* Left Category Navigation */
+.settings-nav-pane,
+.settings-nav-sidebar {
+  width: 210px !important;
+  min-width: 210px !important;
+  background: #161b22 !important;
+  border-right: 1px solid #30363d !important;
+  display: flex !important;
+  flex-direction: column !important;
+  padding: 12px 8px !important;
+  gap: 4px !important;
+  user-select: none !important;
+  flex-shrink: 0 !important;
+}
+
+.settings-nav-btn,
+.settings-nav-item {
+  display: flex !important;
+  align-items: center !important;
+  gap: 10px !important;
+  padding: 10px 12px !important;
+  background: transparent !important;
+  border: 1px solid transparent !important;
+  border-radius: 6px !important;
+  color: #8b949e !important;
+  font-size: 13px !important;
+  font-weight: 500 !important;
+  cursor: pointer !important;
+  text-align: left !important;
+  transition: all 0.15s ease !important;
+  width: 100% !important;
+  box-sizing: border-box !important;
+}
+
+.settings-nav-btn:hover,
+.settings-nav-item:hover {
+  background: rgba(255, 255, 255, 0.05) !important;
+  color: #c9d1d9 !important;
+}
+
+.settings-nav-btn.active,
+.settings-nav-item.active {
+  background: rgba(88, 166, 255, 0.12) !important;
+  border-color: rgba(88, 166, 255, 0.3) !important;
+  color: #58a6ff !important;
+  font-weight: 600 !important;
+}
+
+/* Right Tab Pages Container */
+.settings-pages-container,
+.settings-content-area {
+  flex: 1 !important;
+  min-width: 0 !important;
+  padding: 20px 24px !important;
+  overflow-y: auto !important;
+  background: #0d1117 !important;
+  box-sizing: border-box !important;
+}
+
+.settings-page {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  min-height: 100%;
+  box-sizing: border-box;
+}
+
+.lang-cards-grid {
+  display: grid !important;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)) !important;
+  gap: 12px !important;
+  margin-top: 10px !important;
+}
+
+.lang-card {
+  background: #161b22 !important;
+  border: 1px solid #30363d !important;
+  border-radius: 8px !important;
+  padding: 16px !important;
+  cursor: pointer !important;
+  transition: all 0.15s ease !important;
+}
+
+.lang-card:hover {
+  border-color: #58a6ff !important;
+  background: #1c2128 !important;
+}
+
+.lang-card.active {
+  border-color: #58a6ff !important;
+  background: rgba(88, 166, 255, 0.1) !important;
+  box-shadow: 0 0 0 1px #58a6ff !important;
+}
+
+.lang-card-title {
+  font-weight: 600 !important;
+  font-size: 14px !important;
+  color: #e6edf3 !important;
+  margin-bottom: 4px !important;
+}
+
+.lang-card-desc {
+  font-size: 12px !important;
+  color: #8b949e !important;
+}
+
+
+
+
+/* ==========================================================================
+   Universal Form Elements in Modals (Cyber Dark Theme)
+   ========================================================================== */
+.modal-input,
+select.modal-input,
+.settings-dialog-card input,
+.settings-dialog-card select,
+#concept-tagger-modal input,
+#concept-tagger-modal select,
+#concept-action-modal input,
+#concept-action-modal select {
+  background: #0d1117 !important;
+  color: #e6edf3 !important;
+  border: 1px solid #30363d !important;
+  border-radius: 6px !important;
+  padding: 8px 12px !important;
+  font-size: 13px !important;
+  box-sizing: border-box !important;
+  outline: none !important;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease !important;
+}
+
+.modal-input:focus,
+select.modal-input:focus,
+.settings-dialog-card input:focus,
+.settings-dialog-card select:focus,
+#concept-tagger-modal input:focus,
+#concept-tagger-modal select:focus,
+#concept-action-modal input:focus,
+#concept-action-modal select:focus {
+  border-color: #58a6ff !important;
+  box-shadow: 0 0 0 2px rgba(88, 166, 255, 0.25) !important;
+}
+
+/* Dropdown Options (Dark theme, crisp white text) */
+select option,
+select optgroup {
+  background: #161b22 !important;
+  color: #e6edf3 !important;
+  padding: 8px 10px !important;
+}
+
+select optgroup {
+  color: #8b949e !important;
+  font-weight: 600 !important;
+}
+
+/* Horizontal '解除' button and action columns */
+.mini-btn {
+  white-space: nowrap !important;
+  word-break: keep-all !important;
+  flex-shrink: 0 !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  min-width: 44px !important;
+}
+
+.doc-content-viewer table th:last-child,
+.doc-content-viewer table td:last-child {
+  white-space: nowrap !important;
+  min-width: 72px !important;
+  width: 72px !important;
+  text-align: center !important;
+}
+
+/* Preset Provider Pill Buttons in LLM Dialog */
+#prov-types button {
+  background: #161b22 !important;
+  border: 1px solid #30363d !important;
+  border-radius: 6px !important;
+  color: #c9d1d9 !important;
+  padding: 5px 10px !important;
+  font-size: 12px !important;
+  cursor: pointer !important;
+  transition: all 0.15s ease !important;
+}
+
+#prov-types button:hover {
+  background: #21262d !important;
+  border-color: #58a6ff !important;
+  color: #ffffff !important;
+}
+
+
+
+
+/* ==========================================================================
+   Horizontal Action Button & Markdown Table Column Widths
+   ========================================================================== */
+.mini-btn {
+  white-space: nowrap !important;
+  word-break: keep-all !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  flex-shrink: 0 !important;
+  padding: 3px 12px !important;
+  min-width: 52px !important;
+  text-align: center !important;
+}
+
+.doc-content-viewer table th:last-child,
+.doc-content-viewer table td:last-child {
+  white-space: nowrap !important;
+  min-width: 80px !important;
+  width: 80px !important;
+  text-align: center !important;
+}
+
+/* Form inputs & select dropdowns dark theme */
+.modal-input,
+select.modal-input,
+.settings-dialog-card input,
+.settings-dialog-card select,
+#concept-tagger-modal select,
+#concept-tagger-modal input,
+#concept-action-modal input,
+#concept-action-modal select {
+  background: #0d1117 !important;
+  color: #e6edf3 !important;
+  border: 1px solid #30363d !important;
+  border-radius: 6px !important;
+  padding: 8px 12px !important;
+  font-size: 13px !important;
+  outline: none !important;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease !important;
+}
+
+select option,
+select optgroup {
+  background: #161b22 !important;
+  color: #e6edf3 !important;
+  padding: 8px 10px !important;
+}
+
+#prov-types button {
+  background: #161b22 !important;
+  border: 1px solid #30363d !important;
+  border-radius: 6px !important;
+  color: #c9d1d9 !important;
+  padding: 5px 10px !important;
+  font-size: 12px !important;
+  cursor: pointer !important;
+  transition: all 0.15s ease !important;
+}
+
+#prov-types button:hover {
+  background: #21262d !important;
+  border-color: #58a6ff !important;
+  color: #ffffff !important;
+}
+
+
+
+
+/* ==========================================================================
+   Universal Cyber Dark Mode Controls (Selects, Inputs, Modals, Buttons)
+   ========================================================================== */
+:root {
+  color-scheme: dark;
+}
+
+select,
+select option,
+select optgroup {
+  color-scheme: dark !important;
+  background-color: #161b22 !important;
+  color: #e6edf3 !important;
+}
+
+select.modal-input,
+.settings-dialog-card select,
+#concept-tagger-modal select,
+#concept-action-modal select {
+  color-scheme: dark !important;
+  background-color: #0d1117 !important;
+  color: #e6edf3 !important;
+  border: 1px solid #30363d !important;
+  border-radius: 6px !important;
+  padding: 8px 32px 8px 12px !important;
+  font-size: 13px !important;
+  appearance: none !important;
+  -webkit-appearance: none !important;
+  background-image: url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' fill='%238b949e' viewBox='0 0 16 16'%3E%3Cpath d='M7.247 11.14 2.451 5.658C1.885 5.013 2.345 4 3.204 4h9.592a1 1 0 0 1 .753 1.659l-4.796 5.48a1 1 0 0 1-1.506 0z'/%3E%3C/svg%3E") !important;
+  background-repeat: no-repeat !important;
+  background-position: right 10px center !important;
+  cursor: pointer !important;
+}
+
+select.modal-input:focus,
+.settings-dialog-card select:focus,
+#concept-tagger-modal select:focus,
+#concept-action-modal select:focus {
+  border-color: #58a6ff !important;
+  box-shadow: 0 0 0 3px rgba(56, 139, 253, 0.25) !important;
+}
+
+.modal-input,
+.settings-dialog-card input,
+#concept-tagger-modal input,
+#concept-action-modal input,
+#txt-scan-dir {
+  color-scheme: dark !important;
+  background-color: #0d1117 !important;
+  color: #e6edf3 !important;
+  border: 1px solid #30363d !important;
+  border-radius: 6px !important;
+  padding: 8px 12px !important;
+  font-size: 13px !important;
+  outline: none !important;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease !important;
+}
+
+.modal-input:focus,
+.settings-dialog-card input:focus,
+#concept-tagger-modal input:focus,
+#concept-action-modal input:focus,
+#txt-scan-dir:focus {
+  border-color: #58a6ff !important;
+  box-shadow: 0 0 0 3px rgba(56, 139, 253, 0.25) !important;
+}
+
+/* Force Horizontal '解除' and Action Buttons */
+.mini-btn {
+  white-space: nowrap !important;
+  word-break: keep-all !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  flex-shrink: 0 !important;
+  padding: 3px 12px !important;
+  min-width: 54px !important;
+  text-align: center !important;
+  line-height: 1.4 !important;
+  box-sizing: border-box !important;
+}
+
+.doc-content-viewer table th:last-child,
+.doc-content-viewer table td:last-child,
+#d-code-markdown table th:last-child,
+#d-code-markdown table td:last-child {
+  white-space: nowrap !important;
+  min-width: 80px !important;
+  width: 80px !important;
+  text-align: center !important;
+}
+
+
+
+/* ==========================================================================
+   Explorer Tree Document Icon (Warm Cyber Orange #f0883e)
+   ========================================================================== */
+.tree-doc-icon {
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  flex-shrink: 0 !important;
+  width: 14px !important;
+  height: 14px !important;
+  margin-right: 5px !important;
+  vertical-align: -1.5px !important;
+  color: #f0883e !important;
+  fill: #f0883e !important;
+  filter: drop-shadow(0 0 2px rgba(240, 136, 62, 0.45));
 }
 

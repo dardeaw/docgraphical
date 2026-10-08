@@ -132,6 +132,8 @@ def get_repo_doc_metrics(repo_path: str,
                 if len(vSources) < 300:
                     vSources.append(os.path.relpath(
                         os.path.join(root, f), repo_path).replace("\\", "/"))
+            if f.upper() == "LOG.MD" and os.path.abspath(root) == os.path.abspath(repo_path):
+                continue
             if is_doc_file(f):
                 md_files += 1
                 full = os.path.join(root, f)

@@ -34,7 +34,7 @@ if (window.THREE && !window.THREE.Timer) {
 </script>
 <script src="/static/three-spritetext.min.js"></script>
 <script src="/static/3d-force-graph.min.js"></script>
-<link rel="stylesheet" href="/static/galaxy.css?v=3.9.19">
+<link rel="stylesheet" href="/static/galaxy.css?v=5.9.11">
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark-dimmed.min.css">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
@@ -47,10 +47,6 @@ if (window.THREE && !window.THREE.Timer) {
     <div class="brand-dot" style="background:#00ffaa; box-shadow:0 0 10px #00ffaa;"></div>
     <span id="app-logo">DocGraph 3D</span>
   </div>
-
-  <button class="tool-btn active" id="btn-toggle-tree" onclick="toggleTreePanel()" title="Toggle Explorer">
-    📁 Explorer
-  </button>
 
   <div class="toolbar-right">
     <button class="tool-btn" id="btn-rotate" title="Toggle 3D Auto-Rotation">🔄 Auto Rotate</button>
@@ -68,25 +64,81 @@ if (window.THREE && !window.THREE.Timer) {
 <!-- Main 3-Column Workstation Layout -->
 <div id="app-layout">
 
-  <!-- Column 1: Explorer Panel -->
-  <div id="tree-panel">
-    <div class="tree-header" style="justify-content:flex-start;">
-      <div style="display:flex; gap:4px; align-items:center;">
-        <button onclick="openPathModal()" class="mini-btn" id="btn-repo-mgr" title="Manage Repositories">⚙ Repos</button>
-        <button onclick="syncAllRepos(this)" class="mini-btn" id="btn-sync-all-tree" title="Incremental sync every indexed repository">⚡ Sync all</button>
-        <button onclick="toggleShowSource()" class="mini-btn" id="btn-toggle-src" title="顯示／隱藏來源檔案（ppt／pdf／word）">👁 Source</button>
+    <!-- Far-Left Activity Bar (VS Code Style) -->
+  <div id="activity-bar">
+    <div class="activity-top">
+      <button class="activity-tab active" id="act-tab-explorer" onclick="switchActivityTab('explorer')" title="文件瀏覽器 (Explorer)">
+        <svg class="act-icon" viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+          <polyline points="14 2 14 8 20 8"></polyline>
+          <line x1="16" y1="13" x2="8" y2="13"></line>
+          <line x1="16" y1="17" x2="8" y2="17"></line>
+          <polyline points="10 9 9 9 8 9"></polyline>
+        </svg>
+      </button>
+      <button class="activity-tab" id="act-tab-concepts" onclick="switchActivityTab('concepts')" title="概念標籤管理 (Concepts Registry)">
+        <svg class="act-icon" viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z"></path>
+          <line x1="7" y1="7" x2="7.01" y2="7"></line>
+        </svg>
+        <span class="activity-badge" id="badge-concept-candidates" style="display:none;">0</span>
+      </button>
+    </div>
+    <div class="activity-bottom">
+      <button class="activity-tab" id="act-tab-settings" onclick="openSettingsModal('repo')" title="系統設定 (Settings)">
+        <svg class="act-icon" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="12" cy="12" r="3"></circle>
+          <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
+        </svg>
+      </button>
+    </div>
+  </div>
+
+  <!-- Left Sidebar Drawer Container (Collapsible) -->
+  <div id="left-sidebar-drawer">
+    
+    <!-- Drawer Panel 1: Explorer (Existing Tree View) -->
+    <div id="tree-panel" class="drawer-panel active">
+      <div class="tree-header">
+        <span class="drawer-title" id="lbl-drawer-explorer-title">EXPLORER</span>
+        <div style="display:flex; gap:4px; align-items:center;">
+          <button onclick="syncAllRepos(this)" class="mini-btn" id="btn-sync-all-tree" title="Incremental sync every indexed repository">⚡ Sync</button>
+          <button onclick="toggleShowSource()" class="mini-btn" id="btn-toggle-src" title="顯示／隱藏來源檔案（ppt／pdf／word）">👁 Source</button>
+        </div>
+      </div>
+      <div class="tree-actions-bar">
+        <button class="mini-btn" id="btn-sel-all" onclick="selectAllProjects(true)">Select All</button>
+        <button class="mini-btn" id="btn-sel-none" onclick="selectAllProjects(false)">Deselect</button>
+        <span id="lbl-proj-summary" style="margin-left:auto; font-size:10px; color:#8b949e;">0 Active</span>
+      </div>
+      <div class="tree-search-box" style="display:flex; align-items:center; gap:6px; padding:6px 10px;">
+        <input type="text" id="tree-search" class="tree-input" style="flex:1; min-width:0; margin:0;" placeholder="Filter documentation tree..." oninput="filterTree(this.value)" />
+        <button onclick="clearTreeFilter()" class="mini-btn" id="btn-clear-filter" title="Clear filter" style="flex-shrink:0; padding:4px 10px; font-size:12px; line-height:1; display:inline-flex; align-items:center; justify-content:center;">✕</button>
+      </div>
+      <div class="tree-body" id="tree-container"></div>
+    </div>
+
+    <!-- Drawer Panel 2: Concepts Manager (Concept Registry) -->
+    <div id="concepts-panel" class="drawer-panel" style="display:none;">
+      <div class="tree-header">
+        <span class="drawer-title" id="lbl-drawer-concepts-title">CONCEPTS REGISTRY</span>
+        <div style="display:flex; gap:4px; align-items:center;">
+          <button onclick="openAddConceptModal()" class="mini-btn" id="btn-add-concept" title="定義正式概念">+ New</button>
+        </div>
+      </div>
+      <div class="concepts-tabs-bar">
+        <button class="concept-tab-btn active" id="btn-cpt-official" onclick="switchConceptSubTab('official')">正式概念 (<span id="count-cpt-official">0</span>)</button>
+        <button class="concept-tab-btn" id="btn-cpt-candidates" onclick="switchConceptSubTab('candidates')">待審候選 (<span id="count-cpt-candidates">0</span>)</button>
+      </div>
+      <div class="tree-search-box" style="display:flex; align-items:center; gap:6px; padding:6px 10px;">
+        <input type="text" id="concept-search" class="tree-input" style="flex:1; min-width:0; margin:0;" placeholder="搜尋概念或別名..." oninput="filterConcepts(this.value)" />
+        <button onclick="clearConceptFilter()" class="mini-btn" id="btn-clear-cpt-filter" title="Clear filter" style="flex-shrink:0; padding:4px 10px; font-size:12px; line-height:1;">✕</button>
+      </div>
+      <div class="concepts-list-container" id="concepts-list-container">
+        <!-- Rendered dynamically -->
       </div>
     </div>
-    <div class="tree-actions-bar">
-      <button class="mini-btn" id="btn-sel-all" onclick="selectAllProjects(true)">Select All</button>
-      <button class="mini-btn" id="btn-sel-none" onclick="selectAllProjects(false)">Deselect</button>
-      <span id="lbl-proj-summary" style="margin-left:auto; font-size:10px; color:#8b949e;">0 Active</span>
-    </div>
-    <div class="tree-search-box">
-      <input type="text" id="tree-search" class="tree-input" placeholder="Filter documentation tree..." oninput="filterTree(this.value)" />
-      <button onclick="clearTreeFilter()" class="mini-btn" id="btn-clear-filter" title="Clear filter" style="padding:2px 8px; font-size:11px;">✕</button>
-    </div>
-    <div class="tree-body" id="tree-container"></div>
+
   </div>
 
   <!-- Resizer 1: Between Tree and Doc -->
@@ -106,24 +158,19 @@ if (window.THREE && !window.THREE.Timer) {
         </div>
         <div class="doc-sub-text" id="d-sub">Select an item from the left Explorer or the 3D topology</div>
 
-        <!-- Token Intelligence Metric -->
-        <div class="doc-token-bar">
-          <div style="display:flex; justify-content:space-between; font-size:11px; margin-bottom:3px;">
-            <span>⚡ Token Efficiency: <b id="stat-savings-badge" style="color:#00ffaa;">0.0%</b> saved</span>
-            <span>Full: <b id="stat-full-tokens" style="color:#c9d1d9;">0</b> · Sliced: <b id="stat-sliced-tokens" style="color:#00ffaa;">0</b> tokens</span>
-          </div>
-          <div class="token-fill-track">
-            <div id="stat-savings-fill" class="token-fill-bar" style="width:0%;"></div>
-          </div>
-        </div>
-
         <!-- Action Bar -->
         <div class="doc-action-bar">
           <span style="font-size:11px; font-weight:600; color:#8b949e;" id="d-code-title">🗡️ Sliced Section Markdown</span>
-          <div style="display:flex; gap:6px;">
+          <div style="display:flex; gap:6px; align-items:center;">
+            <button class="mini-btn" style="background:#1f6feb22; border-color:#388bfd88; color:#58a6ff; font-weight:600;" id="btn-attach-tag-viewer" onclick="openAttachTagFromViewer()" title="為此檔案或章節貼上概念標籤">🏷️ + 貼標籤</button>
             <button class="mini-btn" onclick="copyCurrentSection()" title="Copy Markdown text">📋 Copy Markdown</button>
             <button class="mini-btn" style="background:#238636; color:#fff; border-color:#2ea043;" onclick="copyMcpPayload()" title="Copy structured payload for AI Agent">🤖 Copy for Agent</button>
           </div>
+        </div>
+        <!-- Dedicated Document Tags Pill Bar -->
+        <div id="doc-tags-pill-bar" style="display:none; padding:6px 14px; background:#0d1117; border-bottom:1px solid #21262d; align-items:center; gap:8px; flex-wrap:wrap;">
+          <span style="font-size:11px; color:#8b949e; font-weight:600; display:flex; align-items:center; gap:4px;"><span>🏷️</span> <span id="lbl-doc-tags-title">概念標籤 (Tags):</span></span>
+          <div id="doc-tags-pill-list" style="display:flex; gap:6px; flex-wrap:wrap; align-items:center;"></div>
         </div>
       </div>
 
@@ -250,103 +297,180 @@ if (window.THREE && !window.THREE.Timer) {
 
 </div>
 
-<!-- Modal: Repository Management -->
-<div id="path-modal" class="modal-overlay">
-  <div class="modal-card">
-    <div class="modal-header">
-      <span style="font-weight:600; font-size:14px; color:#58a6ff;" id="lbl-modal-title">Repository Management</span>
-      <button class="drawer-close" onclick="closePathModal()">×</button>
+<!-- Unified System Settings Modal (VS Code Style) -->
+<div id="settings-modal" class="modal-overlay">
+  <div class="settings-modal-dialog settings-dialog-card">
+    <!-- Top Bar -->
+    <div class="settings-top-bar">
+      <div style="display:flex; align-items:center; gap:8px;">
+        <span style="font-size:16px;">⚙</span>
+        <span style="font-weight:600; font-size:14px; color:#e6edf3;" id="lbl-settings-main-title">Preferences & Settings</span>
+      </div>
+      <button class="settings-close-btn" onclick="closeSettingsModal()">✕</button>
     </div>
-    <div class="modal-body">
-      <p style="font-size:12px; color:#8b949e; margin-bottom:4px;" id="lbl-modal-sub">
-        Scan local project directories, build index (init), incremental sync (sync), full rebuild (index), or uninitialize (uninit).
-      </p>
-      <p style="font-size:11px; color:#3fb950; margin-bottom:12px; display:flex; align-items:center; gap:6px;">
-        <span style="width:7px; height:7px; border-radius:50%; background:#3fb950; display:inline-block;"></span>
-        <span>DocGraphical 1.0.0 connected (native AST engine)</span>
-      </p>
 
-      <div style="display:flex; flex-direction:column; gap:6px; margin-bottom:12px;">
-        <label style="font-size:12px; font-weight:600; color:#c9d1d9;" id="lbl-add-dir">Scan Project Directory:</label>
-        <div class="add-path-box">
-          <input type="text" id="custom-path-input" class="add-path-input" placeholder="Enter absolute directory path (e.g. D:\Projects)" />
-          <button class="mini-btn" id="btn-browse-path" onclick="browseDirectoryNative()" style="padding:6px 12px; background:#21262d; border-color:#30363d; color:#c9d1d9; display:none;">📁 Browse...</button>
-          <button class="mini-btn" id="btn-browse-web" onclick="openBrowsePicker()" title="Browse server directories">📁 Browse</button>
-          <button class="mini-btn" id="btn-add-path" onclick="submitAddPath()" style="padding:6px 14px; background:#1f6feb; border-color:#388bfd; color:#fff; font-weight:600;">Add Path</button>
-        </div>
+    <!-- Main Body: Tabs on left, page on right -->
+    <div class="settings-content-wrap settings-modal-body">
+      <!-- Left Category Navigation -->
+      <div class="settings-nav-pane settings-nav-sidebar">
+        <button class="settings-nav-btn settings-nav-item active" id="stg-nav-repo" onclick="switchSettingsTab('repo')">
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path></svg>
+          <span id="stg-lbl-repo">Repositories</span>
+        </button>
+        <button class="settings-nav-btn settings-nav-item" id="stg-nav-lang" onclick="switchSettingsTab('lang')">
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><line x1="2" y1="12" x2="22" y2="12"></line><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"></path></svg>
+          <span id="stg-lbl-lang">Language</span>
+        </button>
+        <button class="settings-nav-btn settings-nav-item" id="stg-nav-llm" onclick="switchSettingsTab('llm')">
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="10" rx="2"></rect><circle cx="12" cy="5" r="2"></circle><path d="M12 7v4"></path><line x1="8" y1="16" x2="8" y2="16"></line><line x1="16" y1="16" x2="16" y2="16"></line></svg>
+          <span id="stg-lbl-llm">LLM Providers</span>
+        </button>
       </div>
 
-      <div style="display:flex; flex-direction:column; gap:6px;">
-        <div style="display:flex; align-items:center; gap:8px;">
-          <span style="font-size:12px; font-weight:600; color:#c9d1d9;" id="lbl-repo-list">Discovered Repositories:</span>
-          <button class="mini-btn" id="btn-sync-all" onclick="syncAllRepos(this)" title="Incremental sync every indexed repository" style="padding:4px 12px; background:#1f6feb; border-color:#388bfd; color:#fff; font-weight:600;">⚡ Sync all</button>
+      <!-- Right Tab Pages Container -->
+      <div class="settings-pages-container settings-content-area">
+        
+        <!-- Tab Page 1: Repository Management (Original path-modal logic intact) -->
+        <div id="stg-page-repo" class="settings-page" style="display:flex;">
+          <div class="modal-header" style="padding:0 0 14px 0; border:none;">
+            <div>
+              <div class="modal-title" id="lbl-modal-title">Repository Management</div>
+              <div class="modal-subtitle" id="lbl-modal-sub">Scan local project directories, build index (init), incremental sync (sync), full rebuild (index), or uninitialize (uninit).</div>
+            </div>
+          </div>
+          
+          <div class="modal-body" style="padding:0;">
+            <div class="modal-input-group">
+              <label id="lbl-add-dir" style="color:#8b949e; font-size:12px; font-weight:600; display:block; margin-bottom:6px;">Scan Project Directory:</label>
+              <div style="display:flex; gap:8px;">
+                <input type="text" id="txt-scan-dir" class="modal-input" placeholder="e.g. D:\MyProjects or /home/user/repos" style="flex:1;" />
+                <button onclick="browseFolderPath()" class="btn-primary" style="background:#21262d; border:1px solid #30363d; color:#c9d1d9; border-radius:6px; padding:7px 14px; cursor:pointer;" title="Browse local filesystem">📁 Browse</button>
+                <button onclick="scanDirectory()" class="btn-primary" id="btn-scan" style="background:#1f6feb; border:1px solid #388bfd; color:#fff; border-radius:6px; padding:7px 16px; font-weight:600; cursor:pointer;">Scan</button>
+              </div>
+            </div>
+
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-top:16px; margin-bottom:8px;">
+              <label style="font-weight:600; font-size:12px; color:#c9d1d9;" id="lbl-repo-list">Discovered Repositories:</label>
+              <button onclick="syncAllRepos(this)" class="mini-btn" id="btn-sync-all" style="background:#238636; color:#fff; border-color:#2ea043; padding:3px 10px;" title="Incremental sync every indexed repository">⚡ Sync all</button>
+            </div>
+            <div id="discovered-repos-list" style="border:1px solid #30363d; border-radius:6px; overflow:hidden;">
+              <table class="repo-table">
+                <thead>
+                  <tr>
+                    <th style="width:160px;" id="th-proj">Project</th>
+                    <th id="th-path">Directory Path</th>
+                    <th style="width:140px;" id="th-metrics">Metrics</th>
+                    <th style="width:80px;" id="th-status">Status</th>
+                    <th style="width:220px;" id="th-actions">Actions</th>
+                  </tr>
+                </thead>
+                <tbody id="repo-table-body">
+                  <tr><td colspan="5" style="text-align:center; color:#8b949e; padding:16px;">Scanning local repositories...</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
         </div>
-        <div class="table-container">
-          <table class="repo-table">
-            <thead>
-              <tr>
-                <th style="width:18%;" id="th-proj">Project</th>
-                <th style="width:34%;" id="th-path">Directory Path</th>
-                <th style="width:12%;" id="th-metrics">Metrics</th>
-                <th style="width:12%;" id="th-status">Status</th>
-                <th style="width:24%;" id="th-actions">Actions</th>
-              </tr>
-            </thead>
-            <tbody id="manager-table-body"></tbody>
-          </table>
+
+        <!-- Tab Page 2: Language & Locale (Clean card picker) -->
+        <div id="stg-page-lang" class="settings-page" style="display:none;">
+          <div style="margin-bottom:16px;">
+            <div class="modal-title" id="lbl-lang-page-title">Display Language</div>
+            <div class="modal-subtitle" id="lbl-lang-page-desc">Select your preferred user interface language. System will update dynamically.</div>
+          </div>
+          
+          <div class="lang-cards-grid">
+            <div class="lang-card" id="card-lang-zh" onclick="selectAppLanguage('zh')">
+              <div class="lang-card-title">繁體中文</div>
+              <div class="lang-card-desc">Traditional Chinese (台灣/繁體)</div>
+            </div>
+            <div class="lang-card" id="card-lang-en" onclick="selectAppLanguage('en')">
+              <div class="lang-card-title">English</div>
+              <div class="lang-card-desc">English (International)</div>
+            </div>
+            <div class="lang-card" id="card-lang-ja" onclick="selectAppLanguage('ja')">
+              <div class="lang-card-title">日本語</div>
+              <div class="lang-card-desc">Japanese (日本語)</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Tab Page 3: LLM Providers & Models -->
+        <div id="stg-page-llm" class="settings-page" style="display:none; flex-direction:column; gap:12px; height:100%; box-sizing:border-box;">
+          
+          <div style="display:flex; justify-content:space-between; align-items:flex-start; border-bottom:1px solid #21262d; padding-bottom:8px;">
+            <div>
+              <div style="font-weight:600; font-size:15px; color:#e6edf3;" id="lbl-prov-title">LLM Providers</div>
+              <div style="font-size:12px; color:#8b949e; margin-top:2px;" id="lbl-prov-note">This provider is used by the whole app (ingest, chat, and all LLM features).</div>
+            </div>
+          </div>
+
+          <!-- Active Model Bar -->
+          <div style="display:flex; gap:10px; align-items:center; background:#161b22; padding:10px 14px; border:1px solid #30363d; border-radius:8px;">
+            <span id="lbl-prov-cur" style="color:#8b949e; font-size:12px; font-weight:600; white-space:nowrap;">Active model</span>
+            <select id="prov-current-model" class="modal-input" style="flex:1; color:#58a6ff; font-weight:600; font-size:12px; min-width:0;"></select>
+          </div>
+
+          <!-- Registered Providers List -->
+          <!-- Saved Providers List Container (Shown only when there are saved custom providers) -->
+          <div id="chat-prov-list-section" style="display:none; flex-direction:column; gap:6px; background:#161b22; border:1px solid #30363d; border-radius:8px; padding:10px 14px;">
+            <div style="display:flex; justify-content:space-between; align-items:center;">
+              <span id="lbl-prov-configured-title" style="font-size:12px; font-weight:600; color:#c9d1d9;">已儲存的自訂供應商 (Configured Providers)</span>
+              <span id="prov-configured-count" style="font-size:11px; color:#8b949e;"></span>
+            </div>
+            <div id="chat-prov-list" style="display:flex; flex-direction:column; gap:6px; max-height:140px; overflow-y:auto;"></div>
+          </div>
+
+          <!-- Add / Edit Provider Form -->
+          <div style="background:#161b22; border:1px solid #30363d; border-radius:8px; padding:14px; display:flex; flex-direction:column; gap:10px;">
+            <div id="lbl-prov-add" style="font-weight:600; font-size:13px; color:#e6edf3; border-bottom:1px solid #21262d; padding-bottom:6px;">Add provider</div>
+            
+            <!-- Provider Name Dropdown Selector -->
+            <div>
+              <label style="color:#8b949e; font-size:11px; font-weight:600; display:block; margin-bottom:4px;"><span id="lbl-prov-f-label">Provider Name (供應商名稱)</span></label>
+              <select id="chat-prov-label" class="modal-input" style="width:100%;" onchange="onSelectProviderName(this.value)">
+                <!-- Dynamically populated with Cloud & Opencode Local options -->
+              </select>
+            </div>
+
+            <div id="prov-form" style="display:flex; flex-direction:column; gap:8px;">
+
+              <div id="prov-row-url">
+                <label style="color:#8b949e; font-size:11px; font-weight:600; display:block; margin-bottom:3px;"><span id="lbl-prov-f-base">Base URL</span></label>
+                <input id="chat-prov-base" class="modal-input" placeholder="http://127.0.0.1:11434" style="display:block; width:100%;" />
+              </div>
+
+              <div id="prov-fixed-url" style="display:none; font-size:11px; color:#8b949e; background:#0d1117; border:1px dashed #30363d; border-radius:6px; padding:7px 10px;"></div>
+
+              <div id="prov-row-key">
+                <label style="color:#8b949e; font-size:11px; font-weight:600; display:block; margin-bottom:3px;"><span id="lbl-prov-f-key">API key</span></label>
+                <input id="chat-prov-key" type="password" class="modal-input" placeholder="sk-…" style="display:block; width:100%;" />
+              </div>
+
+              <div>
+                <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:4px;">
+                  <span id="lbl-prov-f-models" style="color:#8b949e; font-size:11px; font-weight:600;">Models</span>
+                  <button id="btn-prov-fetch" onclick="fetchProvModels()" class="mini-btn" style="background:#21262d; border-color:#388bfd88; color:#58a6ff; padding:3px 10px; font-size:11px;">⇩ <span id="lbl-prov-fetch">Auto-fill</span></button>
+                </div>
+                <div id="prov-model-list" style="display:flex; flex-direction:column; gap:4px; max-height:110px; overflow-y:auto; background:#0d1117; border:1px solid #30363d; border-radius:6px; padding:6px;"></div>
+                <input id="prov-model-filter" class="modal-input" oninput="filterProvModelList(this.value)" placeholder="🔎 篩選模型… filter models…" style="margin-top:6px; width:100%; font-size:12px;" />
+              </div>
+            </div>
+
+            <div id="chat-prov-msg" style="color:#8b949e; font-size:12px; min-height:16px;"></div>
+
+            <div style="display:flex; gap:8px; justify-content:flex-end; margin-top:6px; border-top:1px solid #21262d; padding-top:8px;">
+              <button onclick="closeSettingsModal()" class="mini-btn" style="padding:6px 14px; font-size:12px;">✕ <span id="lbl-prov-cancel">Cancel</span></button>
+              <button onclick="addChatProvider()" class="btn-primary" style="background:#238636; border:1px solid #2ea043; color:#fff; border-radius:6px; padding:6px 18px; font-size:12px; font-weight:600; cursor:pointer;">＋ <span id="lbl-prov-save">Save</span></button>
+            </div>
+          </div>
+
         </div>
       </div>
-    </div>
-    <div class="modal-footer">
-      <button class="mini-btn" onclick="closePathModal()" style="padding:6px 16px; background:#21262d; border-color:#30363d; color:#c9d1d9;">Close</button>
     </div>
   </div>
 </div>
-
 <div id="toast"></div>
-
-<!-- LLM Provider Settings Dialog (app-wide: ingest / chat / any LLM feature) -->
-<div id="prov-dialog" style="display:none; position:fixed; inset:0; z-index:1000003; background:rgba(0,0,0,0.6); align-items:center; justify-content:center;">
-  <div style="--cfs:16px; --cfs-sm:15px; --cfs-lg:17px; width:460px; max-width:92vw; max-height:84vh; overflow-y:auto; background:#0d1117; border:1px solid #30363d; border-radius:12px; padding:16px; font-size:var(--cfs); color:#e6edf3;">
-    <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:10px;">
-      <span id="lbl-prov-title" style="font-weight:600; font-size:var(--cfs-lg);">LLM Providers</span>
-      <button onclick="toggleProviderDialog(false)" style="background:transparent; border:none; color:#8b949e; cursor:pointer; font-size:14px;">✕</button>
-    </div>
-    <div id="lbl-prov-note" style="font-size:var(--cfs-sm); color:#8b949e; margin-bottom:8px;">This provider is used by the whole app (ingest, chat, and all LLM features).</div>
-    <div id="chat-prov-list" style="display:flex; flex-direction:column; gap:6px; margin-bottom:12px;"></div>
-    <div style="display:flex; gap:6px; align-items:center; margin-bottom:12px;">
-      <span id="lbl-prov-cur" style="color:#8b949e; font-size:var(--cfs-sm); white-space:nowrap;">Active model</span>
-      <select id="prov-current-model" style="flex:1; background:#010409; border:1px solid #30363d; border-radius:6px; padding:5px 8px; color:#e6edf3; font-size:var(--cfs-sm); min-width:0;"></select>
-    </div>
-    <div id="lbl-prov-add" style="font-weight:600; margin-bottom:6px;">Add provider</div>
-    <div id="prov-types" style="display:flex; gap:6px; flex-wrap:wrap; margin-bottom:8px;"></div>
-    <div id="prov-form" style="display:flex; flex-direction:column; gap:6px;">
-      <label style="color:#8b949e; font-size:var(--cfs-sm);"><span id="lbl-prov-f-label">Label</span>
-        <input id="chat-prov-label" placeholder="e.g. DeepSeek cloud" style="display:block; width:100%; box-sizing:border-box; margin-top:2px; background:#010409; border:1px solid #30363d; border-radius:6px; padding:7px 10px; color:#e6edf3; font-size:var(--cfs);" />
-      </label>
-      <label id="prov-row-url" style="color:#8b949e; font-size:var(--cfs-sm);"><span id="lbl-prov-f-base">Base URL</span>
-        <input id="chat-prov-base" placeholder="http://127.0.0.1:11434" style="display:block; width:100%; box-sizing:border-box; margin-top:2px; background:#010409; border:1px solid #30363d; border-radius:6px; padding:7px 10px; color:#e6edf3; font-size:var(--cfs);" />
-      </label>
-      <div id="prov-fixed-url" style="display:none; font-size:var(--cfs-sm); color:#8b949e; border:1px dashed #30363d; border-radius:6px; padding:7px 10px;"></div>
-      <label id="prov-row-key" style="color:#8b949e; font-size:var(--cfs-sm);"><span id="lbl-prov-f-key">API key</span>
-        <input id="chat-prov-key" type="password" placeholder="sk-…" style="display:block; width:100%; box-sizing:border-box; margin-top:2px; background:#010409; border:1px solid #30363d; border-radius:6px; padding:7px 10px; color:#e6edf3; font-size:var(--cfs);" />
-      </label>
-      <div>
-        <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:4px;">
-          <span id="lbl-prov-f-models" style="color:#8b949e; font-size:var(--cfs-sm);">Models</span>
-          <button id="btn-prov-fetch" onclick="fetchProvModels()" style="background:transparent; border:1px solid #1f6feb; color:#58a6ff; border-radius:6px; padding:4px 10px; cursor:pointer; font-size:var(--cfs-sm); white-space:nowrap;">⇩ <span id="lbl-prov-fetch">Auto-fill</span></button>
-        </div>
-        <div id="prov-model-list" style="display:flex; flex-direction:column; gap:4px; max-height:150px; overflow-y:auto;"></div>
-        <input id="prov-model-filter" oninput="filterProvModelList(this.value)" placeholder="🔎 篩選模型… filter models…" style="margin-top:6px; width:100%; box-sizing:border-box; background:#010409; border:1px solid #30363d; border-radius:6px; padding:6px 10px; color:#e6edf3; font-size:13px;" />
-      </div>
-    </div>
-    <div id="chat-prov-msg" style="color:#8b949e; margin-top:8px; min-height:16px;"></div>
-    <div style="display:flex; gap:8px; justify-content:flex-end; margin-top:10px;">
-      <button onclick="toggleProviderDialog(false)" style="background:transparent; border:1px solid #30363d; color:#c9d1d9; border-radius:6px; padding:7px 14px; cursor:pointer;">✕ <span id="lbl-prov-cancel">Cancel</span></button>
-      <button onclick="addChatProvider()" style="background:#238636; border:1px solid #2ea043; color:#fff; border-radius:6px; padding:7px 14px; cursor:pointer;">＋ <span id="lbl-prov-save">Save</span></button>
-    </div>
-  </div>
-</div>
 
 <script>
 /* Web directory picker (inline so it can never desync from this modal's Browse button) */
@@ -363,6 +487,7 @@ function closeBrowsePicker() {
   const o = document.getElementById('browse-overlay');
   if (o) o.remove();
 }
+function browseFolderPath() { openBrowsePicker(); }
 function openBrowsePicker() {
   try {
     openBrowsePickerInner();
@@ -379,7 +504,7 @@ function openBrowsePickerInner() {
   }
   const zh = (typeof currentLanguage !== 'undefined' && currentLanguage === 'zh');
   closeBrowsePicker();
-  const inp = document.getElementById('custom-path-input');
+  const inp = document.getElementById('txt-scan-dir') || document.getElementById('custom-path-input');
   browseCur = (inp && inp.value.trim()) || '';
   browseSel = '';
   const o = document.createElement('div');
@@ -563,11 +688,155 @@ function confirmBrowsePick() {
     browseToast(zh ? '❌ 請先點選一個目錄' : '❌ Click a directory first');
     return;
   }
-  const inp = document.getElementById('custom-path-input');
+  const inp = document.getElementById('txt-scan-dir') || document.getElementById('custom-path-input');
   if (inp) inp.value = pick;
   closeBrowsePicker();
 }
 </script>
-<script src="/static/docgraph.js?v=3.9.25"></script>
+<script src="/static/docgraph.js?v=5.9.16"></script>
+
+<!-- Sleek In-App Concepts Action Modal (No ugly browser prompts!) -->
+<div id="concept-action-modal" class="modal-overlay" style="display:none; position:fixed; top:0; left:0; width:100vw; height:100vh; background:rgba(0,0,0,0.75); z-index:9999; align-items:center; justify-content:center; backdrop-filter:blur(3px);">
+  <div style="background:#161b22; border:1px solid #30363d; border-radius:10px; width:460px; max-width:92vw; box-shadow:0 20px 50px rgba(0,0,0,0.8); display:flex; flex-direction:column; overflow:hidden;">
+    
+    <!-- Modal Header -->
+    <div style="padding:12px 16px; border-bottom:1px solid #30363d; display:flex; justify-content:space-between; align-items:center; background:#0d1117;">
+      <span id="cpt-modal-title" style="font-weight:600; font-size:14px; color:#58a6ff;">定義正式概念</span>
+      <button onclick="closeConceptActionModal()" style="background:none; border:none; color:#8b949e; cursor:pointer; font-size:16px; line-height:1; padding:2px 6px;">✕</button>
+    </div>
+
+    <!-- Modal Body -->
+    <div style="padding:16px; display:flex; flex-direction:column; gap:12px; background:#161b22;">
+      
+      <!-- Action Hint / Description -->
+      <div id="cpt-modal-desc" style="font-size:12px; color:#8b949e; line-height:1.4;">
+        定立知識庫官方核心概念詞彙，並可設定其分類與多重別名。
+      </div>
+
+      <!-- Category Select / Input -->
+      <div id="cpt-field-category">
+        <label id="lbl-cpt-modal-cat" style="display:block; font-size:11px; color:#8b949e; margin-bottom:4px; font-weight:600;">概念分類 (Category)</label>
+        <div style="display:flex; gap:6px;">
+          <input type="text" id="txt-cpt-category" class="modal-input" placeholder="例如：Architecture, Hardware, Business..." style="flex:1;" />
+          <select id="sel-cpt-category" class="modal-input" style="width:130px;" onchange="if(this.value) document.getElementById('txt-cpt-category').value = this.value;">
+            <option value="">選擇現有分類...</option>
+          </select>
+        </div>
+      </div>
+
+      <!-- Concept Name Field -->
+      <div id="cpt-field-name">
+        <label id="lbl-cpt-modal-name" style="display:block; font-size:11px; color:#8b949e; margin-bottom:4px; font-weight:600;">概念標準名稱 (Concept Name)</label>
+        <input type="text" id="txt-cpt-name" class="modal-input" placeholder="例如：Microservices, LOO, Serverless..." />
+      </div>
+
+      <!-- Aliases / Synonyms Field -->
+      <div id="cpt-field-aliases">
+        <label id="lbl-cpt-modal-aliases" style="display:block; font-size:11px; color:#8b949e; margin-bottom:4px; font-weight:600;">別名與同義詞 (Aliases / Comma separated)</label>
+        <input type="text" id="txt-cpt-aliases" class="modal-input" placeholder="例如：微服務架構, SOA, 分散式..." />
+        <span id="lbl-cpt-modal-aliases-tip" style="font-size:10px; color:#6e7681; margin-top:2px; display:block;">多個別名請以逗號分隔，系統將自動比對。</span>
+      </div>
+
+      <!-- Merge Target Field (Visible only in Merge mode) -->
+      <div id="cpt-field-target" style="display:none;">
+        <label id="lbl-cpt-modal-target" style="display:block; font-size:11px; color:#8b949e; margin-bottom:4px; font-weight:600;">合併匯入之目標概念 (Target Concept)</label>
+        <select id="sel-cpt-target" class="modal-input">
+          <!-- Populated dynamically -->
+        </select>
+        <span id="lbl-cpt-modal-target-warn" style="font-size:10px; color:#e3b341; margin-top:4px; display:block;">⚠ 合併後來源概念將被刪除，其引用文件將全部重定向至目標概念。</span>
+      </div>
+
+    </div>
+
+    <!-- Modal Footer -->
+    <div style="padding:10px 16px; border-top:1px solid #30363d; display:flex; justify-content:flex-end; gap:8px; background:#0d1117;">
+      <button onclick="closeConceptActionModal()" class="mini-btn" style="padding:6px 14px; font-size:12px;" id="btn-cpt-modal-cancel">取消</button>
+      <button onclick="submitConceptActionModal()" class="btn-primary" style="padding:6px 18px; font-size:12px; font-weight:600;" id="btn-cpt-modal-submit">確定</button>
+    </div>
+
+  </div>
+</div>
+
+<!-- In-App Quick Tagger Modal -->
+<div id="concept-tagger-modal" class="modal-overlay" style="display:none; position:fixed; top:0; left:0; width:100vw; height:100vh; background:rgba(0,0,0,0.75); z-index:10000; align-items:center; justify-content:center; backdrop-filter:blur(3px);">
+  <div style="background:#161b22; border:1px solid #30363d; border-radius:10px; width:460px; max-width:92vw; box-shadow:0 20px 50px rgba(0,0,0,0.8); display:flex; flex-direction:column; overflow:hidden;">
+    <div style="padding:12px 16px; border-bottom:1px solid #30363d; display:flex; justify-content:space-between; align-items:center; background:#0d1117;">
+      <span id="tagger-modal-title" style="font-weight:600; font-size:14px; color:#58a6ff;">🏷️ 貼標籤 (Attach Concept Tag)</span>
+      <button onclick="closeTaggerModal()" style="background:none; border:none; color:#8b949e; cursor:pointer; font-size:16px; line-height:1; padding:2px 6px;">✕</button>
+    </div>
+    <div style="padding:16px; display:flex; flex-direction:column; gap:12px; background:#161b22;">
+      <div id="tagger-modal-error" style="display:none; color:#f85149; font-size:12px; background:#da36331a; border:1px solid #da363344; padding:6px 10px; border-radius:4px; margin-top:4px;"></div>
+      <div id="tagger-hint" style="font-size:11px; color:#8b949e; line-height:1.4;">
+        為當前文件或指定章節貼上正式概念標籤，建立精確知識圖譜關聯。
+      </div>
+      
+      <!-- Target Display (File or Heading) -->
+      <div>
+        <label id="lbl-tagger-target" style="display:block; font-size:11px; color:#8b949e; margin-bottom:4px; font-weight:600;">目標對象 (Target)</label>
+        <div id="tagger-target-display" style="font-size:12px; color:#e6edf3; background:#0d1117; padding:8px 10px; border:1px solid #30363d; border-radius:6px; word-break:break-all;"></div>
+      </div>
+
+      <!-- Concept Selector -->
+      <div>
+        <label id="lbl-tagger-concept" style="display:block; font-size:11px; color:#8b949e; margin-bottom:4px; font-weight:600;">選擇要貼上的概念標籤 (Select Concept)</label>
+        <select id="sel-tagger-concept" class="modal-input" style="width:100%; font-size:12px;">
+          <!-- Dynamically populated from conceptsTreeData -->
+        </select>
+      </div>
+    </div>
+    <div style="padding:10px 16px; border-top:1px solid #30363d; display:flex; justify-content:flex-end; gap:8px; background:#0d1117;">
+      <button onclick="closeTaggerModal()" class="mini-btn" style="padding:6px 14px; font-size:12px;" id="btn-tagger-cancel">取消</button>
+      <button onclick="submitAttachTagFromModal()" class="btn-primary" style="padding:6px 18px; font-size:12px; font-weight:600;" id="btn-tagger-submit">確定貼上</button>
+    </div>
+  </div>
+</div>
+
+<!-- 3D Node Cyber Context Menu -->
+<div id="graph-node-context-menu" style="display:none; position:fixed; z-index:99999; background:#161b22; border:1px solid #30363d; border-radius:8px; box-shadow:0 12px 30px rgba(0,0,0,0.8); min-width:180px; overflow:hidden; font-size:12px; backdrop-filter:blur(6px);">
+  <div id="ctx-node-name" style="padding:8px 12px; background:#0d1117; color:#58a6ff; font-weight:600; border-bottom:1px solid #30363d; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">Node</div>
+  <div style="padding:4px 0;">
+    <div onclick="ctxActionOpenViewer()" style="padding:6px 14px; color:#e6edf3; cursor:pointer;" onmouseover="this.style.background='#1f6feb22'" onmouseout="this.style.background='none'">📖 開啟文檔閱讀 (Read Doc)</div>
+    <div onclick="ctxActionAttachTag()" style="padding:6px 14px; color:#58a6ff; cursor:pointer;" onmouseover="this.style.background='#1f6feb22'" onmouseout="this.style.background='none'">🏷️ 貼上概念標籤 (Attach Tag...)</div>
+    <div onclick="ctxActionFocusNode()" style="padding:6px 14px; color:#e6edf3; cursor:pointer;" onmouseover="this.style.background='#1f6feb22'" onmouseout="this.style.background='none'">🎯 3D 視角居中 (Center Camera)</div>
+  </div>
+</div>
+
+<!-- In-App Cyber Prompt Dialog (Input Modal) -->
+<div id="cyber-prompt-modal" class="modal-overlay" style="display:none; position:fixed; top:0; left:0; width:100vw; height:100vh; background:rgba(0,0,0,0.75); z-index:10002; align-items:center; justify-content:center; backdrop-filter:blur(4px);">
+  <div style="background:#161b22; border:1px solid #30363d; border-radius:10px; width:440px; max-width:92vw; box-shadow:0 20px 50px rgba(0,0,0,0.85); display:flex; flex-direction:column; overflow:hidden;">
+    <div style="padding:12px 16px; border-bottom:1px solid #30363d; display:flex; justify-content:space-between; align-items:center; background:#0d1117;">
+      <span id="cyber-prompt-title" style="font-weight:600; font-size:13px; color:#58a6ff;">📁 新增資料夾 (New Folder)</span>
+      <button onclick="closeCyberPrompt(null)" style="background:none; border:none; color:#8b949e; cursor:pointer; font-size:16px; line-height:1; padding:2px 6px;">✕</button>
+    </div>
+    <div style="padding:16px; background:#161b22; display:flex; flex-direction:column; gap:10px;">
+      <div id="cyber-prompt-msg" style="font-size:13px; color:#e6edf3; line-height:1.4;">請輸入名稱：</div>
+      <input type="text" id="cyber-prompt-input" class="modal-input" style="width:100%; box-sizing:border-box;" placeholder="" onkeydown="if(event.key==='Enter') submitCyberPrompt();" />
+      <div id="cyber-prompt-tip" style="font-size:11px; color:#8b949e; line-height:1.4;"></div>
+    </div>
+    <div style="padding:10px 16px; border-top:1px solid #30363d; display:flex; justify-content:flex-end; gap:8px; background:#0d1117;">
+      <button onclick="closeCyberPrompt(null)" class="mini-btn" style="padding:6px 14px; font-size:12px;" id="btn-cyber-prompt-cancel">取消</button>
+      <button onclick="submitCyberPrompt()" style="background:#238636; border:1px solid #2ea043; color:#fff; border-radius:6px; padding:6px 18px; font-size:12px; font-weight:600; cursor:pointer;" id="btn-cyber-prompt-ok">建立</button>
+    </div>
+  </div>
+</div>
+
+<!-- In-App Cyber Confirm Dialog -->
+<div id="cyber-confirm-modal" class="modal-overlay" style="display:none; position:fixed; top:0; left:0; width:100vw; height:100vh; background:rgba(0,0,0,0.75); z-index:10001; align-items:center; justify-content:center; backdrop-filter:blur(4px);">
+  <div style="background:#161b22; border:1px solid #30363d; border-radius:10px; width:440px; max-width:92vw; box-shadow:0 20px 50px rgba(0,0,0,0.85); display:flex; flex-direction:column; overflow:hidden;">
+    <div style="padding:12px 16px; border-bottom:1px solid #30363d; display:flex; justify-content:space-between; align-items:center; background:#0d1117;">
+      <span id="cyber-confirm-title" style="font-weight:600; font-size:13px; color:#f85149;">⚠ 操作確認</span>
+      <button onclick="closeCyberConfirm(false)" style="background:none; border:none; color:#8b949e; cursor:pointer; font-size:16px; line-height:1; padding:2px 6px;">✕</button>
+    </div>
+    <div style="padding:16px; background:#161b22; font-size:13px; color:#e6edf3; line-height:1.5;">
+      <div id="cyber-confirm-msg" style="white-space:pre-wrap; line-height:1.6;">確定要執行此操作嗎？</div>
+      <div id="cyber-confirm-tip" style="font-size:11px; color:#8b949e; margin-top:8px; line-height:1.4;"></div>
+    </div>
+    <div style="padding:10px 16px; border-top:1px solid #30363d; display:flex; justify-content:flex-end; gap:8px; background:#0d1117;">
+      <button onclick="closeCyberConfirm(false)" class="mini-btn" style="padding:6px 14px; font-size:12px;" id="btn-cyber-confirm-cancel">取消</button>
+      <button onclick="closeCyberConfirm(true)" style="background:#da3633; border:1px solid #f85149; color:#fff; border-radius:6px; padding:6px 18px; font-size:12px; font-weight:600; cursor:pointer;" id="btn-cyber-confirm-ok">確定</button>
+    </div>
+  </div>
+</div>
+
 </body>
 </html>

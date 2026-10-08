@@ -1,3 +1,7 @@
+let activeSpotlightConcept = null;
+function loadGraphData() { if (typeof loadMasterGraphAndFilter === 'function') loadMasterGraphAndFilter(); }
+let cachedFileConceptsMap = {};
+let cachedHeadingConceptsMap = {};
 // DocGraph 3D - Option 1: 3-Column Knowledge Studio Layout
 // Left: Explorer | Center: Markdown Content | Right: 3D Galaxy & Connected Links
 
@@ -16,14 +20,20 @@ let activeNode = null;
 let selectedTreeNodeEl = null;
 let isTreeOpen = true;
 let isRotating = false;
-let currentLanguage = 'en';
+let currentLanguage = (function() { try { return localStorage.getItem('docgraph_language') || 'en'; } catch(e) { return 'en'; } })();
 
 // Mode & Filter States
 let currentLOD = 'all'; // 'arch', 'standard', 'all', 'custom'
 const hiddenKinds = new Set(['heading_2', 'heading_3', 'heading_4', 'heading_5', 'heading_6']);
 const hiddenEdgeKinds = new Set();
 
+
+function getDocIconSvg(color = KIND_COLORS.file || '#f0883e') {
+  return `<svg class="tree-doc-icon" viewBox="0 0 16 16" width="13" height="13" fill="${color}" style="margin-right:5px; flex-shrink:0; vertical-align:-1.5px; display:inline-block;"><path d="M4 0h5.5l4.5 4.5V14a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V2a2 2 0 0 1 2-2zm5 1v3.5a.5.5 0 0 0 .5.5H13L9 1z"/></svg>`;
+}
+
 const KIND_COLORS = {
+  concept: '#e2e8f0', // Core Concept WikiLink (Royal Silver Cube)
   file: '#f0883e',       // Document (Warm Cyber Orange)
   heading_1: '#58a6ff',  // H1 Primary (Electric Blue)
   heading_2: '#3fb950',  // H2 Major (Emerald Green)
@@ -32,8 +42,38 @@ const KIND_COLORS = {
   heading_5: '#00d2d3',  // H5 Fine (Cyan / Turquoise)
   heading_6: '#ffd700'   // H6 Micro (Bright Gold)
 };
+// ─── Shared Architecture Utilities (Single Source of Truth) ───
+function getNodeColor(kind) {
+  return KIND_COLORS[kind] || '#58a6ff';
+}
+
+function getNodeKindLabel(node) {
+  if (!node) return 'NODE';
+  if (node.kind === 'file') return 'DOC';
+  if ((node.kind || '').startsWith('heading')) return 'H' + (node.level || 1);
+  if (node.kind === 'concept') return 'TAG';
+  return (node.kind || 'NODE').toUpperCase().slice(0, 4);
+}
+
+function getRelationMeta(link, currentNodeId, lang) {
+  const isDocLink = (link.kind === 'doc_link');
+  const srcId = typeof link.source === 'object' ? link.source.id : link.source;
+  const isOut = (srcId === currentNodeId);
+  const isZh = (lang === 'zh');
+
+  let icon = isDocLink ? (isOut ? '→' : '←') : (isOut ? '↓' : '↑');
+  let text = '';
+  if (isZh) {
+    text = isDocLink ? (isOut ? '引用' : '被引用') : (isOut ? '包含' : '上層');
+  } else {
+    text = isDocLink ? (isOut ? 'References' : 'Referenced By') : (isOut ? 'Contains' : 'Parent');
+  }
+  return { icon, text, isDocLink, isOut };
+}
+
 
 const KIND_SIZES = {
+  concept: 2.8,       // Royal Silver Cube
   file: 3.0,       // Document (Warm Cyber Orange) - scaled down for compact 3D view
   heading_1: 2.0,  // H1 Primary (Electric Blue)
   heading_2: 1.4,  // H2 Major (Emerald Green)
@@ -45,10 +85,13 @@ const KIND_SIZES = {
 
 const EDGE_COLORS = {
   parent_child: '#388bfd',
-  doc_link: '#00ffaa'
+  doc_link: '#00ffaa',
+  wiki_link: '#bc8cff' // Vivid Violet Orbit Beam
 };
 
 document.addEventListener('DOMContentLoaded', () => {
+  try { applyAppLanguage(); } catch (e) { console.error('lang init error:', e); }
+  try { fetchConceptsData(); } catch (e) { console.error('concepts init error:', e); }
   try { init3DGraph(); } catch (e) { console.error('init3DGraph error:', e); }
   try { init3DNavControls(); } catch (e) { console.error('initCyberControls error:', e); }
   try { initAutoRotate(); } catch (e) { console.error('initAutoRotate error:', e); }
@@ -176,6 +219,37 @@ function createFileLabelSprite(n) {
   return null;
 }
 
+function createCustomNodeObject(n) {
+  if (!n) return null;
+  if (n.kind === 'concept') {
+    if (typeof SpriteText !== 'undefined') {
+      try {
+        // 純標籤牌直接作為 3D 本體實體！完全移除 3D 方塊與 Halo，居中對齊連線
+        const sprite = new SpriteText(`🏷️ ${n.name}`);
+        sprite.color = '#ffffff';
+        sprite.textHeight = 2.4;
+        sprite.backgroundColor = 'rgba(10, 14, 22, 0.92)';
+        sprite.borderColor = '#94a3b8';
+        sprite.borderWidth = 0.9;
+        sprite.borderRadius = 3;
+        sprite.padding = [1.2, 0.35];
+        sprite.position.set(0, 0, 0);
+        if (sprite.material) {
+          sprite.material.depthWrite = false;
+          sprite.material.transparent = true;
+          sprite.material.opacity = 0.95;
+        }
+        n.__conceptSprite = sprite;
+        return sprite;
+      } catch (err) {
+        console.warn('Concept SpriteText creation failed:', err);
+      }
+    }
+    return null;
+  }
+  return createFileLabelSprite(n);
+}
+
 function init3DGraph() {
   const elem = document.getElementById('3d-graph');
   const pane3D = document.getElementById('viewport-3d-pane');
@@ -192,6 +266,12 @@ function init3DGraph() {
     .backgroundColor('#090d13')
     .nodeId('id')
     .nodeLabel(n => {
+      if (n.kind === 'concept') {
+        return `<div class="scene-tooltip">
+          <div class="tooltip-title" style="color:#f0883e;">🏷️ ${escapeHtml(n.name)}</div>
+          <div class="tooltip-sub">Concept Tag</div>
+        </div>`;
+      }
       const typeLabel = n.kind === 'file' ? 'Document' : `H${n.level || 1} Section`;
       const fileName = (n.file || '').split(/[\\/]/).pop();
       const nodeColor = KIND_COLORS[n.kind] || '#58a6ff';
@@ -213,8 +293,8 @@ function init3DGraph() {
     })
     .nodeRelSize(1.8)
     .nodeResolution(16)
-    .nodeThreeObjectExtend(true)
-    .nodeThreeObject(n => createFileLabelSprite(n))
+    .nodeThreeObjectExtend(n => n.kind !== 'concept')
+    .nodeThreeObject(n => createCustomNodeObject(n))
     .linkOpacity(l => {
       if (highlightNodes.size > 0) {
         return highlightLinks.has(l) ? 0.95 : 0.08;
@@ -229,9 +309,9 @@ function init3DGraph() {
     })
     .linkWidth(l => {
       if (highlightNodes.size > 0) {
-        return highlightLinks.has(l) ? 1.2 : 0.15;
+        return highlightLinks.has(l) ? 0.7 : 0.12;
       }
-      return l.kind === 'doc_link' ? 0.7 : 0.3;
+      return l.kind === 'doc_link' ? 0.45 : (l.kind === 'wiki_link' ? 0.35 : 0.2);
     })
     .linkDirectionalParticles(l => {
       if (highlightNodes.size > 0) {
@@ -244,10 +324,10 @@ function init3DGraph() {
     .d3AlphaDecay(0.03)
     .d3VelocityDecay(0.35)
     .onNodeClick(node => {
-      highlightScope('node', node);
-      focusOnNode(node);
-      selectActiveNode(node);
-      syncExplorerSelection(node);
+      dispatchUnifiedSelection(node);
+    })
+    .onNodeRightClick((node, event) => {
+      openNodeContextMenu(node, event);
     })
     .onBackgroundClick(() => {
       clearHighlight();
@@ -299,6 +379,21 @@ function updateLabelsVisibility() {
   }
 
   gNodes.forEach(n => {
+    if (n.kind === 'concept' && n.__conceptSprite) {
+      const isHighlighted = highlightNodes.has(n.id);
+      if (n.__conceptSprite.material) {
+        if (!hasFilter) {
+          n.__conceptSprite.material.opacity = 0.95;
+          n.__conceptSprite.borderColor = '#94a3b8';
+        } else if (isHighlighted) {
+          n.__conceptSprite.material.opacity = 1.0;
+          n.__conceptSprite.borderColor = '#58a6ff';
+        } else {
+          n.__conceptSprite.material.opacity = 0.15;
+          n.__conceptSprite.borderColor = '#30363d';
+        }
+      }
+    }
     if (n.__labelSprite) {
       const isFile = n.kind === 'file';
       const isRevealed = (n.id === revealedNodeId);
@@ -353,7 +448,7 @@ function focusOnNode(node) {
 
   // 1. 真·近祖置中 (Focus on 1-level Direct Immediate Parent for sections, NEVER skip to root file!)
   let centerNode = liveNode;
-  if (liveNode.kind !== 'file') {
+  if (liveNode.kind !== 'file' && liveNode.kind !== 'concept') {
     const gNodes = (Graph && Graph.graphData) ? (Graph.graphData().nodes || []) : (rawData.nodes || []);
     const nearAncestor = findImmediateAncestor(liveNode, gNodes);
     if (nearAncestor && nearAncestor.x !== undefined) {
@@ -506,10 +601,23 @@ function clearHighlight() {
   highlightNodes.clear();
   highlightLinks.clear();
   activeNode = null;
+  if (activeSpotlightConcept) {
+    activeSpotlightConcept = null;
+    applyLODAndFilter();
+  }
   if (selectedTreeNodeEl) {
     selectedTreeNodeEl.classList.remove('selected');
     selectedTreeNodeEl = null;
   }
+
+  // Restore user LOD settings if temporarily unhidden
+  if (userLODHiddenSnapshot) {
+    hiddenKinds.clear();
+    userLODHiddenSnapshot.forEach(k => hiddenKinds.add(k));
+    userLODHiddenSnapshot = null;
+    applyLODAndFilter();
+  }
+
   if (Graph) {
     Graph.nodeColor(Graph.nodeColor())
       .linkColor(Graph.linkColor())
@@ -660,6 +768,7 @@ function loadProjects(opts = {}) {
 }
 
 function loadMasterGraphAndFilter() {
+  fetchConceptsData();
   if (allProjectsList.length === 0) return;
 
   // Multi-repo merge: ask the server for EVERY known project path so the
@@ -717,6 +826,10 @@ function filterGraphBySelectedProjects(isInitial = false) {
 function buildProjectTree() {
   const container = document.getElementById('tree-container');
   if (!container) return;
+  if (!container.dataset.ctxBound) {
+    container.dataset.ctxBound = '1';
+    container.addEventListener('contextmenu', openTreeCtxMenu);
+  }
 
   // Snapshot currently open folders and selection
   const openProjs = new Set();
@@ -748,6 +861,86 @@ function buildProjectTree() {
   container.innerHTML = '';
   const summaryEl = document.getElementById('lbl-proj-summary');
   if (summaryEl) summaryEl.innerText = `${selectedProjects.size} Active`;
+
+  // ─── Build Global Concept Maps for Explorer Tree Badges ───
+  cachedFileConceptsMap = {};
+  cachedHeadingConceptsMap = {};
+
+  const allGraphLinks = (masterGraphData.links && masterGraphData.links.length > 0) ? masterGraphData.links : (rawData.links || []);
+  allGraphLinks.forEach(l => {
+    if (l.kind === 'wiki_link') {
+      const tgt = typeof l.target === 'object' ? (l.target.id || '') : (l.target || '');
+      const src = typeof l.source === 'object' ? (l.source.id || '') : (l.source || '');
+      let cName = '';
+      if (tgt.includes('concept::')) {
+        cName = tgt.substring(tgt.lastIndexOf('concept::') + 9);
+      } else if (typeof l.target === 'object' && l.target.name) {
+        cName = l.target.name;
+      }
+      if (!cName) return;
+
+      if (src.includes('heading::')) {
+        if (!cachedHeadingConceptsMap[src]) cachedHeadingConceptsMap[src] = new Set();
+        cachedHeadingConceptsMap[src].add(cName);
+        const rawSrc = src.replace(/^p\d+::/, '');
+        if (!cachedHeadingConceptsMap[rawSrc]) cachedHeadingConceptsMap[rawSrc] = new Set();
+        cachedHeadingConceptsMap[rawSrc].add(cName);
+
+        const parts = rawSrc.split('::');
+        if (parts.length >= 2) {
+          const f = parts[1].replace(/\\/g, '/');
+          if (!cachedFileConceptsMap[f]) cachedFileConceptsMap[f] = new Set();
+          cachedFileConceptsMap[f].add(cName);
+          const fBase = f.split('/').pop();
+          if (!cachedFileConceptsMap[fBase]) cachedFileConceptsMap[fBase] = new Set();
+          cachedFileConceptsMap[fBase].add(cName);
+        }
+      } else if (src.includes('file::')) {
+        const rawSrc = src.replace(/^p\d+::/, '');
+        const f = rawSrc.replace('file::', '').replace(/\\/g, '/');
+        if (!cachedFileConceptsMap[f]) cachedFileConceptsMap[f] = new Set();
+        cachedFileConceptsMap[f].add(cName);
+        const fBase = f.split('/').pop();
+        if (!cachedFileConceptsMap[fBase]) cachedFileConceptsMap[fBase] = new Set();
+        cachedFileConceptsMap[fBase].add(cName);
+      }
+    }
+  });
+
+  // Supplement from conceptsTreeData if available
+  if (typeof conceptsTreeData !== 'undefined' && conceptsTreeData && conceptsTreeData.tree) {
+    Object.values(conceptsTreeData.tree).forEach(cList => {
+      (cList || []).forEach(cObj => {
+        const cName = cObj.name;
+        if (typeof activeConceptLinkedFiles !== 'undefined' && activeConceptLinkedFiles[cName]) {
+          activeConceptLinkedFiles[cName].forEach(lf => {
+            const fp = (lf.filePath || '').replace(/\\/g, '/');
+            if (fp.startsWith('heading::')) {
+              if (!cachedHeadingConceptsMap[fp]) cachedHeadingConceptsMap[fp] = new Set();
+              cachedHeadingConceptsMap[fp].add(cName);
+              const parts = fp.split('::');
+              if (parts.length >= 2) {
+                const f = parts[1];
+                if (!cachedFileConceptsMap[f]) cachedFileConceptsMap[f] = new Set();
+                cachedFileConceptsMap[f].add(cName);
+                const fBase = f.split('/').pop();
+                if (!cachedFileConceptsMap[fBase]) cachedFileConceptsMap[fBase] = new Set();
+                cachedFileConceptsMap[fBase].add(cName);
+              }
+            } else {
+              const f = fp.replace('file::', '');
+              if (!cachedFileConceptsMap[f]) cachedFileConceptsMap[f] = new Set();
+              cachedFileConceptsMap[f].add(cName);
+              const fBase = f.split('/').pop();
+              if (!cachedFileConceptsMap[fBase]) cachedFileConceptsMap[fBase] = new Set();
+              cachedFileConceptsMap[fBase].add(cName);
+            }
+          });
+        }
+      });
+    });
+  }
+
 
   // Build recursive directory structure for projects
   const projRoots = {};
@@ -793,7 +986,7 @@ function buildProjectTree() {
 
     if (n.kind === 'file') {
       currentDir.files[fileName].node = n;
-    } else {
+    } else if (n.kind && n.kind.startsWith('heading')) {
       currentDir.files[fileName].symbols.push(n);
     }
   });
@@ -890,8 +1083,8 @@ function buildProjectTree() {
       <span class="tree-arrow ${isProjOpen ? 'open' : ''}">▸</span>
       <input type="checkbox" ${isSelected ? 'checked' : ''} title="Toggle project inclusion" />
       <span title="${escapeHtml(projName)}" style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:600;color:#58a6ff;">📦 ${escapeHtml(projName)}</span>
-      <button class="mini-btn" style="margin-left:auto; padding:1px 8px; font-size:11px;" title="${vProjZh ? '在此專案新增文件…（開啟 LLM 摘要入庫對話框）' : 'New document here… (open LLM summary ingest dialog)'}" onclick="event.stopPropagation();treeNewDocument('${vProjEsc}')">＋</button>
-      <span class="node-kind-tag" style="margin-left:6px;">${proj.files || Object.keys(projData.files).length} files</span>
+      <button class="mini-btn" style="margin-left:auto; width:22px; height:20px; padding:0; font-size:11px; display:inline-flex; align-items:center; justify-content:center; flex-shrink:0;" title="${vProjZh ? '在此專案新增文件…（開啟 LLM 摘要入庫對話框）' : 'New document here… (open LLM summary ingest dialog)'}" onclick="event.stopPropagation();treeNewDocument('${vProjEsc}')">＋</button>
+      <span class="node-kind-tag" style="margin-left:6px;">${proj.files || Object.keys(projData.files).length} md</span>
       ${vProjIndexed ? '' : `<button class="mini-btn" style="margin-left:6px; padding:1px 8px; font-size:10px; border-color:#9e6a03; color:#d29922;" title="${vProjZh ? '建立索引後才會出現在圖上' : 'Index it to show its nodes in the graph'}" onclick="event.stopPropagation();initRepo('${vProjEsc}', this)">${vProjZh ? '＋ 建立索引' : '＋ Create Index'}</button>`}
     `;
 
@@ -974,54 +1167,136 @@ function treeNewDocument(absPath) {
 // (all_dirs from the backend makes the empty folder visible).
 function treeNewFolder(absPath) {
   const zh = (typeof currentLanguage !== 'undefined' && currentLanguage === 'zh');
-  if (!absPath) { showToast(zh ? '❌ 無目標路徑' : '❌ No target path'); return; }
-  const name = (window.prompt(zh ? `新資料夾名稱（建在 ${absPath} 下）` : `New folder name (under ${absPath})`, '') || '').trim();
-  if (!name) return;
-  fetch('/api/browse/mkdir', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ parent: absPath, name: name })
-  })
-    .then(r => r.json().then(d => ({ status: r.status, body: d })))
-    .then(({ status, body }) => {
-      if (status === 200 && body.success) {
-        showToast((zh ? '📁 已建立：' : '📁 Created: ') + body.path);
-        if (typeof loadProjects === 'function') loadProjects({ preserve: true });
-      } else {
-        showToast('❌ ' + ((body && body.error) || status));
-      }
+  const ja = (typeof currentLanguage !== 'undefined' && currentLanguage === 'ja');
+  if (!absPath) {
+    showToast(zh ? '❌ 無目標路徑' : (ja ? '❌ 対象パスがありません' : '❌ No target path'));
+    return;
+  }
+  const title = zh ? '📁 新增資料夾' : (ja ? '📁 新規フォルダ作成' : '📁 New Folder');
+  const msg = zh ? `在目錄「${absPath}」下建立新資料夾：` : (ja ? `ディレクトリ「${absPath}」に新規フォルダを作成：` : `Create new folder under "${absPath}":`);
+  const tip = zh ? '💡 請輸入資料夾名稱（不可包含特殊字元 \ / : * ? " < > |）' : (ja ? '💡 フォルダ名を入力してください（特殊文字は使用できません）' : '💡 Enter a valid folder name without special characters');
+  const confirmText = zh ? '建立資料夾' : (ja ? 'フォルダ作成' : 'Create Folder');
+  const cancelText = zh ? '取消' : (ja ? 'キャンセル' : 'Cancel');
+
+  showCyberPrompt(title, msg, '', (name) => {
+    const trimmed = (name || '').trim();
+    if (!trimmed) return;
+    fetch('/api/browse/mkdir', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ parent: absPath, name: trimmed })
     })
-    .catch(err => showToast('❌ ' + err));
+      .then(async r => {
+        const text = await r.text();
+        try {
+          return { status: r.status, ok: r.ok, body: JSON.parse(text) };
+        } catch (e) {
+          throw new Error(`Server returned ${r.status}: ${text.slice(0, 150)}`);
+        }
+      })
+      .then(({ status, ok, body }) => {
+        if (ok && body && body.success) {
+          showToast((zh ? '📁 已建立：' : (ja ? '📁 作成完了：' : '📁 Created: ')) + (body.path || trimmed));
+          if (typeof loadProjects === 'function') loadProjects({ preserve: true });
+        } else {
+          showToast('❌ ' + ((body && body.error) || status));
+        }
+      })
+      .catch(err => showToast('❌ ' + (err.message || err)));
+  }, { placeholder: zh ? '例如：01_架構規範, 測試專案...' : 'e.g. 01_Architecture, Specs...', tip, confirmText, cancelText });
 }
 
 // Inline − on md rows: delete the md + its header-recorded sources + index.
 // Always asks first (native confirm lists exactly what will go).
+function treeDeleteDir(absPath, displayName) {
+  const zh = (typeof currentLanguage !== 'undefined' && currentLanguage === 'zh');
+  const ja = (typeof currentLanguage !== 'undefined' && currentLanguage === 'ja');
+  if (!absPath) {
+    showToast(zh ? '❌ 無目錄路徑' : (ja ? '❌ ディレクトリパスがありません' : '❌ No directory path'));
+    return;
+  }
+  const name = displayName || absPath.split('\\').pop() || absPath.split('/').pop() || absPath;
+  const title = zh ? `⚠ 永久刪除資料夾「${name}」` : (ja ? `⚠ フォルダ「${name}」の完全削除` : `⚠ Delete Folder "${name}"`);
+  const msg = zh
+    ? `確定刪除資料夾「${name}」？\n\n⚠ 此動作將：\n1. 徹底刪除硬碟中的該資料夾與其所屬全部子檔案。\n2. 自動重新解析並同步移除知識圖譜索引！\n3. 此動作無法復原。`
+    : (ja
+      ? `フォルダ「${name}」を削除しますか？\n\n⚠ この操作により：\n1. フォルダ内の全サブファイルおよび文書が完全に削除されます。\n2. ナレッジグラフのインデックスが同期更新されます。\n3. 元に戻すことはできません。`
+      : `Delete folder "${name}"?\n\n⚠ This action will:\n1. Permanently delete the folder and ALL nested files/documents inside.\n2. Automatically update and remove them from the graph index.\n3. This cannot be undone.`);
+
+  const tip = zh ? '💡 警告：資料夾內之全部檔案都將被實體刪除！' : (ja ? '💡 警告：フォルダ内のすべてのファイルが物理削除されます！' : '💡 Warning: All nested files inside will be permanently erased!');
+  const confirmText = zh ? '永久刪除資料夾' : (ja ? 'フォルダを完全に削除' : 'Delete Folder');
+  const cancelText = zh ? '取消' : (ja ? 'キャンセル' : 'Cancel');
+
+  showCyberConfirm(title, msg, () => {
+    fetch('/api/browse/delete-dir', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ path: absPath })
+    })
+      .then(async r => {
+        const text = await r.text();
+        try {
+          return { status: r.status, ok: r.ok, body: JSON.parse(text) };
+        } catch (e) {
+          throw new Error(`Server returned ${r.status}: ${text.slice(0, 150)}`);
+        }
+      })
+      .then(({ status, ok, body }) => {
+        if (ok && body && body.success) {
+          showToast(zh ? `🗑 已刪除資料夾「${name}」` : (ja ? `🗑 フォルダ「${name}」を削除しました` : `🗑 Deleted folder "${name}"`));
+          if (typeof loadProjects === 'function') loadProjects({ preserve: true });
+        } else {
+          showToast('❌ ' + ((body && body.error) || status));
+        }
+      })
+      .catch(err => showToast('❌ ' + (err.message || err)));
+  }, { confirmText, cancelText, tip });
+}
+
 function treeDeleteFile(absPath, displayName) {
   const zh = (typeof currentLanguage !== 'undefined' && currentLanguage === 'zh');
+  const ja = (typeof currentLanguage !== 'undefined' && currentLanguage === 'ja');
   if (!absPath) { showToast(zh ? '❌ 無目標路徑' : '❌ No target path'); return; }
   const name = displayName || absPath.split('\\').pop() || absPath;
-  const ok = window.confirm(zh
-    ? `確定刪除「${name}」？\n\nmd 本體＋它 header 記載的來源檔會一起砍掉，索引同步移除。\n此動作無法復原。`
-    : `Delete "${name}"?\n\nThe md plus its header-recorded source files will be removed and the index updated.\nThis cannot be undone.`);
-  if (!ok) return;
-  fetch('/api/ingest/delete', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ path: absPath })
-  })
-    .then(r => r.json().then(d => ({ status: r.status, body: d })))
-    .then(({ status, body }) => {
-      if (status === 200 && body.success) {
-        const n = (body.deleted || []).length;
-        const miss = (body.missing || []).length;
-        showToast((zh ? `🗑 已刪除 ${n} 個檔案` : `🗑 Deleted ${n} file(s)`)
-          + (miss ? (zh ? `（${miss} 個找不到，略過）` : ` (${miss} missing, skipped)`) : ''));
-        if (typeof loadProjects === 'function') loadProjects({ preserve: true });
-      } else {
-        showToast('❌ ' + ((body && body.error) || status));
-      }
+
+  const title = zh ? `⚠ 永久刪除文件「${name}」` : (ja ? `⚠ ドキュメント「${name}」の完全削除` : `⚠ Delete Document "${name}"`);
+  const msg = zh
+    ? `確定刪除「${name}」？\n\n⚠ 此動作將：\n1. 刪除 md 本體檔案。\n2. 同步刪除 header 記載的來源附件檔案（PDF/PPTX等）。\n3. 自動清除知識圖譜索引！\n此動作無法復原。`
+    : (ja
+      ? `「${name}」を削除しますか？\n\n⚠ この操作により：\n1. mdファイル本体が削除されます。\n2. ヘッダー記載のソースファイルも削除されます。\n3. ナレッジグラフのインデックスが同期削除されます。\n元に戻すことはできません。`
+      : `Delete "${name}"?\n\n⚠ This action will:\n1. Delete the md document.\n2. Remove associated header source files (PDF/PPTX etc).\n3. Wipe it from the graph index!\nThis cannot be undone.`);
+
+  const tip = zh ? '💡 提示：本體與關聯來源檔案將一併清除。' : (ja ? '💡 ヒント：ドキュメントと添付元ファイルも削除されます。' : '💡 Note: The document and its source files will be deleted.');
+  const confirmText = zh ? '永久刪除文件' : (ja ? 'ドキュメントを完全に削除' : 'Delete Document');
+  const cancelText = zh ? '取消' : (ja ? 'キャンセル' : 'Cancel');
+
+  showCyberConfirm(title, msg, () => {
+    fetch('/api/ingest/delete', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ path: absPath })
     })
-    .catch(err => showToast('❌ ' + err));
+      .then(async r => {
+        const text = await r.text();
+        try {
+          return { status: r.status, ok: r.ok, body: JSON.parse(text) };
+        } catch (e) {
+          throw new Error(`Server returned ${r.status}: ${text.slice(0, 150)}`);
+        }
+      })
+      .then(({ status, ok, body }) => {
+        if (ok && body && body.success) {
+          const n = (body.deleted || []).length;
+          const miss = (body.missing || []).length;
+          showToast((zh ? `🗑 已刪除 ${n} 個檔案` : `🗑 Deleted ${n} file(s)`)
+            + (miss ? (zh ? `（${miss} 個找不到，略過）` : ` (${miss} missing, skipped)`) : ''));
+          if (typeof loadProjects === 'function') loadProjects({ preserve: true });
+        } else {
+          showToast('❌ ' + ((body && body.error) || status));
+        }
+      })
+      .catch(err => showToast('❌ ' + (err.message || err)));
+  }, { confirmText, cancelText, tip });
 }
 
 // Recursive directory & file renderer
@@ -1040,16 +1315,19 @@ function renderDirContents(projName, dirObj, parentEl, openDirs, openFiles, sele
     dirNodeEl.className = 'tree-node';
     dirNodeEl.setAttribute('data-tree-dir', dirKey);
 
-    // Folder badge (recursive file count) + inline ＋ (same as New document).
+    // Folder badge (recursive file count) + inline ＋ (New document) + inline − (Delete folder).
     const vDirZh = (typeof currentLanguage !== 'undefined' && currentLanguage === 'zh');
+    const vDirJa = (typeof currentLanguage !== 'undefined' && currentLanguage === 'ja');
     const vDirCount = countDirFiles(subDir);
     const vDirAbs = resolveTreeAbsPath(projName, cleanSubPath);
     const vDirEsc = (vDirAbs || '').replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+    const vDNameEsc = (dName || '').replace(/\\/g, '\\\\').replace(/'/g, "\\'");
     dirNodeEl.innerHTML = `
       <span class="tree-arrow ${isDirOpen ? 'open' : ''}">▸</span>
       <span title="${escapeHtml(dName)}" style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:500;color:#e6edf3;">📁 ${escapeHtml(dName)}</span>
-      <button class="mini-btn" style="margin-left:auto; padding:1px 8px; font-size:11px;" title="${vDirZh ? `在此資料夾新增文件…（${escapeHtml(vDirAbs)}）` : `New document here… (${escapeHtml(vDirAbs)})`}" onclick="event.stopPropagation();treeNewDocument('${vDirEsc}')">＋</button>
-      ${vDirCount > 0 ? `<span class="node-kind-tag" style="margin-left:6px;">${vDirCount} files</span>` : ''}
+      <button class="mini-btn" style="margin-left:auto; width:22px; height:20px; padding:0; font-size:11px; display:inline-flex; align-items:center; justify-content:center; flex-shrink:0;" title="${vDirZh ? `在此資料夾新增文件…（${escapeHtml(vDirAbs)}）` : (vDirJa ? `このフォルダに新規ドキュメント…（${escapeHtml(vDirAbs)}）` : `New document here… (${escapeHtml(vDirAbs)})`)}" onclick="event.stopPropagation();treeNewDocument('${vDirEsc}')">＋</button>
+      <button class="mini-btn" style="margin-left:4px; width:22px; height:20px; padding:0; font-size:11px; display:inline-flex; align-items:center; justify-content:center; flex-shrink:0; border-color:#5a2d2d; color:#f85149;" title="${vDirZh ? `刪除資料夾「${escapeHtml(dName)}」（包含全部子文件與索引，需確認）` : (vDirJa ? `フォルダ「${escapeHtml(dName)}」を削除（全サブファイルとインデックス含む、要確認）` : `Delete folder "${escapeHtml(dName)}" (all files + index, asks first)`)}" onclick="event.stopPropagation();treeDeleteDir('${vDirEsc}', '${vDNameEsc}')">−</button>
+      ${vDirCount > 0 ? `<span class="node-kind-tag" style="margin-left:6px;">${vDirCount} md</span>` : ''}
     `;
 
     const dirChildrenEl = document.createElement('div');
@@ -1111,11 +1389,12 @@ function renderDirContents(projName, dirObj, parentEl, openDirs, openFiles, sele
     const vNameEsc = (fName || '').replace(/\\/g, '\\\\').replace(/'/g, "\\'");
     fileNodeEl.innerHTML = `
       <span class="tree-arrow ${isFileOpen ? 'open' : ''}" style="${bUnindexed ? 'visibility:hidden;' : ''}">▸</span>
-      <span title="${escapeHtml(fName)}" style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:${bUnindexed ? '#d29922' : '#c9d1d9'};">📄 ${escapeHtml(fName)}</span>
-      ${vIsMd ? `<button class="mini-btn" style="padding:0 7px;font-size:11px;flex-shrink:0;border-color:#5a2d2d;color:#f85149;" title="${bUzh ? `刪除「${escapeHtml(fName)}」（md＋來源檔＋索引，需確認）` : `Delete "${escapeHtml(fName)}" (md + sources + index, asks first)`}" onclick="event.stopPropagation();treeDeleteFile('${vFileEsc}', '${vNameEsc}')">−</button>` : ''}
+      ${getDocIconSvg(bUnindexed ? '#d29922' : (KIND_COLORS.file || '#f0883e'))}
+      <span title="${escapeHtml(fName)}" style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:${bUnindexed ? '#d29922' : '#c9d1d9'};">${escapeHtml(fName)}</span>
+      ${vIsMd ? `<button class="mini-btn" style="width:22px; height:20px; padding:0; font-size:11px; display:inline-flex; align-items:center; justify-content:center; flex-shrink:0; border-color:#5a2d2d; color:#f85149;" title="${bUzh ? `刪除「${escapeHtml(fName)}」（md＋來源檔＋索引，需確認）` : `Delete "${escapeHtml(fName)}" (md + sources + index, asks first)`}" onclick="event.stopPropagation();treeDeleteFile('${vFileEsc}', '${vNameEsc}')">−</button>` : ''}
       ${bUnindexed
         ? `<span class="node-kind-tag" style="flex-shrink:0;margin-left:6px;background:#3a2e12;color:#d29922;border:1px solid #9e6a03;">${bUzh ? '⏳ 待索引' : '⏳ unindexed'}</span>`
-        : `<span class="node-kind-tag" style="flex-shrink:0;margin-left:6px;">${symList.length}h</span>`}
+        : ''}
     `;
 
     const fileChildrenEl = document.createElement('div');
@@ -1136,40 +1415,11 @@ function renderDirContents(projName, dirObj, parentEl, openDirs, openFiles, sele
         showToast(currentLanguage === 'zh' ? '⏳ 尚未索引 — 用 Sync 納入' : '⏳ Not indexed yet — Sync to include it');
         return;
       }
-      highlightScope('file', { project: projName, file: cleanFilePath, node: fileNode, symbols: symList });
-      selectActiveNode(fileNode);
-      focusOnNode(fileNode);
+      dispatchUnifiedSelection(fileNode);
     };
 
     if (selectedKey === fileKey) {
       selectTreeNode(fileNodeEl);
-    }
-
-    // 3a. Header-recorded sources hang directly under their md (toggle-gated).
-    const vSrcList = fileData.sources || [];
-    if (vSrcList.length) {
-      const vPe = (allProjectsList || []).find(p => p.name === projName);
-      const vRepoPath = (vPe && vPe.path) || '';
-      vSrcList.forEach(srcRel => {
-        const sName = (srcRel || '').split('/').pop() || srcRel;
-        const sExt = (sName.split('.').pop() || '').toLowerCase();
-        const sUrl = vRepoPath ? `/api/ingest/source?repo=${encodeURIComponent(vRepoPath)}&file=${encodeURIComponent(srcRel)}` : '';
-        const sEl = document.createElement('div');
-        sEl.className = 'tree-node';
-        sEl.setAttribute('data-tree-src', '1');
-        sEl.setAttribute('data-tree-proj', projName);
-        sEl.setAttribute('data-tree-file-path', srcRel);
-        sEl.innerHTML = `
-          <span class="tree-arrow" style="visibility:hidden;">▸</span>
-          <span title="${escapeHtml(srcRel)}" style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#8b949e;">📎 ${escapeHtml(sName)}</span>
-          <span class="node-kind-tag" style="flex-shrink:0;margin-left:6px;background:#21262d;color:#8b949e;border:1px solid #30363d;">${escapeHtml(sExt) || 'src'}</span>
-        `;
-        sEl.onclick = () => {
-          selectTreeNode(sEl);
-          if (sUrl) window.open(sUrl, '_blank', 'noopener');
-        };
-        fileChildrenEl.appendChild(sEl);
-      });
     }
 
     // 3. Convert flat headings into a nested AST hierarchy tree (Every level collapsible!)
@@ -1179,6 +1429,52 @@ function renderDirContents(projName, dirObj, parentEl, openDirs, openFiles, sele
 
     parentEl.appendChild(fileNodeEl);
     parentEl.appendChild(fileChildrenEl);
+
+    // 3a. Header-recorded sources: Unfolded, perfectly aligned with MD (same hierarchy level).
+    // Single-click selects node, Double-click opens file!
+    const vSrcList = fileData.sources || [];
+    if (vSrcList.length) {
+      const vPe = (allProjectsList || []).find(p => p.name === projName);
+      const vRepoPath = (vPe && vPe.path) || '';
+      vSrcList.forEach(srcRel => {
+        const sName = (srcRel || '').split('/').pop() || srcRel;
+        const sExt = (sName.split('.').pop() || '').toUpperCase();
+        const sUrl = vRepoPath ? `/api/ingest/source?repo=${encodeURIComponent(vRepoPath)}&file=${encodeURIComponent(srcRel)}` : '';
+        const sEl = document.createElement('div');
+        sEl.className = 'tree-node';
+        sEl.setAttribute('data-tree-src', '1');
+        sEl.setAttribute('data-tree-proj', projName);
+        sEl.setAttribute('data-tree-file-path', srcRel);
+        sEl.setAttribute('title', `${sName}\n• 單擊：選取檔案\n• 雙擊：開啟原始檔案`);
+
+        sEl.innerHTML = `
+          <span class="tree-arrow" style="visibility:hidden;width:12px;margin-right:2px;">•</span>
+          <span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#8b949e;display:flex;align-items:center;gap:4px;">
+            <span style="font-size:12px;">📎</span>
+            <span style="color:#c9d1d9;">${escapeHtml(sName)}</span>
+          </span>
+          <span class="node-kind-tag" style="flex-shrink:0;margin-left:6px;background:rgba(56, 139, 253, 0.1);color:#58a6ff;border:1px solid rgba(56, 139, 253, 0.3);font-size:9px;font-weight:600;padding:0 5px;">${escapeHtml(sExt) || 'SRC'}</span>
+        `;
+
+        // 1. Single click: select only (no auto opening)
+        sEl.onclick = (e) => {
+          e.stopPropagation();
+          selectTreeNode(sEl);
+        };
+
+        // 2. Double click: open file
+        sEl.ondblclick = (e) => {
+          e.stopPropagation();
+          if (sUrl) {
+            window.open(sUrl, '_blank', 'noopener');
+          } else {
+            showToast(currentLanguage === 'zh' ? '找不到來源檔案路徑' : 'Source file path not found');
+          }
+        };
+
+        parentEl.appendChild(sEl);
+      });
+    }
   });
 }
 
@@ -1232,10 +1528,7 @@ function renderNestedHeadingTree(headingNodes, parentEl, openDirs, selectedKey) 
 
     hNodeEl.onclick = (e) => {
       e.stopPropagation();
-      selectTreeNode(hNodeEl);
-      highlightScope('node', h);
-      focusOnNode(h);
-      selectActiveNode(h);
+      dispatchUnifiedSelection(h);
     };
 
     if (selectedKey === h.id) {
@@ -1269,6 +1562,23 @@ function syncExplorerSelection(node) {
       if (el.getAttribute('data-tree-node-id') === node.id) {
         targetEl = el;
         break;
+      }
+    }
+  }
+
+  // 1b. Heading node match by name within file container
+  if (!targetEl && node.kind && node.kind.startsWith('heading') && node.file) {
+    const cleanF = (node.file || '').replace(/\\/g, '/').toLowerCase();
+    const fileContainer = document.querySelector(`#tree-container [data-tree-file-path="${cleanF}"]`);
+    const parentChildren = fileContainer ? fileContainer.nextElementSibling : document.getElementById('tree-container');
+    if (parentChildren) {
+      const headingEls = parentChildren.querySelectorAll('.tree-node');
+      for (const el of headingEls) {
+        const text = (el.innerText || '').trim().toLowerCase();
+        if (text.includes(node.name.toLowerCase())) {
+          targetEl = el;
+          break;
+        }
       }
     }
   }
@@ -1383,9 +1693,12 @@ function selectAllProjects(val) {
 // md viewer context: owning project/repo + header source rels
 // (drives source-file links + the viewer right-click menu).
 let viewCtx = { project: '', file: '', repo: '', sources: [] };
-function selectActiveNode(node) {
+function selectActiveNode(node, bSkipDelegates = false) {
   if (!node) return;
   activeNode = node;
+  if (!bSkipDelegates) {
+    syncExplorerSelection(node);
+  }
 
   const dName = document.getElementById('d-name');
   const dSub = document.getElementById('d-sub');
@@ -1396,12 +1709,15 @@ function selectActiveNode(node) {
   if (badge) {
     badge.innerText = (node.kind || 'NODE').toUpperCase();
     badge.style.background = KIND_COLORS[node.kind] || '#1f6feb';
+    badge.style.color = '#ffffff';
+    badge.style.fontWeight = '700';
+    badge.style.textShadow = '0 1px 2px rgba(0,0,0,0.7)';
   }
 
   // Fetch Section / Full Content for Center Markdown Viewer
   const queryFile = node.abs_path || node.file || '';
   // Viewer context: owning project/repo (for source-file links + ctx menu).
-  viewCtx = { project: '', file: (node.file || '').replace(/\\/g, '/'), repo: '', sources: [] };
+  viewCtx = { project: '', file: (node.file || '').replace(/\\/g, '/'), repo: '', sources: [], heading: (node.kind === 'file' ? '' : (node.name || '')) };
   try { viewCtx.project = node.project || getNodeProject(node) || ''; } catch (e) { /* ignore */ }
   const vProjEntry = (allProjectsList || []).find(p => p.name === viewCtx.project);
   if (vProjEntry && vProjEntry.path) viewCtx.repo = vProjEntry.path;
@@ -1421,15 +1737,7 @@ function selectActiveNode(node) {
       const slicedTokens = Math.ceil(content.length / 3.8);
       const savings = node.kind === 'file' ? '0.0%' : `${Math.max(0, ((fullTokens - slicedTokens) / (fullTokens || 1)) * 100).toFixed(1)}%`;
 
-      const savBadge = document.getElementById('stat-savings-badge');
-      const savFill = document.getElementById('stat-savings-fill');
-      const fTokens = document.getElementById('stat-full-tokens');
-      const sTokens = document.getElementById('stat-sliced-tokens');
 
-      if (savBadge) savBadge.textContent = savings;
-      if (savFill) savFill.style.width = savings;
-      if (fTokens) fTokens.textContent = `${fullTokens.toLocaleString()} tokens`;
-      if (sTokens) sTokens.textContent = `${slicedTokens.toLocaleString()} tokens`;
 
       // Store in memory for 1-click Agent Copy
       window._activeSurgicalPayload = `[DocGraph Sliced Context: ${node.name} | ${node.file || ''} | Line ${node.line || 1}]\n${content}`;
@@ -1446,67 +1754,77 @@ function selectActiveNode(node) {
       }
     });
 
-  // Update Right Column Lower Pane: Connected Relations & Links
-  const rawLinks = rawData.links || [];
-  const connectedLinks = rawLinks.filter(l => {
-    const src = typeof l.source === 'object' ? l.source.id : l.source;
-    const tgt = typeof l.target === 'object' ? l.target.id : l.target;
-    return src === node.id || tgt === node.id;
-  });
+  // Update Right Column Lower Pane via decoupled handler
+  renderConnectedRelationsPanel(node);
+}
 
-  const relList = document.getElementById('d-relations');
-  const relCountEl = document.getElementById('d-rel-count');
-  if (relCountEl) relCountEl.textContent = connectedLinks.length;
 
-  if (relList) {
-    relList.innerHTML = '';
-    if (connectedLinks.length === 0) {
-      relList.innerHTML = `<div style="font-size:11px; color:#8b949e; padding:8px;">${currentLanguage === 'zh' ? '此節點無關聯連結' : 'No connected links for this node'}</div>`;
-    } else {
-      connectedLinks.forEach(l => {
-        const srcId = typeof l.source === 'object' ? l.source.id : l.source;
-        const tgtId = typeof l.target === 'object' ? l.target.id : l.target;
-        const otherId = (srcId === node.id) ? tgtId : srcId;
-        const otherNode = rawData.nodes.find(n => n.id === otherId);
-        if (!otherNode) return;
+// ─── Document Tags Visual Engine (Dedicated Top Bar & Inline Badges) ─
+function updateDocTagsBar(mdText, filePath) {
+  const bar = document.getElementById('doc-tags-pill-bar');
+  const list = document.getElementById('doc-tags-pill-list');
+  if (!bar || !list) return;
 
-        const isDocLink = l.kind === 'doc_link';
-        const isOut = (srcId === node.id);
-
-        let relLabel = '';
-        if (currentLanguage === 'zh') {
-          relLabel = isDocLink ? (isOut ? '參考引用' : '被引用') : (isOut ? '包含' : '上層');
-        } else {
-          relLabel = isDocLink ? (isOut ? 'References' : 'Referenced By') : (isOut ? 'Contains' : 'Parent');
-        }
-
-        // Color badge dynamically matching the target node's AST kind/level
-        const targetColor = KIND_COLORS[otherNode.kind] || (isDocLink ? '#00ffaa' : '#58a6ff');
-        const kindTagText = otherNode.kind === 'file' ? 'DOC' : ('H' + (otherNode.level || 1));
-
-        const row = document.createElement('div');
-        row.className = 'rel-row';
-        row.style.cursor = 'pointer';
-        row.innerHTML = `
-          <span class="rel-kind" style="background:${targetColor}22; color:${targetColor}; border:1px solid ${targetColor}66;">${relLabel}</span>
-          <span class="rel-target" style="color:#e6edf3; font-weight:500;">${escapeHtml(otherNode.name)}</span>
-          <span class="node-kind-tag" style="background:${targetColor}18; color:${targetColor}; border:1px solid ${targetColor}44; margin-left:auto; font-size:10px;">${kindTagText}</span>
-        `;
-        row.onclick = () => {
-          highlightScope('node', otherNode);
-          focusOnNode(otherNode);
-          selectActiveNode(otherNode);
-          syncExplorerSelection(otherNode);
-        };
-        relList.appendChild(row);
-      });
+  // Extract all unique concepts in this document [[...]]
+  const concepts = new Set();
+  const pat = /\[\[([^\]|#\n]+)(?:#[^\]|\n]+)?(?:\|([^\]\n]+))?\]\]/g;
+  let match;
+  while ((match = pat.exec(mdText || '')) !== null) {
+    const cName = (match[1] || '').trim();
+    if (cName && cName.length <= 60 && !cName.toLowerCase().endsWith('.md')) {
+      concepts.add(cName);
     }
   }
+
+  if (concepts.size === 0) {
+    bar.style.display = 'none';
+    list.innerHTML = '';
+    return;
+  }
+
+  bar.style.display = 'flex';
+  list.innerHTML = '';
+
+  concepts.forEach(cName => {
+    const pill = document.createElement('div');
+    pill.style.cssText = 'display:inline-flex; align-items:center; gap:4px; background:#1f6feb22; border:1px solid #388bfd66; border-radius:12px; padding:2px 8px; font-size:11px; color:#58a6ff; font-weight:600; cursor:pointer; transition:all 0.15s ease;';
+    pill.onmouseover = () => { pill.style.background = '#1f6feb44'; pill.style.borderColor = '#58a6ff'; };
+    pill.onmouseout = () => { pill.style.background = '#1f6feb22'; pill.style.borderColor = '#388bfd66'; };
+
+    const txt = document.createElement('span');
+    txt.innerText = `🏷️ ${cName}`;
+    txt.onclick = () => {
+      onConceptCardClick(cName);
+    };
+
+    const del = document.createElement('span');
+    del.innerText = '✕';
+    del.style.cssText = 'color:#f85149; margin-left:4px; font-size:11px; padding:0 2px; cursor:pointer;';
+    del.title = '脫鉤解除此標籤 (Unlink)';
+    del.onclick = (e) => {
+      unlinkConcept(cName, filePath, e);
+    };
+
+    pill.appendChild(txt);
+    pill.appendChild(del);
+    list.appendChild(pill);
+  });
 }
 
 function renderMarkdown(mdText) {
   const container = document.getElementById('d-code-markdown');
   if (!container) return;
+
+  const curFile = (viewCtx && viewCtx.file) ? viewCtx.file : (activeNode ? (activeNode.file || activeNode.abs_path || '') : '');
+  updateDocTagsBar(mdText, curFile);
+
+  // Convert [[Concept]] into clickable interactive inline tags
+  let processedMd = mdText || '';
+  processedMd = processedMd.replace(/\[\[([^\]|#\n]+)(?:#[^\]|\n]+)?(?:\|([^\]\n]+))?\]\]/g, (m, cName, alias) => {
+    const displayName = alias ? alias.trim() : cName.trim();
+    if (cName.toLowerCase().endsWith('.md')) return m; // keep standard doc links
+    return `<span class="inline-concept-badge" style="display:inline-flex; align-items:center; background:#1f6feb22; border:1px solid #388bfd55; color:#58a6ff; font-weight:600; padding:1px 6px; border-radius:4px; cursor:pointer; font-size:11px;" onclick="onConceptCardClick('${escapeHtml(cName.trim())}', event)">🏷️ ${escapeHtml(displayName)}</span>`;
+  });
   // Ingest-md header sources: `> - `rel`` lines — remembered for linkify + menu.
   viewCtx.sources = [];
   ((mdText || '').match(/^> - `(.+)`$/gm) || []).forEach(l => {
@@ -1514,11 +1832,12 @@ function renderMarkdown(mdText) {
     if (r && viewCtx.sources.indexOf(r) < 0) viewCtx.sources.push(r);
   });
   if (window.marked) {
-    container.innerHTML = marked.parse(mdText || '');
+    container.innerHTML = marked.parse(processedMd || '');
     container.querySelectorAll('pre code').forEach((block) => {
       if (window.hljs) hljs.highlightElement(block);
     });
     linkifySources(container);
+    bindMarkdownInternalLinks(container);
   } else {
     container.innerText = mdText || '';
   }
@@ -1656,6 +1975,26 @@ function changeLOD(mode) {
 
 function applyLODAndFilter() {
   const activeNodes = (rawData.nodes || []).filter(n => {
+    if (n.kind === 'concept') {
+      // 1. If a specific concept is spotlighted/selected, ONLY that exact concept tag is visible!
+      if (activeSpotlightConcept) {
+        return (n.name === activeSpotlightConcept) || (n.id === `concept::${activeSpotlightConcept}`) || n.id.endsWith(`::concept::${activeSpotlightConcept}`);
+      }
+      // 2. If a document or heading node is active/highlighted, show concepts linked to this document!
+      if (activeNode) {
+        const activeDocPath = (activeNode.file || activeNode.name || '').replace(/\\/g, '/');
+        const hasDirectLink = (rawData.links || []).some(l => {
+          if (l.kind !== 'wiki_link') return false;
+          const sId = typeof l.source === 'object' ? l.source.id : l.source;
+          const tId = typeof l.target === 'object' ? l.target.id : l.target;
+          const isThisConcept = (tId === n.id || sId === n.id);
+          const isThisDoc = sId.includes(activeDocPath) || tId.includes(activeDocPath) || (activeNode.id && (sId === activeNode.id || tId === activeNode.id));
+          return isThisConcept && isThisDoc;
+        });
+        if (hasDirectLink) return true;
+      }
+      return false; // Keep unrelated concept tags hidden to prevent visual clutter
+    }
     if (hiddenKinds.has(n.kind)) return false;
     return true;
   });
@@ -1687,6 +2026,7 @@ function buildLegends() {
   nodesList.innerHTML = '';
   
   const kinds = [
+    { kind: 'concept', label: 'Concept' },
     { kind: 'file', label: 'Document' },
     { kind: 'heading_1', label: 'H1 Section' },
     { kind: 'heading_2', label: 'H2 Section' },
@@ -1831,6 +2171,7 @@ function togglePanelsSwap() {
 
   updateSwapButtonI18n();
   updateControlsHelpI18n();
+  updateActivityBarI18n();
 
   if (!isSwapped) {
     showToast(currentLanguage === 'zh' ? '3D 圖已置中，Markdown 移至右側' : '3D Graph centered, Markdown in right panel');
@@ -1853,10 +2194,14 @@ function togglePanelsSwap() {
 }
 
 function initColumnResizers() {
-  // Resizer 1: Tree vs Doc
+  // Resizer 1: Tree vs Doc — drags the OUTER drawer (post activity-bar
+  // layout). Dragging the inner panel splits it from the drawer and leaves
+  // a dead gap, so the inner panel is reset to follow the drawer width.
   const resizerTreeDoc = document.getElementById('resizer-tree-doc');
+  const drawer = document.getElementById('left-sidebar-drawer');
   const treePanel = document.getElementById('tree-panel');
-  if (resizerTreeDoc && treePanel) {
+  if (treePanel && treePanel.style.width) treePanel.style.width = '';
+  if (resizerTreeDoc && drawer) {
     let isDragging = false;
     resizerTreeDoc.addEventListener('mousedown', (e) => {
       isDragging = true;
@@ -1867,8 +2212,8 @@ function initColumnResizers() {
 
     window.addEventListener('mousemove', (e) => {
       if (!isDragging) return;
-      const newWidth = Math.max(180, Math.min(500, e.clientX));
-      treePanel.style.width = `${newWidth}px`;
+      const newWidth = Math.max(240, Math.min(700, e.clientX));
+      drawer.style.width = `${newWidth}px`;
     });
 
     window.addEventListener('mouseup', () => {
@@ -2088,6 +2433,7 @@ function syncRepo(path, btn) {
     if (res.success) {
       showToast(`✅ Synced: ${res.files} files, ${res.nodes} nodes, ${res.edges} links!`);
       loadProjects();
+      setBusy(btn, false);
     } else {
       setBusy(btn, false);
       alert('Sync failed: ' + res.error);
@@ -2110,6 +2456,7 @@ function rebuildRepo(path, btn) {
     if (res.success) {
       showToast(`✅ Rebuilt: ${res.files} files, ${res.nodes} nodes, ${res.edges} links!`);
       loadProjects();
+      setBusy(btn, false);
     } else {
       setBusy(btn, false);
       alert('Rebuild failed: ' + res.error);
@@ -2132,6 +2479,7 @@ function uninitRepo(path, btn) {
     if (res.success) {
       showToast('🗑️ Repository uninitialized.');
       loadProjects();
+      setBusy(btn, false);
     } else {
       setBusy(btn, false);
       alert('Uninit failed: ' + res.error);
@@ -2153,6 +2501,7 @@ function initRepo(path, btn) {
     if (res.success) {
       showToast(`✅ Index created: ${res.files} files, ${res.nodes} nodes, ${res.edges} links!`);
       loadProjects();
+      setBusy(btn, false);
     } else {
       setBusy(btn, false);
       alert('Index failed: ' + res.error);
@@ -2200,6 +2549,7 @@ function syncAllRepos(btn) {
         ? `⚡ 全域同步完成：${res.synced} 個 repo，解析 ${t.parsed || 0}，跳過 ${t.skipped || 0}，移除 ${t.removed || 0}`
         : `⚡ Synced ${res.synced} repos: ${t.parsed || 0} parsed, ${t.skipped || 0} skipped, ${t.removed || 0} removed`);
       loadProjects();
+      setBusy(btn, false);
     } else {
       setBusy(btn, false);
       alert('Sync all failed: ' + (res.error || 'unknown'));
@@ -2234,14 +2584,16 @@ function openIngestDialog(absDir) {
     }
   });
   if (!repoPath) { showToast(zh ? '❌ 找不到所屬 repo' : '❌ Owning repo not found'); return; }
-  ingState = { dir: absDir, repo: repoPath, proj: projName, picked: [], files: [], summary: '', model: '', zh };
+  // Per-file batch state: each picked file carries its own staged path,
+  // status and summary. md filename always equals the source stem.
+  ingState = { dir: absDir, repo: repoPath, proj: projName, picked: [], sel: -1, zh };
   const o = document.createElement('div');
   o.id = 'ing-overlay';
   o.style.cssText = 'position:fixed;inset:0;z-index:1000002;background:rgba(0,0,0,.6);display:flex;align-items:center;justify-content:center;';
   o.innerHTML = `
   <div style="width:90vw;max-width:1700px;height:88vh;overflow:hidden;display:flex;flex-direction:column;background:#0d1117;border:1px solid #30363d;border-radius:12px;padding:16px;color:#e6edf3;">
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px;">
-      <span style="font-weight:600;font-size:19px;">${zh ? '📥 新增文件 — LLM 摘要入庫' : '📥 New document — LLM summary ingest'} <span style="font-size:14px;color:#8b949e;font-weight:400;">v3.9.14</span></span>
+      <span style="font-weight:600;font-size:19px;">${zh ? '📥 新增文件 — LLM 摘要入庫' : '📥 New document — LLM summary ingest'} <span style="font-size:14px;color:#8b949e;font-weight:400;">v3.9.26</span></span>
       <button onclick="closeIngestDialog()" style="background:transparent;border:none;color:#8b949e;cursor:pointer;font-size:16px;">✕</button>
     </div>
     <div style="font-size:15px;color:#8b949e;margin-bottom:10px;word-break:break-all;">${zh ? '目標目錄：' : 'Target: '}${escapeHtml(absDir)}${projName ? ` &nbsp;·&nbsp; ${escapeHtml(projName)}` : ''}</div>
@@ -2253,13 +2605,11 @@ function openIngestDialog(absDir) {
           <input type="file" id="ing-file-input" multiple accept=".pptx,.ppt,.docx,.doc,.pdf,.txt,.md,.markdown,.csv,.html,.htm,.eml,.jpg,.jpeg,.png,.webp,.bmp,.tiff,.tif" style="display:none;" />
         </div>
         <div id="ing-file-list" style="display:flex;flex-direction:column;gap:4px;flex:1;min-height:100px;overflow-y:auto;"></div>
+        <button id="ing-btn-sum" onclick="ingSummarizeAll(this)" style="background:#1f6feb;border:1px solid #388bfd;color:#fff;border-radius:6px;padding:8px 12px;cursor:pointer;font-weight:600;font-size:16px;white-space:nowrap;">${zh ? '✨ 整批生成摘要' : '✨ Summarize all'}</button>
       </div>
       <div style="flex:1;min-width:0;display:flex;flex-direction:column;gap:8px;">
         <div style="font-size:16px;font-weight:600;color:#c9d1d9;">${zh ? '② LLM 摘要預覽' : '② LLM summary preview'}</div>
-        <div style="display:flex;gap:6px;align-items:center;">
-          <input id="ing-name-input" placeholder="${zh ? '摘要檔名（免副檔名）' : 'Summary filename (no ext)'}" style="flex:1;min-width:0;background:#010409;border:1px solid #30363d;border-radius:6px;padding:6px 10px;color:#e6edf3;font-size:16px;" />
-          <button id="ing-btn-sum" onclick="ingSummarize(this)" style="background:transparent;border:1px solid #1f6feb;color:#58a6ff;border-radius:6px;padding:6px 12px;cursor:pointer;white-space:nowrap;font-size:16px;">${zh ? '✨ 生成摘要' : '✨ Summarize'}</button>
-        </div>
+        <div id="ing-sel-name" style="font-size:14px;color:#58a6ff;word-break:break-all;min-height:18px;"></div>
         <div style="display:flex;gap:6px;align-items:center;">
           <button id="ing-tab-prev" onclick="ingShowTab('prev')" style="background:#1f6feb44;border:1px solid #1f6feb;color:#58a6ff;border-radius:6px;padding:4px 12px;cursor:pointer;font-size:16px;">👁 ${zh ? '預覽' : 'Preview'}</button>
           <button id="ing-tab-edit" onclick="ingShowTab('edit')" style="background:transparent;border:1px solid #30363d;color:#c9d1d9;border-radius:6px;padding:4px 12px;cursor:pointer;font-size:16px;">✏️ ${zh ? '編輯' : 'Edit'}</button>
@@ -2306,49 +2656,96 @@ function openIngestDialog(absDir) {
   }
 }
 // Append files to the ingest pick list (shared by picker + drag&drop).
+// Each entry carries its own staged path, status and summary:
+// pending -> staged -> working -> done | error
 function ingAddPicked(files) {
   if (!ingState || !files || !files.length) return;
   const seen = new Set(ingState.picked.map(f => `${f.name}::${f.size}`));
   files.forEach(f => {
     const k = `${f.name}::${f.size}`;
-    if (!seen.has(k)) { seen.add(k); ingState.picked.push(f); }
+    if (!seen.has(k)) {
+      seen.add(k);
+      ingState.picked.push({ file: f, name: f.name, size: f.size,
+        stagedPath: '', status: 'picked', summary: '', model: '', error: '' });
+    }
   });
+  if (ingState.sel < 0 && ingState.picked.length) ingState.sel = 0;
   ingRenderPicked();
+}
+function ingEntryIcon(st) {
+  return st === 'done' ? '✅' : st === 'error' ? '❌' : st === 'working' ? '⏳' : '📎';
 }
 function ingRenderPicked() {
   const box = document.getElementById('ing-file-list');
   if (!box || !ingState) return;
   box.innerHTML = '';
-  // Filename follows the pick immediately (first file stem + 摘要), so the
-  // user never has to type it — manual edits are never clobbered.
-  const ni = document.getElementById('ing-name-input');
   if (!ingState.picked.length) {
-    box.innerHTML = `<div style="font-size:13px;color:#8b949e;">${ingState.zh ? '（尚未選擇檔案）' : '(no files yet)'}</div>`;
-    if (ni && ni.value === (ingState._autoName || '')) { ni.value = ''; ingState._autoName = ''; }
+    box.innerHTML = `<div style="font-size:15px;color:#8b949e;">${ingState.zh ? '（尚未選擇檔案）' : '(no files yet)'}</div>`;
+    ingState.sel = -1;
+    paintIngSelName();
+    paintIngSaveBtn();
     return;
   }
-  // Auto-name from the first picked file (only while the user hasn't typed).
-  const ni2 = document.getElementById('ing-name-input');
-  if (ni2 && !ni2.value) {
-    ni2.value = ingState.picked[0].name.replace(/\.[^.]+$/, '') + '摘要';
-    ingState._autoName = ni2.value;
-  }
-  ingState.picked.forEach((f, idx) => {
+  ingState.picked.forEach((e, idx) => {
     const d = document.createElement('div');
-    d.style.cssText = 'display:flex;gap:6px;align-items:center;font-size:16px;color:#c9d1d9;border:1px solid #21262d;border-radius:6px;padding:4px 8px;';
+    const sel = idx === ingState.sel;
+    d.style.cssText = 'display:flex;gap:6px;align-items:center;font-size:16px;color:#c9d1d9;border:1px solid ' + (sel ? '#1f6feb' : '#21262d') + ';border-radius:6px;padding:4px 8px;' + (e.status === 'done' ? 'cursor:pointer;' : '');
+    if (sel) d.style.background = '#1f6feb22';
+    const ic = document.createElement('span');
+    ic.textContent = ingEntryIcon(e.status);
+    ic.style.cssText = e.status === 'working' ? 'color:#58a6ff;' : '';
+    if (e.status === 'working') ic.className = 'ing-spin';
+    d.appendChild(ic);
     const tx = document.createElement('span');
     tx.style.cssText = 'flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;';
-    tx.textContent = `📎 ${f.name} (${Math.round(f.size / 1024)} KB)`;
-    tx.title = f.name;
+    tx.textContent = `${e.name} (${Math.round(e.size / 1024)} KB)`;
+    tx.title = (e.status === 'error' && e.error) ? e.error : (e.stagedPath || e.name);
     d.appendChild(tx);
     const x = document.createElement('button');
     x.textContent = '✕';
     x.title = ingState.zh ? '移除' : 'Remove';
     x.style.cssText = 'background:transparent;border:none;color:#8b949e;cursor:pointer;font-size:16px;padding:0 2px;';
-    x.onclick = () => { ingState.picked.splice(idx, 1); ingRenderPicked(); };
+    x.onclick = (ev) => {
+      ev.stopPropagation();
+      ingState.picked.splice(idx, 1);
+      if (ingState.sel >= ingState.picked.length) ingState.sel = ingState.picked.length - 1;
+      ingRenderPicked();
+    };
     d.appendChild(x);
+    d.onclick = () => ingSelectFile(idx);
     box.appendChild(d);
   });
+  paintIngSelName();
+  paintIngSaveBtn();
+}
+// Currently selected file name above the preview + Confirm count.
+function paintIngSelName() {
+  const el = document.getElementById('ing-sel-name');
+  if (!el || !ingState) return;
+  const e = ingState.picked[ingState.sel];
+  el.textContent = e ? `▸ ${e.name}` : '';
+}
+function paintIngSaveBtn() {
+  const btn = document.getElementById('ing-btn-save');
+  if (!btn || !ingState) return;
+  const n = ingState.picked.filter(e => e.status === 'done').length;
+  btn.textContent = n
+    ? (ingState.zh ? `✅ 確認產出 ${n} 個 md 並入庫` : `✅ Confirm: write ${n} md & index`)
+    : (ingState.zh ? '✅ 確認產出 md 並入庫' : '✅ Confirm: write md & index');
+}
+// Click a row: stash current editor draft, show that file's summary.
+function ingSelectFile(idx) {
+  const st = ingState;
+  if (!st || !st.picked[idx]) return;
+  const ed = document.getElementById('ing-edit');
+  if (ed && st.picked[st.sel] && st.picked[st.sel].status === 'done') {
+    st.picked[st.sel].summary = ed.value;  // keep human edits per file
+  }
+  st.sel = idx;
+  const e = st.picked[idx];
+  if (ed) ed.value = e.summary || '';
+  ingShowTab('prev');
+  ingRenderPicked();
 }
 // Animated busy line for long ingest ops: spinning ◌ + elapsed seconds +
 // dialog-wide button lock (no double-submit). Returns stop(); idempotent.
@@ -2380,58 +2777,46 @@ function ingProgress(label) {
     if (st && st._stop) st._stop = null;
   };
 }
-function ingUpload(btn, done) {
+// Stage picked files (only ones not staged yet), then continue.
+function ingStageAll(done) {
   const st = ingState;
   if (!st) return;
   const zh = st.zh;
-  if (!st.picked.length) { ingMsg(zh ? '請先選擇檔案' : 'Pick files first', true); return; }
-  setBusy(btn, true, '⏳…');
+  const fresh = st.picked.filter(e => !e.stagedPath);
+  if (!fresh.length) { if (typeof done === 'function') done(); return; }
   if (st._stop) st._stop();
   st._stop = ingProgress(zh ? '上傳暫存中' : 'Staging upload');
   const fd = new FormData();
   fd.append('target_dir', st.dir);
   fd.append('stage', '1');  // files wait in staging; Confirm moves them in
-  st.picked.forEach(f => fd.append('files', f, f.name));
+  fresh.forEach(e => fd.append('files', e.file, e.name));
   fetch('/api/ingest/upload', { method: 'POST', body: fd })
   .then(r => r.json().then(d => ({ status: r.status, body: d })))
   .then(({ status, body }) => {
     if (st._stop) st._stop();
-    setBusy(btn, false);
     if (status === 200 && body.success) {
-      st.files = body.files || [];
-      // File set changed after a previous summary? Old preview is stale — reset it.
-      const newKey = st.files.map(f => f.path).join('\n');
-      if (st.sumPaths && st.sumPaths !== newKey) {
-        st.summary = ''; st.model = ''; st.sumPaths = '';
-        const edR = document.getElementById('ing-edit');
-        if (edR) edR.value = '';
-        ingShowTab('prev');
-      }
-      const box = document.getElementById('ing-file-list');
-      box.innerHTML = '';
-      st.files.forEach(f => {
-        const d = document.createElement('div');
-        d.style.cssText = 'font-size:16px;color:#3fb950;border:1px solid #21262d;border-radius:6px;padding:4px 8px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;';
-        d.textContent = `✅ ${f.name}`;
-        d.title = f.path || f.name;
-        box.appendChild(d);
+      const byKey = {};
+      (body.files || []).forEach(f => { byKey[`${f.name}::${f.size}`] = f.path; });
+      fresh.forEach(e => {
+        const p = byKey[`${e.name}::${e.file.size}`];
+        if (p) { e.stagedPath = p; if (e.status === 'picked') e.status = 'staged'; }
       });
-      const nameInput = document.getElementById('ing-name-input');
-      if (nameInput && !nameInput.value && st.files.length) {
-        const stem = st.files[0].name.replace(/\.[^.]+$/, '');
-        nameInput.value = stem + '摘要';
-      }
-      ingMsg(zh ? `已暫存 ${st.files.length} 個檔案（確認後與 md 一起寫入目標目錄）` : `Staged ${st.files.length} file(s) — written on confirm`);
-      if (typeof done === 'function') { const cb = done; done = null; cb(); }
+      ingRenderPicked();
+      ingMsg(zh ? `已暫存 ${st.picked.filter(e => e.stagedPath).length} 個檔案（確認後與 md 一起寫入目標目錄）` : `Staged — written on confirm`);
+      if (typeof done === 'function') done();
     } else {
       if (st._stop) st._stop();
       ingMsg('❌ ' + ((body && body.error) || status), true);
     }
   })
-  .catch(err => { if (st._stop) st._stop(); setBusy(btn, false); ingMsg('❌ ' + err, true); });
+  .catch(err => { if (st._stop) st._stop(); ingMsg('❌ ' + err, true); });
 }
-// Summary Preview / Edit tabs. Single source of truth ping-pongs between
-// st.summary and the editor; save() always reads the editor.
+// Summary Preview / Edit tabs. Truth lives per picked entry;
+// ingSelectFile stashes the editor into the entry before switching.
+function ingCurEntry() {
+  const st = ingState;
+  return (st && st.picked[st.sel]) || null;
+}
 function ingShowTab(which) {
   const st = ingState;
   if (!st) return;
@@ -2440,22 +2825,23 @@ function ingShowTab(which) {
   const tp = document.getElementById('ing-tab-prev');
   const te = document.getElementById('ing-tab-edit');
   if (!pv || !ed || !tp || !te) return;
+  const cur = ingCurEntry();
   const on = 'background:#1f6feb44;border:1px solid #1f6feb;color:#58a6ff;border-radius:6px;padding:4px 12px;cursor:pointer;font-size:16px;';
   const off = 'background:transparent;border:1px solid #30363d;color:#c9d1d9;border-radius:6px;padding:4px 12px;cursor:pointer;font-size:16px;';
   if (which === 'edit') {
-    if (!ed.value) ed.value = st.summary || '';
+    if (cur && !ed.value) ed.value = cur.summary || '';
     pv.style.display = 'none';
     ed.style.display = 'block';
     tp.style.cssText = off;
     te.style.cssText = on;
     ed.focus();
   } else {
-    if (ed.style.display === 'block') st.summary = ed.value;  // keep human edits
+    if (cur && ed.style.display === 'block') cur.summary = ed.value;  // keep human edits
     ed.style.display = 'none';
     pv.style.display = 'block';
     tp.style.cssText = on;
     te.style.cssText = off;
-    const txt = (st.summary || '').trim();
+    const txt = ((cur && cur.summary) || '').trim();
     if (!txt) {
       pv.textContent = st.zh ? '（摘要會顯示在這裡）' : '(summary appears here)';
       return;
@@ -2467,84 +2853,136 @@ function ingShowTab(which) {
     } catch (e) { pv.textContent = txt; }
   }
 }
-function ingSummarize(btn) {
+// Batch: stage everything, then summarize file-by-file. Each completion
+// checkmarks its row and takes over the right preview immediately.
+function ingSummarizeAll(btn) {
   const st = ingState;
   if (!st) return;
   const zh = st.zh;
-  // One-click flow: picked but not uploaded yet -> upload first, then summarize.
-  if (!st.files.length) {
-    if (!st.picked.length) { ingMsg(zh ? '請先選擇檔案' : 'Pick files first', true); return; }
-    ingUpload(null, () => ingSummarize(document.getElementById('ing-btn-sum')));
-    return;
-  }
+  if (!st.picked.length) { ingMsg(zh ? '請先選擇檔案' : 'Pick files first', true); return; }
   setBusy(btn, true, '⏳…');
-  if (st._stop) st._stop();
-  st._stop = ingProgress(zh ? `摘要生成中（${st.files.length} 個檔案，大檔請耐心等候）` : `Summarizing ${st.files.length} file(s)`);
-  const pv0 = document.getElementById('ing-preview');
-  if (pv0) pv0.innerHTML = `<span class="ing-spin">◌</span> ${zh ? 'LLM 生成中…' : 'Generating…'}`;
-  fetch('/api/ingest/summarize', {
-    method: 'POST', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ paths: st.files.map(f => f.path) })
-  })
-  .then(r => r.json().then(d => ({ status: r.status, body: d })))
-  .then(({ status, body }) => {
-    if (st._stop) st._stop();
-    setBusy(btn, false);
-    if (status === 200 && body.success) {
-      st.summary = body.summary || '';
-      st.model = body.model || '';
-      st.sumPaths = st.files.map(f => f.path).join('\n');
-      const ed0 = document.getElementById('ing-edit');
-      if (ed0) ed0.value = st.summary;
-      ingShowTab('prev');  // rendered markdown preview; switch to Edit to revise
-      const notes = (body.notes || []).join('；');
-      ingMsg((zh ? `✅ 摘要完成（${st.model}）` : `✅ Done (${st.model})`) + (notes ? ` — ${notes}` : ''));
-    } else {
-      if (st._stop) st._stop();
-      // Don't leave a stale "Generating…" in the preview on failure.
-      if (pv0) pv0.textContent = zh ? '（摘要會顯示在這裡）' : '(summary appears here)';
-      ingMsg('❌ ' + ((body && body.error) || status), true);
+  ingStageAll(() => {
+    const queue = st.picked.filter(e => e.stagedPath && e.status !== 'done');
+    if (!queue.length) {
+      setBusy(btn, false);
+      ingMsg(zh ? '全部已完成（如需重跑請移除重加）' : 'All done already', true);
+      return;
     }
-  })
-  .catch(err => { if (st._stop) st._stop(); setBusy(btn, false); ingMsg('❌ ' + err, true); });
+    if (st._stop) st._stop();
+    let i = 0;
+    const pv0 = document.getElementById('ing-preview');
+    const step = () => {
+      if (i >= queue.length) {
+        if (st._stop) st._stop();
+        setBusy(btn, false);
+        const nd = st.picked.filter(e => e.status === 'done').length;
+        const ne = st.picked.filter(e => e.status === 'error').length;
+        ingMsg((zh ? `✅ 整批完成：${nd} 成功` : `✅ Batch done: ${nd} ok`) + (ne ? (zh ? `，${ne} 失敗` : `, ${ne} failed`) : ''));
+        return;
+      }
+      const e = queue[i];
+      if (st._stop) st._stop();  // kill the previous file's timer, or they pile up forever
+      st._stop = ingProgress(zh ? `摘要生成中 ${i + 1}/${queue.length}：${e.name}` : `Summarizing ${i + 1}/${queue.length}: ${e.name}`);
+      e.status = 'working'; e.error = '';
+      ingRenderPicked();
+      if (pv0) pv0.innerHTML = `<span class="ing-spin">◌</span> ${zh ? 'LLM 生成中…' : 'Generating…'}`;
+      fetch('/api/ingest/summarize', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ paths: [e.stagedPath] })
+      })
+      .then(r => r.json().then(d => ({ status: r.status, body: d })))
+      .then(({ status, body }) => {
+        if (status === 200 && body.success) {
+          e.status = 'done'; e.summary = body.summary || ''; e.model = body.model || '';
+          const notes = (body.notes || []).join('；');
+          // Latest completion takes over the preview immediately.
+          const k = st.picked.indexOf(e);
+          if (k >= 0) { st.sel = k; }
+          const ed0 = document.getElementById('ing-edit');
+          if (ed0) ed0.value = e.summary;
+          ingShowTab('prev');
+          ingRenderPicked();
+          ingMsg((zh ? `✅ ${e.name}（${body.model || ''}）` : `✅ ${e.name} (${body.model || ''})`) + (notes ? ` — ${notes}` : ''));
+        } else {
+          e.status = 'error'; e.error = (body && body.error) || String(status);
+          ingRenderPicked();
+          if (pv0) pv0.textContent = zh ? '（摘要會顯示在這裡）' : '(summary appears here)';
+          ingMsg(`❌ ${e.name}：` + e.error, true);
+        }
+        i++;
+        step();
+      })
+      .catch(err => {
+        e.status = 'error'; e.error = String(err);
+        ingRenderPicked();
+        ingMsg(`❌ ${e.name}：` + err, true);
+        i++;
+        step();
+      });
+    };
+    step();
+  });
 }
+// Confirm: one md per done file, filename always equals the source stem.
 function ingSave(btn) {
   const st = ingState;
   if (!st) return;
   const zh = st.zh;
-  const nameInput = document.getElementById('ing-name-input');
-  const filename = (nameInput && nameInput.value.trim()) || '';
-  // The human-reviewed text lives in the editor — that is what gets saved.
-  const edEl = document.getElementById('ing-edit');
-  const finalSummary = ((edEl && edEl.value) || st.summary || '').trim();
-  if (!finalSummary) { ingMsg(zh ? '請先生成摘要' : 'Generate the summary first', true); return; }
-  if (!filename) { ingMsg(zh ? '請填摘要檔名' : 'Enter a filename', true); return; }
-  st.summary = finalSummary;
+  // Stash the visible draft into its entry first.
+  const ed0 = document.getElementById('ing-edit');
+  const cur = ingCurEntry();
+  if (ed0 && cur && cur.status === 'done') cur.summary = ed0.value;
+  const done = st.picked.filter(e => e.status === 'done' && (e.summary || '').trim());
+  if (!done.length) { ingMsg(zh ? '還沒有完成的摘要（先按整批生成摘要）' : 'No finished summaries yet', true); return; }
   setBusy(btn, true, '⏳…');
   if (st._stop) st._stop();
-  st._stop = ingProgress(zh ? '寫檔＋增量索引中' : 'Writing + indexing');
-  fetch('/api/ingest/save', {
-    method: 'POST', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ target_dir: st.dir, filename, summary_md: finalSummary,
-                           source_paths: st.files.map(f => f.path), model: st.model })
-  })
-  .then(r => r.json().then(d => ({ status: r.status, body: d })))
-  .then(({ status, body }) => {
-    if (st._stop) st._stop();
-    setBusy(btn, false);
-    if (status === 200 && body.success) {
-      const rels = (body.source_rels || []).join('、');
-      showToast(zh ? `✅ 已產出：${body.md_path}` : `✅ Written: ${body.md_path}`);
-      ingMsg((zh ? `✅ md 與來源同目錄，內文已記錄相對路徑：${rels}` : `✅ md saved next to sources; rel paths recorded: ${rels}`));
-      loadProjects();
-      setTimeout(closeIngestDialog, 1200);
-    } else {
+  let i = 0, okCount = 0;
+  const outs = [];
+  st._stop = ingProgress(zh ? `寫檔＋增量索引中 0/${done.length}` : `Writing + indexing 0/${done.length}`);
+  const step = () => {
+    if (i >= done.length) {
       if (st._stop) st._stop();
-      ingMsg('❌ ' + ((body && body.error) || status), true);
+      setBusy(btn, false);
+      showToast(zh ? `✅ 已產出 ${okCount}/${done.length} 個 md` : `✅ Wrote ${okCount}/${done.length} md`);
+      ingMsg((zh ? `✅ 完成 ${okCount}/${done.length}：` : `✅ Done ${okCount}/${done.length}: `) + outs.join('、'));
+      loadProjects();
+      if (okCount === done.length) setTimeout(closeIngestDialog, 1200);
+      return;
     }
-  })
-  .catch(err => { if (st._stop) st._stop(); setBusy(btn, false); ingMsg('❌ ' + err, true); });
+    const e = done[i];
+    if (st._stop) st._stop();  // same leak guard as summarize loop
+    st._stop = ingProgress(zh ? `寫檔＋增量索引中 ${i + 1}/${done.length}：${e.name}` : `Writing + indexing ${i + 1}/${done.length}: ${e.name}`);
+    const filename = e.name.replace(/\.[^.]+$/, '');  // md name == source stem, no editing
+    fetch('/api/ingest/save', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ target_dir: st.dir, filename, summary_md: e.summary.trim(),
+                             source_paths: [e.stagedPath], model: e.model })
+    })
+    .then(r => r.json().then(d => ({ status: r.status, body: d })))
+    .then(({ status, body }) => {
+      if (status === 200 && body.success) {
+        okCount++;
+        outs.push(e.name);
+      } else {
+        e.status = 'error'; e.error = (body && body.error) || String(status);
+        ingRenderPicked();
+        ingMsg(`❌ ${e.name}：` + e.error, true);
+      }
+      i++;
+      step();
+    })
+    .catch(err => {
+      e.status = 'error'; e.error = String(err);
+      ingRenderPicked();
+      ingMsg(`❌ ${e.name}：` + err, true);
+      i++;
+      step();
+    });
+  };
+  step();
 }
+// ingUpload/summarize single-file legacy removed: staging + per-file
+// summarize are inlined in ingStageAll / ingSummarizeAll above.
 
 function excludeRepo(path) {
   fetch('/api/paths/exclude', {
@@ -2654,7 +3092,8 @@ function openTreeCtxMenu(e) {
   const el = e.target && e.target.closest ? e.target.closest('#tree-container .tree-node') : null;
   if (!el) return;
   e.preventDefault();
-  const zh = currentLanguage === 'zh';
+  const zh = (typeof currentLanguage !== 'undefined' && currentLanguage === 'zh');
+  const ja = (typeof currentLanguage !== 'undefined' && currentLanguage === 'ja');
   let kind = null, proj = null, treePath = '', nodeId = null, headName = '';
   if (el.hasAttribute('data-tree-src')) {
     kind = 'source';
@@ -2719,15 +3158,17 @@ function openTreeCtxMenu(e) {
     items.push({ label: zh ? '📁 新增資料夾…' : '📁 New folder…', fn: () => treeNewFolder(absPath) });
     addCopyAbs(zh ? '📋 複製絕對路徑' : '📋 Copy absolute path');
   } else if (kind === 'dir') {
-    items.push({ label: zh ? '＋ 新增文件…' : '＋ New document…', fn: () => {
+    items.push({ label: zh ? '＋ 新增文件…' : (ja ? '＋ 新規ドキュメント…' : '＋ New document…'), fn: () => {
       if (typeof openIngestDialog === 'function') openIngestDialog(absPath);
-      else showToast(zh ? '⏳ 文件匯入即將推出' : '⏳ Document ingest coming soon');
+      else showToast(zh ? '⏳ 文件匯入即將推出' : (ja ? '⏳ ドキュメント取り込みは準備中' : '⏳ Document ingest coming soon'));
     }});
-    items.push({ label: zh ? '📁 新增資料夾…' : '📁 New folder…', fn: () => treeNewFolder(absPath) });
-    addCopyAbs(zh ? '📋 複製絕對路徑' : '📋 Copy absolute path');
+    items.push({ label: zh ? '📁 新增資料夾…' : (ja ? '📁 新規フォルダ…' : '📁 New folder…'), fn: () => treeNewFolder(absPath) });
+    items.push({ label: zh ? '🗑️ 刪除此資料夾…' : (ja ? '🗑️ このフォルダを削除…' : '🗑️ Delete folder…'), fn: () => treeDeleteDir(absPath, treePath.split('/').pop() || treePath) });
+    addCopyAbs(zh ? '📋 複製絕對路徑' : (ja ? '📋 絶対パスをコピー' : '📋 Copy absolute path'));
   } else if (kind === 'file') {
-    items.push({ label: zh ? '🎯 在圖上定位' : '🎯 Locate in graph', fn: () => focusGraphNodeById(nodeId) });
-    addCopyAbs(zh ? '📋 複製絕對路徑' : '📋 Copy absolute path');
+    items.push({ label: zh ? '🎯 在圖上定位' : (ja ? '🎯 グラフで位置を特定' : '🎯 Locate in graph'), fn: () => focusGraphNodeById(nodeId) });
+    items.push({ label: zh ? '🗑️ 刪除此文件…' : (ja ? '🗑️ このドキュメントを削除…' : '🗑️ Delete document…'), fn: () => treeDeleteFile(absPath, treePath.split('/').pop() || treePath) });
+    addCopyAbs(zh ? '📋 複製絕對路徑' : (ja ? '📋 絶対パスをコピー' : '📋 Copy absolute path'));
   } else if (kind === 'source') {
     // Source child row under its md (never indexed): open + copy only.
     const srcUrl = (projEntry && projEntry.path)
@@ -2793,6 +3234,40 @@ function updateHealthIndicator() {
 
 // Explorer / repo-manager i18n (called on every language switch)
 function updateExplorerI18n() {
+  const lang = currentLanguage;
+  const zh = lang === 'zh';
+  const ja = lang === 'ja';
+  const set = (id, txt) => { const el = document.getElementById(id); if (el) el.textContent = txt; };
+  const setAttr = (id, attr, txt) => { const el = document.getElementById(id); if (el) el.setAttribute(attr, txt); };
+
+  set('btn-repo-mgr', zh ? '⚙ 倉庫' : (ja ? '⚙ リポジトリ' : '⚙ Repos'));
+  set('btn-sel-all', zh ? '全選' : (ja ? 'すべて選択' : 'Select All'));
+  set('btn-sel-none', zh ? '取消選取' : (ja ? '選択解除' : 'Deselect'));
+  set('btn-clear-filter', '✕');
+  setAttr('btn-clear-filter', 'title', zh ? '清除篩選' : (ja ? 'フィルター解除' : 'Clear filter'));
+
+  const treeSearch = document.getElementById('tree-search');
+  if (treeSearch) treeSearch.placeholder = zh ? '篩選文件樹…' : (ja ? 'ドキュメントツリーを検索…' : 'Filter documentation tree...');
+
+  const summary = document.getElementById('lbl-proj-summary');
+  if (summary) summary.innerText = `${selectedProjects.size} ${zh ? '個啟用' : (ja ? '個のアクティブ' : 'Active')}`;
+
+  set('th-proj', zh ? '專案' : (ja ? 'プロジェクト' : 'Project'));
+  set('th-path', zh ? '目錄路徑' : (ja ? 'パス' : 'Directory Path'));
+  set('th-metrics', zh ? '指標' : (ja ? 'メトリクス' : 'Metrics'));
+  set('th-status', zh ? '狀態' : (ja ? 'ステータス' : 'Status'));
+  set('th-actions', zh ? '操作' : (ja ? '操作' : 'Actions'));
+
+  set('lbl-modal-title', zh ? '倉庫管理' : (ja ? 'リポジトリ管理' : 'Repository Management'));
+  set('lbl-add-dir', zh ? '掃描專案目錄：' : (ja ? 'プロジェクトをスキャン：' : 'Scan Project Directory:'));
+  set('lbl-repo-list', zh ? '已發現的倉庫：' : (ja ? '検出されたリポジトリ：' : 'Discovered Repositories:'));
+  set('btn-sync-all', zh ? '⚡ 全部同步' : (ja ? '⚡ すべて同期' : '⚡ Sync all'));
+  set('btn-sync-all-tree', zh ? '⚡ 全部同步' : (ja ? '⚡ すべて同期' : '⚡ Sync all'));
+  paintShowSourceBtn();
+  renderRepoTable(allProjectsList);
+  return;
+}
+function _unused_updateExplorerI18n() {
   const zh = currentLanguage === 'zh';
   const set = (id, txt) => { const el = document.getElementById(id); if (el) el.textContent = txt; };
   const setAttr = (id, attr, txt) => { const el = document.getElementById(id); if (el) el.setAttribute(attr, txt); };
@@ -2825,21 +3300,20 @@ function updateExplorerI18n() {
   renderRepoTable(allProjectsList);
 }
 
-function toggleLanguage() {
-  currentLanguage = currentLanguage === 'en' ? 'zh' : 'en';
-  const b = document.getElementById('btn-lang');
-  if (b) b.textContent = `Language: ${currentLanguage.toUpperCase()}`;
-  updateSwapButtonI18n();
-  updateControlsHelpI18n();
-  updateExplorerI18n();
-  // Re-render the LLM settings dialog labels if it is open
-  const dlg = document.getElementById('prov-dialog');
-  if (dlg && dlg.style.display !== 'none') renderProvDialogLabels();
-  showToast(currentLanguage === 'zh' ? '語系切換：繁體中文' : 'Language switched to English');
-}
+// (Old toggleLanguage superseded by tri-state applyAppLanguage below)
 
 function escapeHtml(str) {
   return (str || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+function getCategoryDisplayName(cat) {
+  const isUncat = !cat || cat === '未分類' || cat === 'Uncategorized';
+  if (!isUncat) return cat;
+  if (typeof currentLanguage !== 'undefined') {
+    if (currentLanguage === 'zh') return '未分類';
+    if (currentLanguage === 'ja') return '未分類';
+  }
+  return 'Uncategorized';
 }
 
 
@@ -2866,6 +3340,7 @@ function toggleControlsHelp(forceState) {
   if (isControlsHelpOpen) {
     modal.classList.remove('hidden');
     updateControlsHelpI18n();
+  updateActivityBarI18n();
   } else {
     modal.classList.add('hidden');
   }
@@ -2900,8 +3375,20 @@ function init3DNavControls() {
       }
     }
 
-    // View control hotkeys
-    if (code === 'KeyC') {
+    // Copy hotkey handling (Ctrl+C / Cmd+C)
+    if ((e.ctrlKey || e.metaKey) && code === 'KeyC') {
+      const sel = (window.getSelection ? window.getSelection().toString() : '').trim();
+      if (sel) {
+        // Active text selection: copy selected text and show confirmation toast
+        const zh = (typeof currentLanguage !== 'undefined' && currentLanguage === 'zh');
+        copyTextToClipboard(sel, zh ? '📋 已複製選取文字' : '📋 Selection copied');
+        return; // Handled cleanly!
+      }
+      return; // No text selected, let native browser copy proceed
+    }
+
+    // View control hotkeys (Standalone keys only — NEVER hijack Ctrl/Cmd combos!)
+    if (code === 'KeyC' && !e.ctrlKey && !e.metaKey && !e.altKey) {
       e.preventDefault();
       if (activeNode) {
         focusOnNode(activeNode);
@@ -3139,30 +3626,25 @@ let provCurrentType = 'llamacpp';
 let provFetchedModels = [];
 
 function provT(key) {
-  const zh = currentLanguage === 'zh';
+  const lang = currentLanguage;
   const dic = {
-    prov_title: zh ? 'LLM 模型供應商' : 'LLM Providers',
-    prov_note: zh ? '此供應商為整支 APP 共用（ingest 摘要、對話與所有 LLM 功能）。'
-                  : 'This provider is used by the whole app (ingest, chat, and all LLM features).',
-    prov_cur: zh ? '啟用模型' : 'Active model',
-    prov_add: zh ? '新增供應商' : 'Add provider',
-    prov_f_label: zh ? '名稱' : 'Label',
-    prov_f_base: zh ? 'Base URL' : 'Base URL',
-    prov_f_key: zh ? 'API 金鑰' : 'API key',
-    prov_f_models: zh ? '模型' : 'Models',
-    prov_fetch: zh ? '自動抓取' : 'Auto-fill',
-    prov_cancel: zh ? '取消' : 'Cancel',
-    prov_save: zh ? '儲存' : 'Save',
-    prov_test: zh ? '測試' : 'Test',
-    prov_models_empty: zh ? '尚無模型，請按自動抓取' : 'No models yet — hit Auto-fill',
-    prov_model_loading: zh ? '載入模型清單…' : 'Loading models…',
-    prov_model_unset: zh ? '（未指定）' : '(none)',
-    prov_ok_models: zh ? ((n, k) => `${n} 個模型（${k}）`) : ((n, k) => `${n} models (${k})`),
-    prov_fail: zh ? '連線失敗' : 'Connection failed',
+    prov_title: lang === 'zh' ? 'LLM 模型供應商' : (lang === 'ja' ? 'LLM プロバイダー' : 'LLM Providers'),
+    prov_note: lang === 'zh' ? '此供應商為整支 APP 共用（ingest 摘要、對話與所有 LLM 功能）。'
+              : (lang === 'ja' ? 'このプロバイダーはアプリ全体（Ingest要約、チャット、全LLM機能）で共有されます。'
+              : 'This provider is used by the whole app (ingest, chat, and all LLM features).'),
+    prov_cur: lang === 'zh' ? '啟用模型' : (lang === 'ja' ? 'アクティブモデル' : 'Active model'),
+    prov_add: lang === 'zh' ? '設定供應商與金鑰' : (lang === 'ja' ? 'プロバイダーとキーの設定' : 'Configure Provider & Key'),
+    prov_f_label: lang === 'zh' ? '供應商名稱' : (lang === 'ja' ? 'プロバイダー名' : 'Provider Name'),
+    prov_f_base: 'Base URL',
+    prov_f_key: lang === 'zh' ? 'API 金鑰 (API Token / Key)' : (lang === 'ja' ? 'APIキー (API Token / Key)' : 'API Key / Token'),
+    prov_f_models: lang === 'zh' ? '可選模型' : (lang === 'ja' ? '利用可能モデル' : 'Available Models'),
+    prov_fetch: lang === 'zh' ? '⇩ 自動偵測模型 (Auto-fill)' : (lang === 'ja' ? '⇩ モデル自動取得 (Auto-fill)' : '⇩ Auto-fill Models'),
+    prov_cancel: lang === 'zh' ? '取消' : (lang === 'ja' ? 'キャンセル' : 'Cancel'),
+    prov_save: lang === 'zh' ? '儲存並啟用' : (lang === 'ja' ? '保存して適用' : 'Save & Activate'),
+    prov_models_empty: lang === 'zh' ? '請先填入 API Key 並點擊自動偵測' : 'Please enter API Key and click Auto-fill',
+    prov_ok_models: (n, k) => (lang === 'zh' ? `已成功獲取 ${n} 個可用模型（${k}）` : (lang === 'ja' ? `${n} 個のモデルを取得しました（${k}）` : `Found ${n} models (${k})`))
   };
-  const v = dic[key];
-  if (typeof v === 'function') return v;
-  return v !== undefined ? v : key;
+  return dic[key] || key;
 }
 
 function toggleProviderDialog(force) {
@@ -3184,49 +3666,150 @@ function renderProvDialogLabels() {
   set('lbl-prov-note', provT('prov_note'));
   set('lbl-prov-cur', provT('prov_cur'));
   set('lbl-prov-add', provT('prov_add'));
-  set('lbl-prov-f-label', provT('prov_f_label'));
+  set('lbl-prov-f-label', currentLanguage === 'zh' ? '選擇服務商 (Provider Name)' : (currentLanguage === 'ja' ? 'プロバイダーの選択 (Provider Name)' : 'Provider Name'));
   set('lbl-prov-f-base', provT('prov_f_base'));
   set('lbl-prov-f-key', provT('prov_f_key'));
   set('lbl-prov-f-models', provT('prov_f_models'));
   set('lbl-prov-fetch', provT('prov_fetch'));
   set('lbl-prov-cancel', provT('prov_cancel'));
   set('lbl-prov-save', provT('prov_save'));
+  set('lbl-prov-configured-title', currentLanguage === 'zh' ? '已儲存的自訂供應商 (Configured Providers)' : (currentLanguage === 'ja' ? '保存済みのプロバイダー (Configured Providers)' : 'Configured Providers'));
+
+  const filterInput = document.getElementById('prov-model-filter');
+  if (filterInput) {
+    filterInput.placeholder = currentLanguage === 'zh' ? '🔎 篩選模型清單…' : (currentLanguage === 'ja' ? '🔎 モデルを絞り込み…' : '🔎 Filter models…');
+  }
 }
 
 function provTypes() {
-  // suggest must stay EMPTY: hardcoded model names shown as radio options
-  // before Auto-fill are stale fake data (a bad habit ported from galaxy).
-  // Real models only ever come from fetchProvModels() after Auto-fill.
   return [
-    { id: 'llamacpp', label: 'llama.cpp / vLLM', base: 'http://172.22.20.125:8080/v1', key: 'EMPTY', urlMode: 'edit', keyMode: 'hide', suggest: [] },
-    { id: 'openai', label: 'OpenAI', base: 'https://api.openai.com/v1', key: '', urlMode: 'fixed', keyMode: 'require', suggest: [] },
-    { id: 'deepseek', label: 'DeepSeek', base: 'https://api.deepseek.com/v1', key: '', urlMode: 'fixed', keyMode: 'require', suggest: [] },
-    { id: 'gemini', label: 'Google Gemini', base: 'https://generativelanguage.googleapis.com/v1beta/openai/', key: '', urlMode: 'fixed', keyMode: 'require', suggest: [] },
-    { id: 'groq', label: 'Groq (Llama)', base: 'https://api.groq.com/openai/v1', key: '', urlMode: 'fixed', keyMode: 'require', suggest: [] },
-    { id: 'grok', label: 'xAI Grok', base: 'https://api.x.ai/v1', key: '', urlMode: 'fixed', keyMode: 'require', suggest: [] },
-    { id: 'custom', label: 'Custom URL', base: '', urlMode: 'edit', keyMode: 'optional', suggest: [] },
+    // --- 知名雲端大廠 (Official Cloud Providers) ---
+    { id: 'openai', label: 'OpenAI', category: 'Cloud', base: 'https://api.openai.com/v1', key: '', urlMode: 'fixed', keyMode: 'require' },
+    { id: 'anthropic', label: 'Anthropic Claude', category: 'Cloud', base: 'https://api.anthropic.com/v1', key: '', urlMode: 'fixed', keyMode: 'require' },
+    { id: 'deepseek', label: 'DeepSeek', category: 'Cloud', base: 'https://api.deepseek.com/v1', key: '', urlMode: 'fixed', keyMode: 'require' },
+    { id: 'gemini', label: 'Google Gemini', category: 'Cloud', base: 'https://generativelanguage.googleapis.com/v1beta/openai/', key: '', urlMode: 'fixed', keyMode: 'require' },
+    { id: 'groq', label: 'Groq (Ultra-Fast Llama)', category: 'Cloud', base: 'https://api.groq.com/openai/v1', key: '', urlMode: 'fixed', keyMode: 'require' },
+    { id: 'grok', label: 'xAI Grok', category: 'Cloud', base: 'https://api.x.ai/v1', key: '', urlMode: 'fixed', keyMode: 'require' },
+    { id: 'mistral', label: 'Mistral AI', category: 'Cloud', base: 'https://api.mistral.ai/v1', key: '', urlMode: 'fixed', keyMode: 'require' },
+    { id: 'perplexity', label: 'Perplexity AI', category: 'Cloud', base: 'https://api.perplexity.ai', key: '', urlMode: 'fixed', keyMode: 'require' },
+    { id: 'cohere', label: 'Cohere', category: 'Cloud', base: 'https://api.cohere.ai/v1', key: '', urlMode: 'fixed', keyMode: 'require' },
+    { id: 'together', label: 'Together AI', category: 'Cloud', base: 'https://api.together.xyz/v1', key: '', urlMode: 'fixed', keyMode: 'require' },
+    { id: 'fireworks', label: 'Fireworks AI', category: 'Cloud', base: 'https://api.fireworks.ai/inference/v1', key: '', urlMode: 'fixed', keyMode: 'require' },
+    { id: 'openrouter', label: 'OpenRouter (All-in-One Aggregator)', category: 'Cloud', base: 'https://openrouter.ai/api/v1', key: '', urlMode: 'fixed', keyMode: 'require' },
+
+    // --- 本機與自建服務 (Local & Self-Hosted /v1) ---
+    { id: 'local_openai', label: 'Local / vLLM / llama.cpp / LM Studio (/v1)', category: 'Local', base: 'http://172.22.20.125:8080/v1', key: 'EMPTY', urlMode: 'edit', keyMode: 'optional' },
+    { id: 'local_ollama', label: 'Local Ollama (/v1)', category: 'Local', base: 'http://127.0.0.1:11434/v1', key: '', urlMode: 'edit', keyMode: 'optional' },
+    { id: 'local_anthropic', label: 'Local Anthropic Proxy (/v1)', category: 'Local', base: 'http://127.0.0.1:8000/v1', key: '', urlMode: 'edit', keyMode: 'optional' },
+    { id: 'custom', label: 'Custom OpenAI-Compatible API (/v1)', category: 'Custom', base: '', key: '', urlMode: 'edit', keyMode: 'optional' },
   ];
 }
 
 function renderProvPresets() {
-  const box = document.getElementById('prov-types');
-  if (!box) return;
-  box.innerHTML = '';
+  // Fetch opencode presets in background if not loaded
+  fetch('/api/llm/opencode-presets')
+    .then(r => r.json())
+    .then(list => {
+      if (Array.isArray(list) && list.length) {
+        cachedOpencodePresets = list;
+        rebuildProviderNameDropdown();
+      }
+    }).catch(() => {});
+
+  rebuildProviderNameDropdown();
+}
+
+function rebuildProviderNameDropdown() {
+  const sel = document.getElementById('chat-prov-label') || document.getElementById('prov-type-select');
+  if (!sel) return;
+  sel.innerHTML = '';
+
+  const zh = currentLanguage === 'zh';
+  const ja = currentLanguage === 'ja';
+
+  const categories = {
+    'Cloud': zh ? '🌐 常見雲端服務商 (僅需 API Key)' : (ja ? '🌐 クラウドプロバイダー (APIキーのみ)' : '🌐 Cloud Providers (API Key Only)'),
+    'Local': zh ? '🖥️ 本地 Opencode 與自建推論 (需指定 Base URL)' : (ja ? '🖥️ ローカル推論 & Opencode (Base URL必須)' : '🖥️ Local & Self-Hosted (Requires Base URL)')
+  };
+
+  const grpCloud = document.createElement('optgroup');
+  grpCloud.label = categories['Cloud'];
+  const grpLocal = document.createElement('optgroup');
+  grpLocal.label = categories['Local'];
+
+  sel.appendChild(grpCloud);
+  sel.appendChild(grpLocal);
+
   for (const p of provTypes()) {
-    const b = document.createElement('button');
-    b.textContent = p.label;
-    b.dataset.typeId = p.id;
-    b.style.cssText = 'border:1px solid #30363d; background:#161b22; color:#c9d1d9; border-radius:999px; padding:4px 12px; font-size:15px; cursor:pointer;';
-    b.onclick = () => selectProvType(p.id);
-    box.appendChild(b);
+    const opt = document.createElement('option');
+    opt.value = p.id;
+    opt.textContent = p.label;
+    if (p.category === 'Cloud') {
+      grpCloud.appendChild(opt);
+    } else {
+      grpLocal.appendChild(opt);
+    }
   }
-  selectProvType(provCurrentType);
+
+  sel.value = provCurrentType || 'openai';
+  onSelectProviderName(sel.value);
+}
+
+function onSelectProviderName(id) {
+  const p = provTypes().find(x => x.id === id) || provTypes()[0];
+  provCurrentType = p.id;
+  provFetchedModels = [];
+
+  const sel = document.getElementById('chat-prov-label') || document.getElementById('prov-type-select');
+  if (sel && sel.value !== p.id) sel.value = p.id;
+
+  const rowUrl = document.getElementById('prov-row-url');
+  const baseInp = document.getElementById('chat-prov-base');
+  const fixedUrl = document.getElementById('prov-fixed-url');
+
+  // 常見雲端不需要給 URL 直接填 API 就好，如果是地端的才要 URL
+  if (p.category === 'Cloud') {
+    if (rowUrl) rowUrl.style.display = 'none';
+    if (fixedUrl) {
+      fixedUrl.style.display = 'block';
+      fixedUrl.innerHTML = `<span style="color:#388bfd;">🌐 官方端點 (Cloud Endpoint):</span> <code>${p.base}</code>`;
+    }
+    if (baseInp) baseInp.value = p.base;
+  } else {
+    if (fixedUrl) fixedUrl.style.display = 'none';
+    if (rowUrl) rowUrl.style.display = 'block';
+    if (baseInp) baseInp.value = p.base || 'http://172.22.20.125:8080/v1';
+  }
+
+  const rowKey = document.getElementById('prov-row-key');
+  const keyInp = document.getElementById('chat-prov-key');
+  const keyLbl = document.getElementById('lbl-prov-f-key');
+
+  if (rowKey) rowKey.style.display = 'block';
+  if (keyInp) {
+    keyInp.value = p.key || '';
+    keyInp.placeholder = p.category === 'Cloud' ? 'sk-…' : (p.key || 'EMPTY (可選/留空)');
+  }
+  if (keyLbl) {
+    keyLbl.textContent = provT('prov_f_key') + (p.category === 'Cloud' ? ' *' : '');
+  }
+
+  renderProvModelList(p.suggest || p.models || []);
+  const msg = document.getElementById('chat-prov-msg');
+  if (msg) msg.textContent = '';
+}
+
+// Backward compatibility alias
+function selectProvType(id) {
+  onSelectProviderName(id);
 }
 
 function selectProvType(id) {
   const tt = provTypes().find((p) => p.id === id) || provTypes()[0];
   provCurrentType = tt.id;
   provFetchedModels = [];
+  const sel = document.getElementById('prov-type-select');
+  if (sel && sel.value !== tt.id) sel.value = tt.id;
   const box = document.getElementById('prov-types');
   if (box) {
     Array.from(box.children).forEach((b) => {
@@ -3330,13 +3913,36 @@ function provFormKey() {
   return el ? el.value.trim() : '';
 }
 
+function formatProvError(err) {
+  if (!err) return '';
+  const zh = currentLanguage === 'zh';
+  const ja = currentLanguage === 'ja';
+  if (err.includes('Base URL 不可為空') || err.includes('Base URL cannot be empty') || err.includes('Base URL is required')) {
+    return zh ? 'Base URL 不可為空' : (ja ? 'Base URL を入力してください' : 'Base URL cannot be empty');
+  }
+  if (err.includes('label 與 base URL 不可為空') || err.includes('Label and base URL are required') || err.includes('名稱與 Base URL 不可為空')) {
+    return zh ? '供應商名稱與 Base URL 不可為空' : (ja ? 'プロバイダー名と Base URL は必須です' : 'Provider name and Base URL are required');
+  }
+  return err;
+}
+
 function fetchProvModels() {
   const msg = document.getElementById('chat-prov-msg');
+  const base = provFormBase();
+  const key = provFormKey();
+  const zh = currentLanguage === 'zh';
+  const ja = currentLanguage === 'ja';
+
+  if (!base) {
+    if (msg) msg.textContent = `❌ ${zh ? 'Base URL 不可為空' : (ja ? 'Base URL を入力してください' : 'Base URL cannot be empty')}`;
+    return;
+  }
+
   if (msg) msg.textContent = '…';
   fetch('/api/llm/providers/models', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ base: provFormBase(), key: provFormKey() }),
+    body: JSON.stringify({ base, key, strLang: zh ? 'zh' : (ja ? 'ja' : 'en') }),
   })
     .then((res) => res.json())
     .then((d) => {
@@ -3345,7 +3951,7 @@ function fetchProvModels() {
         if (msg) msg.textContent = `✅ ${provT('prov_ok_models')(d.models.length, d.kind || '')}`;
       } else {
         renderProvModelList([]);
-        if (msg) msg.textContent = `❌ ${(d && d.error) || 'empty'}`;
+        if (msg) msg.textContent = `❌ ${formatProvError((d && d.error) || 'empty')}`;
       }
     })
     .catch(() => {
@@ -3408,16 +4014,28 @@ function addChatProvider() {
   const msg = document.getElementById('chat-prov-msg');
   const val = (id) => { const el = document.getElementById(id); return el ? el.value.trim() : ''; };
   const picked = provPickedModel();
+  const zh = currentLanguage === 'zh';
+  const ja = currentLanguage === 'ja';
+
+  const base = provFormBase();
+  if (!base) {
+    if (msg) msg.textContent = `❌ ${zh ? 'Base URL 不可為空' : (ja ? 'Base URL を入力してください' : 'Base URL cannot be empty')}`;
+    return;
+  }
+
+  const pDef = provTypes().find(x => x.id === provCurrentType) || {};
+  const provLabel = pDef.label || val('chat-prov-label') || provCurrentType;
+
   if (!provFetchedModels.length || !picked) {
     if (msg) msg.textContent = `❌ ${provT('prov_models_empty')}`;
     return;
   }
   const payload = {
-    label: val('chat-prov-label'),
-    base: provFormBase(),
+    label: provLabel,
+    base: base,
     key: provFormKey(),
     models: provFetchedModels,
-    strLang: (typeof currentLanguage !== 'undefined' && currentLanguage === 'zh') ? 'zh-TW' : 'en-US',
+    strLang: zh ? 'zh-TW' : 'en-US',
   };
   fetch('/api/llm/providers', {
     method: 'POST',
@@ -3438,7 +4056,7 @@ function addChatProvider() {
         if (msg) msg.textContent = `✅ ${newId} → ${picked}`;
         refreshProviderList();
         loadProvActiveModel();
-        toggleProviderDialog(false);
+        showToast(currentLanguage === "zh" ? "✅ 已成功儲存並啟用供應商！" : "✅ Provider saved & activated!");
       } else if (msg) {
         msg.textContent = `❌ ${(body && body.strError) || status}`;
       }
@@ -3496,3 +4114,1531 @@ function loadProvActiveModel() {
     }).catch(() => { /* ignore */ });
   };
 }
+
+
+function bindMarkdownInternalLinks(container) {
+  if (!container) return;
+  const nodes = (masterGraphData.nodes && masterGraphData.nodes.length) ? masterGraphData.nodes : (rawData.nodes || []);
+
+  // 1. Interactive Internal Links (Colorized with 3D Galaxy ball colors)
+  container.querySelectorAll('a').forEach(a => {
+    const href = a.getAttribute('href');
+    if (!href) return;
+    // A1: Never intercept external web URLs, protocols, or mailto
+    if (/^(https?:|\/\/|mailto:|ftp:)/i.test(href)) {
+      a.setAttribute('target', '_blank');
+      a.setAttribute('rel', 'noopener noreferrer');
+      return;
+    }
+    // Intercept internal markdown links (.md or #anchor)
+    let dec = href;
+    try { dec = decodeURIComponent(href); } catch (e) {}
+    if (dec.toLowerCase().endsWith('.md') || dec.includes('.md#') || dec.startsWith('#')) {
+      a.style.cursor = 'pointer';
+
+      // Dynamically match and colorize link to reflect 3D node ball color
+      let matchedKind = 'file';
+      if (dec.includes('#')) {
+        const hName = decodeURIComponent(dec.split('#')[1] || '').trim().toLowerCase();
+        const foundH = nodes.find(n => (n.kind || '').startsWith('heading') && (n.name || '').trim().toLowerCase() === hName);
+        if (foundH) matchedKind = foundH.kind;
+        else matchedKind = 'heading_2';
+      }
+      const ballColor = KIND_COLORS[matchedKind] || '#f0883e';
+      a.style.color = ballColor;
+      a.style.fontWeight = matchedKind === 'file' ? '600' : '500';
+
+      a.onclick = function(e) {
+        e.preventDefault();
+        navigateToMarkdownTarget(dec);
+      };
+    }
+  });
+
+  // 2. Interactive Headings Drill-Down in ALL Markdown Documents
+  // Any H1~H6 in the viewer can be clicked to drill-down into its sliced section!
+  container.querySelectorAll('h1, h2, h3, h4, h5, h6').forEach(hEl => {
+    const headingText = hEl.textContent.replace(/🔍.*$/, '').trim();
+    if (!headingText) return;
+    hEl.title = `🎯 Click to drill down into section: "${headingText}"`;
+    hEl.onclick = function(e) {
+      e.stopPropagation();
+      const curFile = (viewCtx && viewCtx.file) ? viewCtx.file : (activeNode ? (activeNode.file || activeNode.abs_path || '') : '');
+      dispatchUnifiedSelection({ file: curFile, heading: headingText });
+    };
+  });
+}
+
+function navigateToMarkdownTarget(target) {
+  if (!target) return;
+  let fileTarget = target;
+  let headingTarget = '';
+  if (target.includes('#')) {
+    const parts = target.split('#');
+    fileTarget = parts[0];
+    headingTarget = decodeURIComponent(parts[1] || '');
+  }
+
+  // Resolve target via unified pipeline
+  dispatchUnifiedSelection({ file: fileTarget, heading: headingTarget });
+}
+
+
+// ═══════════════════════════════════════════════════════════════════════════
+// 🌟 UNIFIED SELECTION PIPELINE (唯一真中樞選取管路)
+// ═══════════════════════════════════════════════════════════════════════════
+function dispatchUnifiedSelection(target, options = {}) {
+  if (!target) return;
+  const nodes = (masterGraphData.nodes && masterGraphData.nodes.length) ? masterGraphData.nodes : (rawData.nodes || []);
+  let targetNode = null;
+
+  // Case A: target is already a node object
+  if (typeof target === 'object' && target.id && target.kind) {
+    targetNode = target;
+  }
+  // Case B: target is a node ID string
+  else if (typeof target === 'string' && (target.startsWith('file::') || target.startsWith('heading::') || target.startsWith('concept::'))) {
+    targetNode = nodes.find(n => n.id === target);
+  }
+  // Case C: target is a descriptor { file, heading }
+  else if (typeof target === 'object' && (target.file || target.heading)) {
+    const cleanFile = (target.file || '').replace(/\\/g, '/').toLowerCase();
+    const targetBase = cleanFile.split('/').pop();
+    const hText = (target.heading || '').trim().toLowerCase();
+
+    if (hText) {
+      // Find matching heading node
+      targetNode = nodes.find(n => {
+        if (!n.kind || !n.kind.startsWith('heading')) return false;
+        const nFile = (n.file || n.abs_path || '').replace(/\\/g, '/').toLowerCase();
+        const fileMatch = !targetBase || nFile.endsWith(targetBase);
+        const nameMatch = (n.name || '').trim().toLowerCase() === hText || (n.name || '').trim().toLowerCase().includes(hText);
+        return fileMatch && nameMatch;
+      });
+    }
+
+    if (!targetNode && targetBase) {
+      // Fallback to file node
+      targetNode = nodes.find(n => {
+        if (n.kind !== 'file') return false;
+        const nFile = (n.file || n.abs_path || n.name || '').replace(/\\/g, '/').toLowerCase();
+        return nFile.endsWith(targetBase);
+      });
+    }
+  }
+
+  // If node resolved from AST graph:
+  if (targetNode) {
+    if (targetNode.kind === 'concept') {
+      onConceptCardClick(targetNode.name);
+      return;
+    }
+    // 1. Sync Explorer Selection (open parent folders/files, select target heading/file, smooth scroll)
+    syncExplorerSelection(targetNode);
+
+    // 2. Sync 3D Galaxy (focus camera, highlight neighborhood cluster)
+    highlightScope('node', targetNode);
+    focusOnNode(targetNode);
+
+    // 3. Central Markdown Viewer (fetches sliced section if heading, full doc if file)
+    selectActiveNode(targetNode, true);
+
+    showToast(`🎯 Selected [${targetNode.kind.toUpperCase()}]: ${targetNode.name}`);
+  } else {
+    // Fallback: direct API fetch if node not in index
+    console.warn('dispatchUnifiedSelection: target node not indexed in AST graph:', target);
+    if (typeof target === 'object' && target.file) {
+      const headingQuery = target.heading ? `&heading=${encodeURIComponent(target.heading)}` : '';
+      fetch(`/api/doc/section?file=${encodeURIComponent(target.file)}${headingQuery}&sub=1`)
+        .then(res => res.json())
+        .then(data => {
+          if (data.content) {
+            renderMarkdown(data.content);
+            showToast(`📄 Loaded slice: ${target.heading || target.file}`);
+          }
+        });
+    }
+  }
+}
+
+
+// ==========================================================================
+// VS Code Style Activity Bar & Collapsible Drawer Controller
+// ==========================================================================
+
+let currentActivityTab = 'explorer'; // 'explorer' | 'concepts'
+let isDrawerCollapsed = false;
+// (declared in concepts engine) // 'official' | 'candidates'
+
+function switchActivityTab(tabName) {
+  const drawer = document.getElementById('left-sidebar-drawer');
+  const resizer = document.getElementById('resizer-tree-doc');
+  const tabExplorer = document.getElementById('act-tab-explorer');
+  const tabConcepts = document.getElementById('act-tab-concepts');
+  const panelExplorer = document.getElementById('tree-panel');
+  const panelConcepts = document.getElementById('concepts-panel');
+
+  if (!drawer) return;
+
+  // Clicking currently active tab collapses/expands the drawer (VS Code behavior)
+  if (currentActivityTab === tabName && !isDrawerCollapsed) {
+    isDrawerCollapsed = true;
+    drawer.classList.add('collapsed');
+    if (resizer) resizer.style.display = 'none';
+    if (tabExplorer) tabExplorer.classList.remove('active');
+    if (tabConcepts) tabConcepts.classList.remove('active');
+    return;
+  }
+
+  // Otherwise, ensure drawer is visible and switch panels
+  isDrawerCollapsed = false;
+  drawer.classList.remove('collapsed');
+  if (resizer) resizer.style.display = '';
+
+  currentActivityTab = tabName;
+
+  if (tabName === 'explorer') {
+    if (tabExplorer) tabExplorer.classList.add('active');
+    if (tabConcepts) tabConcepts.classList.remove('active');
+    if (panelExplorer) panelExplorer.style.display = 'flex';
+    if (panelConcepts) panelConcepts.style.display = 'none';
+  } else if (tabName === 'concepts') {
+    if (tabExplorer) tabExplorer.classList.remove('active');
+    if (tabConcepts) tabConcepts.classList.add('active');
+    if (panelExplorer) panelExplorer.style.display = 'none';
+    if (panelConcepts) panelConcepts.style.display = 'flex';
+    renderConceptsDrawerList();
+  }
+}
+
+// Backward compatibility for old calls
+function toggleTreePanel() {
+  switchActivityTab(currentActivityTab || 'explorer');
+}
+
+
+// ─── Real Concepts Registry Engine (Two-Tier Hierarchy & Linking) ─────
+let conceptsTreeData = { tree: {}, candidates: [], counts: { official: 0, candidates: 0 } };
+let selectedConceptName = null;
+let currentConceptSubTab = 'official';
+let expandedCategories = new Set();
+let activeConceptLinkedFiles = {}; // cache conceptName -> files list
+
+function getActiveReposParam() {
+  const activeRepos = Array.from(selectedProjects).map(pName => {
+    const p = (allProjectsList || []).find(x => x.name === pName);
+    return p ? p.path : '';
+  }).filter(Boolean);
+  if (activeRepos.length > 0) return activeRepos.join(',');
+  const p = getActiveRepoPath();
+  return p || '';
+}
+
+function getActiveRepoPath() {
+  if (viewCtx && viewCtx.repo) return viewCtx.repo;
+  const curProj = (allProjectsList || []).find(p => selectedProjects.has(p.name));
+  if (curProj && curProj.path) return curProj.path;
+  if (allProjectsList && allProjectsList.length > 0 && allProjectsList[0].path) {
+    return allProjectsList[0].path;
+  }
+  return '';
+}
+
+function switchConceptSubTab(subTab) {
+  currentConceptSubTab = subTab;
+  const btnOfficial = document.getElementById('btn-cpt-official');
+  const btnCandidates = document.getElementById('btn-cpt-candidates');
+  if (btnOfficial) btnOfficial.classList.toggle('active', subTab === 'official');
+  if (btnCandidates) btnCandidates.classList.toggle('active', subTab === 'candidates');
+  renderConceptsDrawerList();
+}
+
+function filterConcepts(kw) {
+  renderConceptsDrawerList(kw);
+}
+
+function clearConceptFilter() {
+  const inp = document.getElementById('concept-search');
+  if (inp) inp.value = '';
+  renderConceptsDrawerList('');
+}
+
+function fetchConceptsData() {
+  const activeRepos = Array.from(selectedProjects).map(pName => {
+    const p = (allProjectsList || []).find(x => x.name === pName);
+    return p ? p.path : '';
+  }).filter(Boolean);
+  const repoParam = activeRepos.length > 0 ? activeRepos.join(',') : (getActiveRepoPath() || '');
+  const url = repoParam ? `/api/concepts?repo=${encodeURIComponent(repoParam)}` : '/api/concepts';
+  fetch(url)
+    .then(res => res.json())
+    .then(data => {
+      if (data.ok) {
+        conceptsTreeData = data;
+        // Expand all categories by default
+        Object.keys(data.tree || {}).forEach(c => expandedCategories.add(c));
+        renderConceptsDrawerList();
+      }
+    })
+    .catch(err => console.error('fetchConceptsData error:', err));
+}
+
+
+function renderLinkedFilesHtml(conceptName, files, zh) {
+  if (!files || files.length === 0) {
+    return `<div style="font-size:11px; color:#8b949e; padding:4px 0;">${zh ? '尚無文檔引用此標籤' : 'No files reference this concept'}</div>`;
+  }
+  let h = `<div style="font-size:11px; color:#58a6ff; font-weight:600; margin-bottom:4px;">📄 ${zh ? '引用文件清單' : 'Referenced Documents'} (${files.length}):</div>`;
+  h += '<div style="display:flex; flex-direction:column; gap:4px; max-height:160px; overflow-y:auto;">';
+  files.forEach(f => {
+    h += `
+      <div style="background:#0d1117; border:1px solid #30363d; border-radius:4px; padding:4px 8px; font-size:11px; display:flex; justify-content:space-between; align-items:center;">
+        <span style="color:#c9d1d9; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:180px; display:flex; align-items:center;" title="${escapeHtml(f.filePath)}">${(f.filePath||'').startsWith('heading::') ? '<span style="color:#58a6ff; font-weight:700; margin-right:4px;">#</span>' : getDocIconSvg('#f0883e')} <span style="margin-left:3px;">${escapeHtml(f.filePath)}</span></span>
+        <button class="mini-btn" style="color:#f85149; border-color:#da3633; padding:1px 4px; font-size:10px;" onclick="unlinkConcept('${escapeHtml(conceptName)}', '${escapeHtml(f.filePath)}', event)" title="${zh ? '解除關聯並永久排除' : 'Unlink & Exclude'}">✕</button>
+      </div>
+    `;
+  });
+  h += '</div>';
+  return h;
+}
+
+function renderConceptsDrawerList(filterKw = '') {
+  const container = document.getElementById('concepts-list-container');
+  if (!container) return;
+  const zh = currentLanguage === 'zh';
+  const kw = (filterKw || '').trim().toLowerCase();
+
+  const countOfficialEl = document.getElementById('count-cpt-official');
+  const countCandidatesEl = document.getElementById('count-cpt-candidates');
+  const badgeEl = document.getElementById('badge-concept-candidates');
+
+  const offCount = (conceptsTreeData.counts && conceptsTreeData.counts.official) || 0;
+  const candCount = (conceptsTreeData.counts && conceptsTreeData.counts.candidates) || 0;
+
+  if (countOfficialEl) countOfficialEl.innerText = offCount;
+  if (countCandidatesEl) countCandidatesEl.innerText = candCount;
+  if (badgeEl) {
+    badgeEl.innerText = candCount;
+    badgeEl.style.display = candCount > 0 ? 'inline-block' : 'none';
+  }
+
+  if (currentConceptSubTab === 'candidates') {
+    // ─── Render Candidates List ──────────────────────────
+    const candidates = (conceptsTreeData.candidates || []).filter(c => {
+      if (!kw) return true;
+      return c.name.toLowerCase().includes(kw) || (c.aliases && c.aliases.toLowerCase().includes(kw));
+    });
+
+    if (candidates.length === 0) {
+      container.innerHTML = `<div style="color:#8b949e; font-size:12px; text-align:center; padding:30px 10px;">${zh ? '尚無待審候選標籤' : 'No candidates awaiting review'}</div>`;
+      return;
+    }
+
+    let h = '<div style="display:flex; flex-direction:column; gap:8px; padding:4px;">';
+    candidates.forEach(c => {
+      h += `
+        <div class="concept-card" style="border:1px dashed #e3b341; background:#161b22; border-radius:6px; padding:10px;">
+          <div style="display:flex; justify-content:space-between; align-items:center;">
+            <span style="font-weight:600; color:#f0883e; font-size:13px;">🏷️ ${escapeHtml(c.name)}</span>
+            <span class="concept-status-pill candidate" style="background:#382800; color:#e3b341; border:1px solid #9e6a03; font-size:11px; padding:2px 6px; border-radius:10px;">${c.refs} ${zh ? '次引用' : 'Refs'}</span>
+          </div>
+          <div style="font-size:11px; color:#8b949e; margin-top:4px;">${zh ? '來源' : 'Source'}: ${escapeHtml(c.aliases || (zh ? 'AI 頻繁偵測' : 'Auto-detected'))}</div>
+          <div style="display:flex; gap:6px; justify-content:flex-end; margin-top:8px;">
+            <button class="mini-btn" style="background:#238636; border-color:#2ea043; color:#fff;" onclick="promoteCandidate('${escapeHtml(c.name)}')">✓ ${zh ? '審批入典' : 'Promote'}</button>
+            <button class="mini-btn" style="background:#21262d; border-color:#30363d; color:#f85149;" onclick="dismissCandidate('${escapeHtml(c.name)}')">✕ ${zh ? '駁回除名' : 'Dismiss'}</button>
+          </div>
+        </div>
+      `;
+    });
+    h += '</div>';
+    container.innerHTML = h;
+    return;
+  }
+
+  // ─── Render Official Two-Tier Categories ─────────────
+  const tree = conceptsTreeData.tree || {};
+  const catNames = Object.keys(tree);
+
+  if (catNames.length === 0) {
+    // If counts say we have official concepts but tree was empty due to repo mismatch, force fetch
+    if (conceptsTreeData.counts && conceptsTreeData.counts.official > 0) {
+      container.innerHTML = `<div style="color:#8b949e; font-size:12px; text-align:center; padding:30px 10px;">⏳ 正在加載正式概念清單...</div>`;
+      setTimeout(() => fetchConceptsData(), 300);
+      return;
+    }
+    container.innerHTML = `<div style="color:#8b949e; font-size:12px; text-align:center; padding:30px 10px;">${zh ? '知識庫尚無正式概念，請點擊上方 + New 定立' : 'No concepts defined yet. Click + New to define one.'}</div>`;
+    return;
+  }
+
+  let html = '<div style="display:flex; flex-direction:column; gap:10px; padding:4px;">';
+  catNames.forEach(cat => {
+    const rawConcepts = tree[cat] || [];
+    const concepts = rawConcepts.filter(c => {
+      if (!kw) return true;
+      return c.name.toLowerCase().includes(kw) || (c.aliases && c.aliases.toLowerCase().includes(kw));
+    });
+
+    if (concepts.length === 0 && kw) return;
+
+    const isExpanded = expandedCategories.has(cat);
+    html += `
+      <div class="concept-category-block" style="background:#0d1117; border:1px solid #30363d; border-radius:6px; overflow:hidden;">
+        <!-- Category Header (Accordion) -->
+        <div onclick="toggleCategoryExpand('${escapeHtml(cat)}')" style="display:flex; align-items:center; justify-content:space-between; padding:8px 10px; background:#161b22; cursor:pointer; user-select:none; border-bottom:${isExpanded ? '1px solid #21262d' : 'none'};">
+          <div style="display:flex; align-items:center; gap:6px;">
+            <span style="font-size:10px; color:#8b949e; transition:transform 0.2s; transform:${isExpanded ? 'rotate(90deg)' : 'rotate(0deg)'};">▶</span>
+            <span style="font-weight:600; font-size:13px; color:#58a6ff;">📁 ${escapeHtml(getCategoryDisplayName(cat))}</span>
+          </div>
+          <span style="font-size:11px; background:#21262d; color:#8b949e; padding:1px 6px; border-radius:8px;">${concepts.length}</span>
+        </div>
+
+        <!-- Concepts Items -->
+        <div style="display:${isExpanded ? 'flex' : 'none'}; flex-direction:column; gap:6px; padding:8px;">
+    `;
+
+    concepts.forEach(c => {
+      const isSelected = selectedConceptName === c.name;
+      const linkedFiles = activeConceptLinkedFiles[c.name] || null;
+      html += `
+        <div class="concept-card" style="border:1px solid ${isSelected ? '#388bfd' : '#21262d'}; background:${isSelected ? '#131d2e' : '#161b22'}; border-radius:6px; padding:8px; cursor:pointer;" onclick="onConceptCardClick('${escapeHtml(c.name)}', event)">
+          <div style="display:flex; justify-content:space-between; align-items:center;">
+            <span style="font-weight:600; color:#e2e8f0; font-size:13px;">🏷️ ${escapeHtml(c.name)}</span>
+            <span class="concept-status-pill official" style="background:#1f6feb22; color:#58a6ff; border:1px solid #388bfd44; font-size:11px; padding:2px 6px; border-radius:10px;">${c.refs} ${zh ? '引用' : 'Refs'}</span>
+          </div>
+          <div style="font-size:11px; color:#8b949e; margin-top:4px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">
+            ${zh ? '別名' : 'Aliases'}: ${escapeHtml(c.aliases || (zh ? '無' : 'None'))}
+          </div>
+          <div style="display:flex; justify-content:flex-end; gap:6px; margin-top:6px;">
+            <button class="mini-btn" onclick="openEditConceptModal('${escapeHtml(c.name)}', '${escapeHtml(c.category)}', '${escapeHtml(c.aliases || '')}', event)">✏️ ${zh ? '編輯' : (currentLanguage === 'ja' ? '編集' : 'Edit')}</button>
+            <button class="mini-btn" onclick="openMergeConceptModal('${escapeHtml(c.name)}', event)">🔗 ${zh ? '合併' : (currentLanguage === 'ja' ? '統合' : 'Merge')}</button>
+            <button class="mini-btn" style="color:#f85149; border-color:#da363388;" onclick="deleteConcept('${escapeHtml(c.name)}', event)">🗑️ ${zh ? '刪除' : (currentLanguage === 'ja' ? '削除' : 'Delete')}</button>
+          </div>
+
+          <!-- Dynamic Linked Files Drawer Area -->
+          <div id="cpt-files-${escapeHtml(c.name)}" style="display:${(isSelected && linkedFiles) ? 'block' : 'none'}; margin-top:8px; border-top:1px dashed #30363d; padding-top:6px;">
+            ${renderLinkedFilesHtml(c.name, linkedFiles, zh)}
+          </div>
+        </div>
+      `;
+    });
+
+    html += `
+        </div>
+      </div>
+    `;
+  });
+  html += '</div>';
+  container.innerHTML = html;
+}
+
+function toggleCategoryExpand(cat) {
+  if (expandedCategories.has(cat)) expandedCategories.delete(cat);
+  else expandedCategories.add(cat);
+  renderConceptsDrawerList();
+}
+
+// ─── Bidirectional Linking & Spotlight Engine ───────────────────────
+
+// ─── Tag-Pages & 3D Right-Click Context Menu Engine ──────────────────
+let ctxSelectedNode = null;
+
+function hideNodeContextMenu() {
+  const m = document.getElementById('graph-node-context-menu');
+  if (m) m.style.display = 'none';
+}
+
+document.addEventListener('click', () => hideNodeContextMenu());
+
+function openNodeContextMenu(node, event) {
+  if (!node) return;
+  ctxSelectedNode = node;
+  const m = document.getElementById('graph-node-context-menu');
+  const nameEl = document.getElementById('ctx-node-name');
+  if (!m || !nameEl) return;
+
+  nameEl.innerText = `${(node.kind || 'node').toUpperCase()}: ${node.name || 'Unnamed'}`;
+  m.style.left = `${Math.min(window.innerWidth - 200, event.clientX || 100)}px`;
+  m.style.top = `${Math.min(window.innerHeight - 150, event.clientY || 100)}px`;
+  m.style.display = 'block';
+}
+
+function ctxActionOpenViewer() {
+  hideNodeContextMenu();
+  if (ctxSelectedNode) {
+    dispatchUnifiedSelection(ctxSelectedNode);
+  }
+}
+
+function ctxActionAttachTag() {
+  hideNodeContextMenu();
+  if (!ctxSelectedNode) return;
+  // If heading node, pass file and heading
+  const file = ctxSelectedNode.file || ctxSelectedNode.abs_path || '';
+  const heading = ctxSelectedNode.kind !== 'file' ? ctxSelectedNode.name : '';
+  openAttachTagToSpecificTarget(file, heading);
+}
+
+function ctxActionCopyMarkdown() {
+  hideNodeContextMenu();
+  if (ctxSelectedNode && ctxSelectedNode.content) {
+    navigator.clipboard.writeText(ctxSelectedNode.content);
+    showToast('📋 已複製 Markdown 內容！');
+  }
+}
+
+// ─── Click Concept -> Load Tag-Page in Center Markdown Viewer ───────
+
+
+// ─── In-App Cyber Confirm System (Zero Native Popups) ───────────────
+let cyberConfirmCallback = null;
+
+let cyberPromptCallback = null;
+
+function showCyberPrompt(title, msg, defaultValue, onSubmit, options = {}) {
+  const modal = document.getElementById('cyber-prompt-modal');
+  const tEl = document.getElementById('cyber-prompt-title');
+  const mEl = document.getElementById('cyber-prompt-msg');
+  const iEl = document.getElementById('cyber-prompt-input');
+  const tipEl = document.getElementById('cyber-prompt-tip');
+  const okBtn = document.getElementById('btn-cyber-prompt-ok');
+  const cancelBtn = document.getElementById('btn-cyber-prompt-cancel');
+
+  if (!modal) {
+    const val = prompt(msg, defaultValue || '');
+    if (val !== null && onSubmit) onSubmit(val);
+    return;
+  }
+
+  if (tEl) tEl.innerText = title || '📁 輸入名稱';
+  if (mEl) mEl.innerText = msg || '';
+  if (iEl) {
+    iEl.value = defaultValue || '';
+    iEl.placeholder = options.placeholder || '';
+  }
+  if (tipEl) {
+    tipEl.innerText = options.tip || '';
+    tipEl.style.display = options.tip ? 'block' : 'none';
+  }
+  if (okBtn) {
+    okBtn.innerText = options.confirmText || (currentLanguage === 'zh' ? '建立' : (currentLanguage === 'ja' ? '作成' : 'Create'));
+  }
+  if (cancelBtn) {
+    cancelBtn.innerText = options.cancelText || (currentLanguage === 'zh' ? '取消' : (currentLanguage === 'ja' ? 'キャンセル' : 'Cancel'));
+  }
+
+  cyberPromptCallback = onSubmit;
+  modal.style.display = 'flex';
+  setTimeout(() => {
+    if (iEl) {
+      iEl.focus();
+      iEl.select();
+    }
+  }, 60);
+}
+
+function submitCyberPrompt() {
+  const iEl = document.getElementById('cyber-prompt-input');
+  const val = iEl ? (iEl.value || '').trim() : '';
+  closeCyberPrompt(val);
+}
+
+function closeCyberPrompt(val) {
+  const modal = document.getElementById('cyber-prompt-modal');
+  if (modal) modal.style.display = 'none';
+  if (val !== null && typeof cyberPromptCallback === 'function') {
+    cyberPromptCallback(val);
+  }
+  cyberPromptCallback = null;
+}
+
+function showCyberConfirm(title, msg, onConfirm, options = {}) {
+  const modal = document.getElementById('cyber-confirm-modal');
+  const tEl = document.getElementById('cyber-confirm-title');
+  const mEl = document.getElementById('cyber-confirm-msg');
+  const tipEl = document.getElementById('cyber-confirm-tip');
+  const okBtn = document.getElementById('btn-cyber-confirm-ok');
+  const cancelBtn = document.getElementById('btn-cyber-confirm-cancel');
+
+  if (!modal) {
+    if (confirm(msg)) onConfirm();
+    return;
+  }
+  if (tEl) tEl.innerText = title || '⚠ 操作確認';
+  if (mEl) mEl.innerText = msg;
+  if (tipEl) {
+    tipEl.innerText = options.tip || '';
+    tipEl.style.display = options.tip ? 'block' : 'none';
+  }
+  if (okBtn) {
+    okBtn.innerText = options.confirmText || (currentLanguage === 'zh' ? '確定' : (currentLanguage === 'ja' ? '確認' : 'Confirm'));
+  }
+  if (cancelBtn) {
+    cancelBtn.innerText = options.cancelText || (currentLanguage === 'zh' ? '取消' : (currentLanguage === 'ja' ? 'キャンセル' : 'Cancel'));
+  }
+  cyberConfirmCallback = onConfirm;
+  modal.style.display = 'flex';
+}
+
+function closeCyberConfirm(isConfirmed) {
+  const modal = document.getElementById('cyber-confirm-modal');
+  if (modal) modal.style.display = 'none';
+  if (isConfirmed && typeof cyberConfirmCallback === 'function') {
+    cyberConfirmCallback();
+  }
+  cyberConfirmCallback = null;
+}
+
+// ─── Concept Unlink Controller (Clean & Elegant) ────────────────────
+function unlinkConcept(conceptName, filePath, event) {
+  if (event) {
+    event.stopPropagation();
+    event.preventDefault();
+  }
+  const zh = currentLanguage === 'zh';
+  const repo = getActiveRepoPath();
+
+  const title = zh ? '⚠ 概念標籤脫鉤確認' : '⚠ Unlink Concept Confirmation';
+  const msg = zh 
+    ? `確定要解除「${filePath}」與標籤「${conceptName}」的關聯嗎？
+（僅會脫鉤此文檔，不會影響其他引用檔案）`
+    : `Unlink '${filePath}' from tag '${conceptName}'? (Other documents will remain untouched)`;
+
+  const tip = zh ? '💡 此操作僅會解除此特定文件與概念標籤的關聯，不會影響其他文檔。' : (ja ? '💡 この操作は該当ファイルとタグの関連付けのみを解除し、他のドキュメントには影響しません。' : '💡 This action only unlinks this specific document from the tag.');
+  const confirmText = zh ? '確定脫鉤' : (ja ? '関連付け解除' : 'Unlink');
+  const cancelText = zh ? '取消' : (ja ? 'キャンセル' : 'Cancel');
+
+  showCyberConfirm(title, msg, () => {
+    fetch('/api/concepts/unlink', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ repo, name: conceptName, filePath, rewriteDisk: true })
+    })
+      .then(res => res.json())
+      .then(data => {
+        if (data.ok) {
+          showToast(zh ? `✅ 已成功為「${filePath}」脫鉤「${conceptName}」！` : `✅ Unlinked '${conceptName}'!`);
+          fetchConceptsData();
+          loadMasterGraphAndFilter();
+          setTimeout(() => {
+            buildProjectTree();
+          }, 120);
+          if (selectedConceptName === conceptName) {
+            onConceptCardClick(conceptName);
+          }
+          // Refresh active document editor if currently open
+          let cleanDoc = filePath;
+          if (cleanDoc.startsWith('heading::')) {
+            const p = cleanDoc.split('::');
+            if (p.length >= 2) cleanDoc = p[1];
+          } else if (cleanDoc.startsWith('file::')) {
+            cleanDoc = cleanDoc.substring(6);
+          }
+          const curF = (viewCtx && viewCtx.file) ? viewCtx.file : '';
+          if (curF && (curF.endsWith(cleanDoc) || cleanDoc.endsWith(curF))) {
+            if (activeNode) selectActiveNode(activeNode);
+            else openFileInEditor(cleanDoc);
+          }
+        } else {
+          alert(data.error || 'Unlink failed');
+        }
+      })
+      .catch(err => alert('Network error: ' + err));
+  });
+}
+
+
+// ─── 3D Synchronous Spotlight Engine for Concepts ────────────────────
+let userLODHiddenSnapshot = null; // remembers user's chosen LOD filters
+
+function spotlightConceptNode(conceptName) {
+  if (!Graph) return;
+  activeSpotlightConcept = conceptName;
+  applyLODAndFilter();
+
+  // Snapshot current hiddenKinds so we can revert when deselecting
+  if (!userLODHiddenSnapshot) {
+    userLODHiddenSnapshot = new Set(hiddenKinds);
+  }
+
+  highlightNodes.clear();
+  highlightLinks.clear();
+
+  const gNodes = (rawData && rawData.nodes) ? rawData.nodes : [];
+  const gLinks = (rawData && rawData.links) ? rawData.links : [];
+
+  const cid = `concept::${conceptName}`;
+  const targetNodes = [];
+
+  // 1. Find the concept node itself (handles multi-repo namespaces e.g. p1::concept::越南廠)
+  const cNode = gNodes.find(n => n.id === cid || n.id.endsWith(`::${cid}`) || (n.kind === 'concept' && n.name === conceptName));
+  if (cNode) {
+    highlightNodes.add(cNode.id);
+    targetNodes.push(cNode);
+  }
+
+  // 2. Trace all connected nodes & links via wiki_link
+  let needsGraphDataUpdate = false;
+  gLinks.forEach(l => {
+    const sId = typeof l.source === 'object' ? l.source.id : l.source;
+    const tId = typeof l.target === 'object' ? l.target.id : l.target;
+    const isTargetConcept = (tId === cid || tId.endsWith(`::${cid}`) || (cNode && tId === cNode.id));
+    const isSourceConcept = (sId === cid || sId.endsWith(`::${cid}`) || (cNode && sId === cNode.id));
+
+    if (isTargetConcept || isSourceConcept) {
+      highlightLinks.add(l);
+      highlightNodes.add(sId);
+      highlightNodes.add(tId);
+
+      const otherId = isTargetConcept ? sId : tId;
+      const otherNode = gNodes.find(n => n.id === otherId);
+      if (otherNode) {
+        targetNodes.push(otherNode);
+        // Only temporarily unhide the SPECIFIC other node's kind during focus
+        if (hiddenKinds.has(otherNode.kind)) {
+          hiddenKinds.delete(otherNode.kind);
+          needsGraphDataUpdate = true;
+        }
+      }
+    }
+  });
+
+  if (needsGraphDataUpdate) {
+    applyLODAndFilter();
+  }
+
+  // 3. Trigger 3D Graph Glow Update (Slim, elegant cyber edge)
+  Graph.nodeColor(Graph.nodeColor())
+    .linkColor(Graph.linkColor())
+    .linkWidth(l => highlightLinks.has(l) ? 0.7 : 0.12)
+    .linkDirectionalParticles(l => highlightLinks.has(l) ? 4 : 0);
+
+  // 4. Smooth 3D Camera Flight to the cluster center with resilient retry
+  const attemptFly = () => {
+    const curNodes = (rawData && rawData.nodes) ? rawData.nodes : [];
+    const curCNode = curNodes.find(n => n.id === cid || n.id.endsWith(`::${cid}`) || (n.kind === 'concept' && n.name === conceptName));
+    const curTargets = [];
+    if (curCNode) curTargets.push(curCNode);
+    (rawData && rawData.links || []).forEach(l => {
+      const sId = typeof l.source === 'object' ? l.source.id : l.source;
+      const tId = typeof l.target === 'object' ? l.target.id : l.target;
+      if (tId === cid || tId.endsWith(`::${cid}`) || (curCNode && tId === curCNode.id)) {
+        const o = curNodes.find(n => n.id === sId);
+        if (o) curTargets.push(o);
+      } else if (sId === cid || sId.endsWith(`::${cid}`) || (curCNode && sId === curCNode.id)) {
+        const o = curNodes.find(n => n.id === tId);
+        if (o) curTargets.push(o);
+      }
+    });
+
+    let sumX = 0, sumY = 0, sumZ = 0, validCount = 0;
+    curTargets.forEach(n => {
+      if (typeof n.x === 'number' && typeof n.y === 'number' && typeof n.z === 'number' && !isNaN(n.x)) {
+        sumX += n.x; sumY += n.y; sumZ += n.z; validCount++;
+      }
+    });
+
+    if (validCount > 0) {
+      const cx = sumX / validCount;
+      const cy = sumY / validCount;
+      const cz = sumZ / validCount;
+      const targetPos = { x: cx, y: cy, z: cz };
+      const camPos = { x: cx, y: cy, z: cz + 85 };
+      Graph.cameraPosition(camPos, targetPos, 850);
+      return true;
+    } else if (curCNode && typeof curCNode.x === 'number' && !isNaN(curCNode.x)) {
+      focusOnNode(curCNode);
+      return true;
+    }
+    return false;
+  };
+
+  if (!attemptFly()) {
+    setTimeout(attemptFly, 300);
+  }
+}
+
+function onConceptCardClick(name, event) {
+  if (event && event.target && event.target.tagName.toLowerCase() === 'button') return;
+  selectedConceptName = name;
+  const zh = currentLanguage === 'zh';
+  const repo = getActiveReposParam();
+
+  // 1. Fetch Tag Markdown Page across all active repos!
+  fetch(`/api/concepts/tag-page?name=${encodeURIComponent(name)}&repo=${encodeURIComponent(repo)}`)
+    .then(res => res.json())
+    .then(data => {
+      if (data.ok) {
+        // Cache linked files across all repos
+        activeConceptLinkedFiles[name] = data.files || [];
+        renderConceptsDrawerList();
+
+        // 2. Open Tag Page directly in Markdown Viewer!
+        renderConceptTagPageInViewer(data);
+      }
+    });
+
+  // 3. 3D Spotlight Focus
+  spotlightConceptNode(name);
+}
+
+function renderConceptTagPageInViewer(tagData) {
+  const zh = currentLanguage === 'zh';
+  const dName = document.getElementById('d-name');
+  const dSub = document.getElementById('d-sub');
+  const badge = document.getElementById('d-kind-badge');
+  const codeTitle = document.getElementById('d-code-title');
+
+  if (dName) dName.innerText = `🏷️ ${tagData.concept} (Tag Page)`;
+  if (dSub) dSub.innerText = `${tagData.path} · ${tagData.files.length} Referenced Documents`;
+  if (badge) {
+    badge.innerText = 'TAG';
+    badge.style.background = '#8957e5';
+    badge.style.color = '#ffffff';
+    badge.style.fontWeight = '700';
+    badge.style.textShadow = '0 1px 2px rgba(0,0,0,0.7)';
+  }
+  if (codeTitle) codeTitle.innerText = '🏷️ Tag Definition & Reference Manager';
+
+  // Build composite Markdown: Content + Dynamic Link Management Table
+  let fullMd = tagData.content + '\n\n---\n\n### 🔗 關聯文檔引用管理 (Referenced Documents)\n';
+  if (!tagData.files || tagData.files.length === 0) {
+    fullMd += '\n*(目前尚無任何文檔引用此概念標籤。可在閱讀文檔時點選頂部「🏷️ + 貼標籤」或於 3D 圖右鍵貼上)*\n';
+  } else {
+    fullMd += '\n| 序號 | 引用檔案路徑 | 提及段落摘要 | 操作 |\n| :--- | :--- | :--- | :--- |\n';
+    tagData.files.forEach((f, idx) => {
+      fullMd += `| ${idx + 1} | \`${f.filePath}\` | ${f.snippet ? f.snippet.replace(/\|/g, '/') : '(章節內文)'} | <button class="mini-btn" style="color:#f85149; border-color:#da3633; padding:3px 12px; font-weight:600; white-space:nowrap; min-width:54px; display:inline-block;" onclick="unlinkConcept('${tagData.concept}', '${f.filePath}', event)">解除</button> |\n`;
+    });
+  }
+
+  // Set view context
+  viewCtx = { project: '', file: tagData.path, repo: tagData.repo || getActiveRepoPath(), heading: '' };
+  renderMarkdown(fullMd);
+}
+
+// ─── Attach Tag to Current Document or Sliced Section ───────────────
+function openAttachTagFromViewer() {
+  const zh = currentLanguage === 'zh';
+  let curFile = (viewCtx && viewCtx.file) ? viewCtx.file : '';
+  let curHeading = (viewCtx && viewCtx.heading) ? viewCtx.heading : '';
+
+  // Fallback to activeNode if viewCtx is not populated yet
+  if (!curFile && activeNode) {
+    curFile = activeNode.file || activeNode.abs_path || '';
+    curHeading = (activeNode.kind !== 'file') ? activeNode.name : '';
+  }
+
+  if (!curFile) {
+    showToast(zh ? '⚠ 請先於左側 Explorer 選取任一篇 Markdown 文檔！' : '⚠ Please select a document first!');
+    return;
+  }
+
+  // If user is currently looking at a Concept Tag Page
+  if (curFile.includes('.docgraphical/tags/')) {
+    showToast(zh ? 'ℹ 當前為標籤定義頁。請選取欲貼上標籤之實際文檔或章節！' : 'ℹ Currently on a Tag Page. Select a document first!');
+    return;
+  }
+
+  openAttachTagToSpecificTarget(curFile, curHeading);
+}
+
+function openAttachTagToSpecificTarget(filePath, heading = '') {
+  taggerMode = 'file_to_concept';
+  taggerContext = { filePath, heading };
+  const zh = currentLanguage === 'zh';
+
+  const modal = document.getElementById('concept-tagger-modal');
+  if (!modal) return;
+
+  const title = document.getElementById('tagger-modal-title');
+  const targetDisplay = document.getElementById('tagger-target-display');
+  const sel = document.getElementById('sel-tagger-concept') || document.getElementById('tagger-select-item');
+  const hint = document.getElementById('tagger-hint');
+
+  const targetDesc = heading ? `段落「${heading}」` : `文檔「${filePath}」`;
+  if (title) title.innerText = zh ? `🏷️ 為 ${targetDesc} 貼上標籤` : `🏷️ Attach Tag to ${targetDesc}`;
+  if (targetDisplay) targetDisplay.innerText = heading ? `${filePath} > [${heading}]` : filePath;
+
+  if (hint) {
+    hint.innerText = heading
+      ? (zh ? `標籤將直接貼入此段落，3D 圖中引力光束將精確連繫該章節小球！` : `Tag will be injected directly under this heading!`)
+      : (zh ? `標籤將追加至此文檔末尾，並即時建立拓撲關聯連線！` : `Tag will be appended to file footer!`);
+  }
+
+  if (sel) {
+    sel.innerHTML = '';
+    const tree = (conceptsTreeData && conceptsTreeData.tree) ? conceptsTreeData.tree : {};
+    let count = 0;
+    Object.keys(tree).forEach(cat => {
+      const items = tree[cat] || [];
+      if (!items.length) return;
+      const grp = document.createElement('optgroup');
+      grp.label = `📁 ${cat}`;
+      items.forEach(item => {
+        const opt = document.createElement('option');
+        opt.value = item.name;
+        opt.textContent = `🏷️ ${item.name}`;
+        grp.appendChild(opt);
+        count++;
+      });
+      sel.appendChild(grp);
+    });
+
+    if (count === 0) {
+      sel.innerHTML = '<option value="">(尚無概念標籤，請先至左側抽屜 + 新增)</option>';
+    }
+  }
+
+  modal.classList.add('show');
+  modal.style.display = 'flex';
+}
+
+function closeTaggerModal() {
+  const modal = document.getElementById('concept-tagger-modal');
+  if (modal) {
+    modal.classList.remove('show');
+    modal.style.display = 'none';
+  }
+  const errEl = document.getElementById('tagger-modal-error');
+  if (errEl) {
+    errEl.innerText = '';
+    errEl.style.display = 'none';
+  }
+  taggerContext = { filePath: '', heading: '' };
+}
+
+function showTaggerModalError(msg) {
+  const errEl = document.getElementById('tagger-modal-error');
+  if (errEl) {
+    errEl.innerText = `⚠ ${msg}`;
+    errEl.style.display = 'block';
+  }
+}
+
+function submitAttachTagFromModal() {
+  submitTaggerModal();
+}
+
+function submitTaggerModal() {
+  const zh = currentLanguage === 'zh';
+  const sel = document.getElementById('sel-tagger-concept') || document.getElementById('tagger-select-item');
+  const chosenConcept = sel ? (sel.value || '').trim() : '';
+  const btnSubmit = document.getElementById('btn-tagger-submit');
+
+  const errEl = document.getElementById('tagger-modal-error');
+  if (errEl) {
+    errEl.innerText = '';
+    errEl.style.display = 'none';
+  }
+
+  if (!chosenConcept) {
+    showTaggerModalError(zh ? '請先選擇一個概念標籤！' : 'Please select a concept tag first!');
+    return;
+  }
+
+  const filePath = taggerContext.filePath;
+  const heading = taggerContext.heading || '';
+  // Prioritize activeNode repo or viewCtx repo, fallback to getActiveReposParam
+  let repo = (activeNode && activeNode.project) ? ((allProjectsList || []).find(p => p.name === activeNode.project)?.path || '') : '';
+  if (!repo && viewCtx && viewCtx.repo) repo = viewCtx.repo;
+  if (!repo) repo = getActiveReposParam();
+
+  if (!filePath) {
+    showTaggerModalError(zh ? '無法取得目標文件路徑！' : 'Target file path missing!');
+    return;
+  }
+
+  if (btnSubmit) {
+    btnSubmit.disabled = true;
+    btnSubmit.innerText = zh ? '貼上中...' : 'Attaching...';
+  }
+
+  fetch('/api/concepts/attach', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ repo, name: chosenConcept, filePath, heading })
+  })
+    .then(res => res.json())
+    .then(data => {
+      if (btnSubmit) {
+        btnSubmit.disabled = false;
+        btnSubmit.innerText = zh ? '確定貼上' : 'Attach';
+      }
+      if (data.ok) {
+        closeTaggerModal();
+        const msg = heading 
+          ? (zh ? `✅ 已成功為「${heading}」貼上「${chosenConcept}」！` : `✅ Attached '${chosenConcept}' to '${heading}'!`)
+          : (zh ? `✅ 已成功為「${filePath}」貼上「${chosenConcept}」！` : `✅ Attached '${chosenConcept}' to '${filePath}'!`);
+        showToast(msg);
+        fetchConceptsData();
+        activeSpotlightConcept = chosenConcept;
+        loadMasterGraphAndFilter();
+        setTimeout(() => {
+          buildProjectTree();
+          spotlightConceptNode(chosenConcept);
+        }, 150);
+
+        // Immediately re-fetch and render this document so the new tag pops up right away!
+        if (activeNode) {
+          selectActiveNode(activeNode);
+        } else if (filePath) {
+          openFileInEditor(filePath);
+        }
+      } else {
+        showTaggerModalError(data.error || 'Attach failed');
+      }
+    })
+    .catch(err => {
+      if (btnSubmit) {
+        btnSubmit.disabled = false;
+        btnSubmit.innerText = zh ? '確定貼上' : 'Attach';
+      }
+      showTaggerModalError(err.message || String(err));
+    });
+}
+
+function openAddConceptModal() {
+  openConceptActionModal('add');
+}
+
+function openEditConceptModal(name, category, aliases, event) {
+  if (event) event.stopPropagation();
+  openConceptActionModal('edit', { name, category, aliases });
+}
+
+function openMergeConceptModal(sourceName, event) {
+  if (event) event.stopPropagation();
+  openConceptActionModal('merge', { sourceName });
+}
+
+function promoteCandidate(name) {
+  openConceptActionModal('promote', { name });
+}
+
+function dismissCandidate(name) {
+  const zh = currentLanguage === 'zh';
+  if (!confirm(zh ? `確定要將待審標籤「${name}」駁回除名嗎？` : `Dismiss candidate '${name}'?`)) return;
+  // Save as dismissed or unlink
+  const repo = getActiveRepoPath();
+  fetch('/api/concepts/unlink', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ repo, name, filePath: '*', rewriteDisk: false })
+  }).then(() => {
+    fetchConceptsData();
+  });
+}
+
+function updateConceptsI18n() {
+  const lang = currentLanguage;
+  const set = (id, txt) => { const el = document.getElementById(id); if (el) el.textContent = txt; };
+  const setAttr = (id, attr, txt) => { const el = document.getElementById(id); if (el) el.setAttribute(attr, txt); };
+
+  // Activity Bar Tooltips
+  setAttr('act-tab-explorer', 'title', lang === 'zh' ? '文件瀏覽器 (Explorer)' : (lang === 'ja' ? 'ファイルエクスプローラー (Explorer)' : 'File Explorer (Explorer)'));
+  setAttr('act-tab-concepts', 'title', lang === 'zh' ? '概念標籤管理 (Concepts Registry)' : (lang === 'ja' ? 'コンセプト管理 (Concepts Registry)' : 'Concepts Registry (Concepts)'));
+  setAttr('act-tab-settings', 'title', lang === 'zh' ? '系統設定 (Settings)' : (lang === 'ja' ? 'システム設定 (Settings)' : 'System Settings (Settings)'));
+
+  // Drawer Titles & Buttons
+  set('lbl-drawer-explorer-title', lang === 'zh' ? '文件瀏覽器' : (lang === 'ja' ? 'エクスプローラー' : 'EXPLORER'));
+  set('lbl-drawer-concepts-title', lang === 'zh' ? '概念標籤管理' : (lang === 'ja' ? 'コンセプト管理' : 'CONCEPTS REGISTRY'));
+  set('btn-add-concept', lang === 'zh' ? '+ 新增' : (lang === 'ja' ? '+ 追加' : '+ New'));
+  setAttr('btn-add-concept', 'title', lang === 'zh' ? '手動定立新正式概念' : (lang === 'ja' ? '新しい公式コンセプトを登録' : 'Define New Official Concept'));
+
+  // Search input placeholder
+  const cptSearch = document.getElementById('concept-search');
+  if (cptSearch) cptSearch.placeholder = lang === 'zh' ? '搜尋概念或別名...' : (lang === 'ja' ? 'コンセプトまたは別名を検索...' : 'Search concepts or aliases...');
+
+  // Sub Tab Buttons
+  const btnOfficial = document.getElementById('btn-cpt-official');
+  const btnCandidates = document.getElementById('btn-cpt-candidates');
+  const countOff = document.getElementById('count-cpt-official')?.innerText || '0';
+  const countCand = document.getElementById('count-cpt-candidates')?.innerText || '0';
+
+  const txtOff = lang === 'zh' ? '正式概念' : (lang === 'ja' ? '公式コンセプト' : 'Official');
+  const txtCand = lang === 'zh' ? '待審候選' : (lang === 'ja' ? '審査待ち候補' : 'Candidates');
+
+  if (btnOfficial) btnOfficial.innerHTML = `${txtOff} (<span id="count-cpt-official">${countOff}</span>)`;
+  if (btnCandidates) btnCandidates.innerHTML = `${txtCand} (<span id="count-cpt-candidates">${countCand}</span>)`;
+
+  // Re-render list with updated language
+  renderConceptsDrawerList(cptSearch ? cptSearch.value : '');
+}
+
+// ==========================================================================
+// Unified Settings Modal Controller (Repositories, Language, LLM)
+// ==========================================================================
+
+let currentSettingsTab = 'repo'; // 'repo' | 'lang' | 'llm'
+
+function openSettingsModal(tab = 'repo') {
+  const m = document.getElementById('settings-modal');
+  if (!m) return;
+  m.classList.add('show');
+  updateSettingsModalI18n();
+  switchSettingsTab(tab);
+}
+
+function closeSettingsModal() {
+  const m = document.getElementById('settings-modal');
+  if (m) m.classList.remove('show');
+}
+
+// Backward compatibility redirects
+function openPathModal(bRefresh = true) {
+  openSettingsModal('repo');
+  if (bRefresh) loadProjects();
+}
+
+function closePathModal() {
+  closeSettingsModal();
+}
+
+function toggleProviderDialog(force) {
+  if (force === false) {
+    closeSettingsModal();
+  } else {
+    openSettingsModal('llm');
+  }
+}
+
+function switchSettingsTab(tabName) {
+  currentSettingsTab = tabName;
+  const navRepo = document.getElementById('stg-nav-repo');
+  const navLang = document.getElementById('stg-nav-lang');
+  const navLlm = document.getElementById('stg-nav-llm');
+
+  const pageRepo = document.getElementById('stg-page-repo');
+  const pageLang = document.getElementById('stg-page-lang');
+  const pageLlm = document.getElementById('stg-page-llm');
+
+  if (navRepo) navRepo.classList.toggle('active', tabName === 'repo');
+  if (navLang) navLang.classList.toggle('active', tabName === 'lang');
+  if (navLlm) navLlm.classList.toggle('active', tabName === 'llm');
+
+  if (pageRepo) pageRepo.style.display = tabName === 'repo' ? 'flex' : 'none';
+  if (pageLang) pageLang.style.display = tabName === 'lang' ? 'flex' : 'none';
+  if (pageLlm) pageLlm.style.display = tabName === 'llm' ? 'flex' : 'none';
+
+  if (tabName === 'repo') {
+    loadProjects();
+  } else if (tabName === 'lang') {
+    updateLanguageCardsUI();
+  } else if (tabName === 'llm') {
+    renderProvDialogLabels();
+    renderProvPresets();
+    refreshProviderList();
+    loadProvActiveModel();
+  }
+}
+
+function selectAppLanguage(lang) {
+  currentLanguage = lang;
+  updateLanguageCardsUI();
+  applyAppLanguage();
+}
+
+function updateLanguageCardsUI() {
+  ['en', 'zh', 'ja'].forEach(l => {
+    const card = document.getElementById(`card-lang-${l}`);
+    if (card) card.classList.toggle('active', currentLanguage === l);
+  });
+}
+
+function toggleLanguage() {
+  // Tri-state cycle: EN -> ZH -> JA -> EN
+  if (currentLanguage === 'en') {
+    currentLanguage = 'zh';
+  } else if (currentLanguage === 'zh') {
+    currentLanguage = 'ja';
+  } else {
+    currentLanguage = 'en';
+  }
+  applyAppLanguage();
+}
+
+function applyAppLanguage() {
+  try { localStorage.setItem('docgraph_language', currentLanguage); } catch(e) {}
+  const b = document.getElementById('btn-lang');
+  if (b) {
+    if (currentLanguage === 'en') b.textContent = 'Language: EN';
+    else if (currentLanguage === 'zh') b.textContent = '語言：繁體中文';
+    else if (currentLanguage === 'ja') b.textContent = '言語：日本語';
+  }
+
+  updateSwapButtonI18n();
+  updateControlsHelpI18n();
+  updateActivityBarI18n();
+  updateExplorerI18n();
+  updateConceptsI18n();
+  updateViewerTagToolbarI18n();
+  updateSettingsModalI18n();
+
+  const msg = currentLanguage === 'zh' ? '語系切換：繁體中文'
+            : (currentLanguage === 'ja' ? '言語を切り替えました：日本語' : 'Language switched to English');
+  showToast(msg);
+}
+
+function updateSettingsModalI18n() {
+  const lang = currentLanguage;
+  const set = (id, txt) => { const el = document.getElementById(id); if (el) el.textContent = txt; };
+
+  // Settings Top & Nav
+  set('lbl-settings-main-title', lang === 'zh' ? '系統偏好與設定' : (lang === 'ja' ? 'システム設定と基本設定' : 'Preferences & Settings'));
+  set('stg-lbl-repo', lang === 'zh' ? '倉庫管理' : (lang === 'ja' ? 'リポジトリ管理' : 'Repositories'));
+  set('stg-lbl-lang', lang === 'zh' ? '語系設定' : (lang === 'ja' ? '言語設定' : 'Language'));
+  set('stg-lbl-llm', lang === 'zh' ? 'LLM 供應商' : (lang === 'ja' ? 'LLM プロバイダー' : 'LLM Providers'));
+
+  // Repo Page
+  set('lbl-modal-title', lang === 'zh' ? '倉庫管理' : (lang === 'ja' ? 'リポジトリ管理' : 'Repository Management'));
+  set('lbl-modal-sub', lang === 'zh' ? '掃描本機專案目錄，構建索引 (init)、增量同步 (sync)、全量重建 (index) 或反初始化 (uninit)。'
+                     : (lang === 'ja' ? 'ローカルプロジェクトをスキャンし、インデックス構築(init)、増分同期(sync)、完全再構築(index)を行います。'
+                     : 'Scan local project directories, build index (init), incremental sync (sync), full rebuild (index), or uninitialize (uninit).'));
+  set('lbl-add-dir', lang === 'zh' ? '掃描專案目錄：' : (lang === 'ja' ? 'プロジェクトディレクトリをスキャン：' : 'Scan Project Directory:'));
+  set('lbl-repo-list', lang === 'zh' ? '已發現的倉庫：' : (lang === 'ja' ? '検出されたリポジトリ：' : 'Discovered Repositories:'));
+  set('btn-sync-all', lang === 'zh' ? '⚡ 全部同步' : (lang === 'ja' ? '⚡ すべて同期' : '⚡ Sync all'));
+  set('btn-sync-all-tree', lang === 'zh' ? '⚡ 全部同步' : (lang === 'ja' ? '⚡ すべて同期' : '⚡ Sync all'));
+
+  // Table Headers
+  set('th-proj', lang === 'zh' ? '專案' : (lang === 'ja' ? 'プロジェクト' : 'Project'));
+  set('th-path', lang === 'zh' ? '目錄路徑' : (lang === 'ja' ? 'パス' : 'Directory Path'));
+  set('th-metrics', lang === 'zh' ? '指標' : (lang === 'ja' ? 'メトリクス' : 'Metrics'));
+  set('th-status', lang === 'zh' ? '狀態' : (lang === 'ja' ? 'ステータス' : 'Status'));
+  set('th-actions', lang === 'zh' ? '操作' : (lang === 'ja' ? '操作' : 'Actions'));
+
+  // Language Page
+  set('lbl-lang-page-title', lang === 'zh' ? '顯示語言設定' : (lang === 'ja' ? '表示言語の設定' : 'Display Language'));
+  set('lbl-lang-page-desc', lang === 'zh' ? '選擇您偏好的介面顯示語言，系統將即時動態刷新全部介面。'
+                          : (lang === 'ja' ? '希望するUI表示言語を選択してください。即座に適用されます。'
+                          : 'Select your preferred user interface language. System will update dynamically.'));
+
+  // LLM Page
+  renderProvDialogLabels();
+  updateLanguageCardsUI();
+}
+
+
+function updateActivityBarI18n() {
+  const lang = currentLanguage;
+  const setAttr = (id, attr, txt) => { const el = document.getElementById(id); if (el) el.setAttribute(attr, txt); };
+
+  const tipExplorer = lang === 'zh' ? '文件瀏覽器 (Explorer)'
+                    : (lang === 'ja' ? 'ファイルエクスプローラー (Explorer)' : 'File Explorer (Explorer)');
+  const tipConcepts = lang === 'zh' ? '概念標籤管理 (Concepts Registry)'
+                    : (lang === 'ja' ? 'コンセプト管理 (Concepts Registry)' : 'Concepts Registry (Concepts)');
+  const tipSettings = lang === 'zh' ? '系統設定 (Settings)'
+                    : (lang === 'ja' ? 'システム設定 (Settings)' : 'System Settings (Settings)');
+
+  setAttr('act-tab-explorer', 'title', tipExplorer);
+  setAttr('act-tab-concepts', 'title', tipConcepts);
+  setAttr('act-tab-settings', 'title', tipSettings);
+}
+
+function openFileInEditor(filePath, targetLine = 1) {
+  const fileId = `file::${filePath}`;
+  const gNodes = (Graph && Graph.graphData) ? (Graph.graphData().nodes || []) : (rawData.nodes || []);
+  const found = gNodes.find(n => n.id === fileId || (n.file && n.file.endsWith(filePath)));
+  if (found) {
+    selectActiveNode(found);
+  } else {
+    const repo = getActiveRepoPath();
+    const absPath = repo ? `${repo}/${filePath}` : filePath;
+    selectActiveNode({ id: fileId, name: filePath, file: filePath, abs_path: absPath, kind: 'file', line: targetLine });
+  }
+}
+
+window.browseFolderPath = function() { if (typeof openBrowsePicker === 'function') openBrowsePicker(); };
+
+function updateViewerTagToolbarI18n() {
+  const lang = currentLanguage;
+  const btnAttach = document.getElementById('btn-attach-tag-viewer');
+  if (btnAttach) {
+    btnAttach.textContent = lang === 'zh' ? '🏷️ + 貼標籤' : (lang === 'ja' ? '🏷️ + タグ付け' : '🏷️ + Attach Tag');
+    btnAttach.title = lang === 'zh' ? '為此檔案或章節貼上概念標籤' : (lang === 'ja' ? 'このファイルまたは見出しにタグを付ける' : 'Attach concept tag to this document or section');
+  }
+
+  const lblTags = document.getElementById('lbl-doc-tags-title');
+  if (lblTags) {
+    lblTags.textContent = lang === 'zh' ? '概念標籤 (Tags):' : (lang === 'ja' ? 'タグ (Tags):' : 'Tags:');
+  }
+}
+
+
+
+// ─── Concept Action Modals (+ New, Edit, Merge) ─────────────────────
+let currentConceptActionState = null;
+
+window.openAddConceptModal = function() {
+  openConceptActionModal('add');
+};
+
+window.openEditConceptModal = function(name, category, aliases, event) {
+  if (event) event.stopPropagation();
+  openConceptActionModal('edit', { name, category, aliases });
+};
+
+window.openMergeConceptModal = function(sourceName, event) {
+  if (event) event.stopPropagation();
+  openConceptActionModal('merge', { sourceName });
+};
+
+window.openConceptActionModal = function(mode, data = {}) {
+  currentConceptActionState = { mode, data };
+  const modal = document.getElementById('concept-action-modal');
+  if (!modal) return;
+
+  const zh = currentLanguage === 'zh';
+  const ja = currentLanguage === 'ja';
+
+  const titleEl = document.getElementById('cpt-modal-title');
+  const descEl = document.getElementById('cpt-modal-desc');
+  const submitBtn = document.getElementById('btn-cpt-modal-submit');
+  const cancelBtn = document.getElementById('btn-cpt-modal-cancel');
+
+  const fieldCat = document.getElementById('cpt-field-category');
+  const fieldName = document.getElementById('cpt-field-name');
+  const fieldAliases = document.getElementById('cpt-field-aliases');
+  const fieldTarget = document.getElementById('cpt-field-target');
+
+  const txtCat = document.getElementById('txt-cpt-category');
+  const selCat = document.getElementById('sel-cpt-category');
+  const txtName = document.getElementById('txt-cpt-name');
+  const txtAliases = document.getElementById('txt-cpt-aliases');
+  const selTarget = document.getElementById('sel-cpt-target');
+
+  const lblCat = document.getElementById('lbl-cpt-modal-cat');
+  const lblName = document.getElementById('lbl-cpt-modal-name');
+  const lblAliases = document.getElementById('lbl-cpt-modal-aliases');
+  const tipAliases = document.getElementById('lbl-cpt-modal-aliases-tip');
+  const lblTarget = document.getElementById('lbl-cpt-modal-target');
+  const warnTarget = document.getElementById('lbl-cpt-modal-target-warn');
+
+  // Full i18n synchronization for all static labels & placeholders
+  if (lblCat) lblCat.textContent = zh ? '概念分類 (Category)' : (ja ? 'カテゴリ (Category)' : 'Category');
+  if (txtCat) txtCat.placeholder = zh ? '例如：架構, 硬體, 商業, 專案...' : (ja ? '例：アーキテクチャ, ハードウェア, ビジネス...' : 'e.g. Architecture, Hardware, Business...');
+
+  if (lblName) lblName.textContent = zh ? '概念標準名稱 (Concept Name)' : (ja ? '標準コンセプト名 (Concept Name)' : 'Concept Name');
+  if (txtName) txtName.placeholder = zh ? '例如：微服務, 越南廠, LOO, CVX...' : (ja ? '例：マイクロサービス, ベトナム工場, LOO, CVX...' : 'e.g. Microservices, VietnamPlant, LOO, CVX...');
+
+  if (lblAliases) lblAliases.textContent = zh ? '別名與同義詞 (Aliases / 以逗號分隔)' : (ja ? '別名・同義語 (Aliases / カンマ区切り)' : 'Aliases & Synonyms (Comma separated)');
+  if (txtAliases) txtAliases.placeholder = zh ? '例如：微服務架構, SOA, 分散式系統...' : (ja ? '例：SOA, 分散システム, マイクロサービス...' : 'e.g. SOA, Distributed Systems, Microservice Arch...');
+  if (tipAliases) tipAliases.textContent = zh ? '多個別名請以逗號分隔，系統將自動比對知識圖譜。' : (ja ? '複数の別名はカンマで区切ってください。自動的に照合されます。' : 'Separate multiple aliases with commas. Graph will link matches automatically.');
+
+  if (lblTarget) lblTarget.textContent = zh ? '合併匯入之目標概念 (Target Concept)' : (ja ? '統合先の対象コンセプト (Target Concept)' : 'Target Concept (Destination)');
+  if (warnTarget) warnTarget.textContent = zh ? '⚠ 合併後來源概念將被刪除，其引用文件將全部重定向至目標概念。' : (ja ? '⚠ 統合後、元のコンセプトは削除され、全参照が対象コンセプトにリダイレクトされます。' : '⚠ After merging, source concept will be deleted and all references redirected to target.');
+
+  if (cancelBtn) cancelBtn.textContent = zh ? '取消' : (ja ? 'キャンセル' : 'Cancel');
+
+  // Populate existing categories dropdown
+  if (selCat) {
+    selCat.innerHTML = `<option value="">${zh ? '選擇現有分類…' : (ja ? '既存カテゴリを選択…' : 'Select category…')}</option>`;
+    const tree = (conceptsTreeData && conceptsTreeData.tree) ? conceptsTreeData.tree : {};
+    Object.keys(tree).forEach(cat => {
+      const opt = document.createElement('option');
+      opt.value = cat;
+      opt.textContent = `📁 ${getCategoryDisplayName(cat)}`;
+      selCat.appendChild(opt);
+    });
+  }
+
+  if (mode === 'add') {
+    if (titleEl) titleEl.textContent = zh ? '✨ 定義正式概念' : (ja ? '✨ 公式コンセプトの定義' : '✨ Define Official Concept');
+    if (descEl) descEl.textContent = zh ? '定立知識庫官方核心概念詞彙，並可設定其分類與多重別名。' : (ja ? '知識ベースの公式コア概念を定義し、カテゴリと別名を設定します。' : 'Define an official knowledge concept with category and aliases.');
+    if (submitBtn) submitBtn.textContent = zh ? '建立概念' : (ja ? '作成' : 'Create Concept');
+
+    if (fieldCat) fieldCat.style.display = 'block';
+    if (fieldName) fieldName.style.display = 'block';
+    if (fieldAliases) fieldAliases.style.display = 'block';
+    if (fieldTarget) fieldTarget.style.display = 'none';
+
+    if (txtCat) txtCat.value = '';
+    if (txtName) { txtName.value = ''; txtName.disabled = false; }
+    if (txtAliases) txtAliases.value = '';
+
+  } else if (mode === 'edit') {
+    if (titleEl) titleEl.textContent = zh ? `✏️ 編輯概念「${data.name}」` : (ja ? `✏️ コンセプト「${data.name}」の編集` : `✏️ Edit Concept '${data.name}'`);
+    if (descEl) descEl.textContent = zh ? '修改概念標籤所屬分類與搜尋同義詞別名。' : (ja ? 'カテゴリおよび検索用別名・シノニムを変更します。' : 'Modify concept category and search aliases.');
+    if (submitBtn) submitBtn.textContent = zh ? '儲存變更' : (ja ? '保存' : 'Save Changes');
+
+    if (fieldCat) fieldCat.style.display = 'block';
+    if (fieldName) fieldName.style.display = 'block';
+    if (fieldAliases) fieldAliases.style.display = 'block';
+    if (fieldTarget) fieldTarget.style.display = 'none';
+
+    if (txtCat) txtCat.value = data.category || '';
+    if (txtName) { txtName.value = data.name || ''; txtName.disabled = true; }
+    const aliasStr = Array.isArray(data.aliases) ? data.aliases.join(', ') : (data.aliases || '');
+    if (txtAliases) txtAliases.value = aliasStr;
+
+  } else if (mode === 'merge') {
+    if (titleEl) titleEl.textContent = zh ? `🔗 合併概念「${data.sourceName}」` : (ja ? `🔗 コンセプト「${data.sourceName}」の統合` : `🔗 Merge Concept '${data.sourceName}'`);
+    if (descEl) descEl.textContent = zh ? `將「${data.sourceName}」的所有引用文件重定向整合至另一個目標概念，並將其自動轉為別名。` : (ja ? `「${data.sourceName}」の全参照を対象コンセプトに統合し、別名として登録します。` : `Merge all references of '${data.sourceName}' into target concept and save as alias.`);
+    if (submitBtn) submitBtn.textContent = zh ? '確認合併' : (ja ? '統合を実行' : 'Confirm Merge');
+
+    if (fieldCat) fieldCat.style.display = 'none';
+    if (fieldName) fieldName.style.display = 'none';
+    if (fieldAliases) fieldAliases.style.display = 'none';
+    if (fieldTarget) fieldTarget.style.display = 'block';
+
+    // Populate target concepts (excluding source)
+    if (selTarget) {
+      selTarget.innerHTML = `<option value="">${zh ? '-- 選擇目標概念 --' : (ja ? '-- 統合先を選択 --' : '-- Select Target Concept --')}</option>`;
+      const tree = (conceptsTreeData && conceptsTreeData.tree) ? conceptsTreeData.tree : {};
+      Object.keys(tree).forEach(cat => {
+        const grp = document.createElement('optgroup');
+        grp.label = `📁 ${cat}`;
+        (tree[cat] || []).forEach(item => {
+          if (item.name !== data.sourceName) {
+            const opt = document.createElement('option');
+            opt.value = item.name;
+            opt.textContent = `🏷️ ${item.name}`;
+            grp.appendChild(opt);
+          }
+        });
+        if (grp.children.length) selTarget.appendChild(grp);
+      });
+    }
+  }
+
+  modal.style.display = 'flex';
+  modal.classList.add('show');
+};
+
+window.closeConceptActionModal = function() {
+  const modal = document.getElementById('concept-action-modal');
+  if (modal) {
+    modal.style.display = 'none';
+    modal.classList.remove('show');
+  }
+  currentConceptActionState = null;
+};
+
+window.submitConceptActionModal = function() {
+  if (!currentConceptActionState) return;
+  const { mode, data } = currentConceptActionState;
+  const zh = currentLanguage === 'zh';
+  const repo = getActiveRepoPath();
+
+  if (mode === 'add' || mode === 'edit') {
+    const name = (document.getElementById('txt-cpt-name').value || '').trim();
+    let rawCategory = (document.getElementById('txt-cpt-category').value || '').trim();
+    const category = (!rawCategory || rawCategory === '未分類' || rawCategory === 'Uncategorized') ? 'Uncategorized' : rawCategory;
+    const aliases = (document.getElementById('txt-cpt-aliases').value || '').trim();
+
+    if (!name) {
+      alert(zh ? '請輸入概念標準名稱！' : 'Please enter a concept name!');
+      return;
+    }
+
+    fetch('/api/concepts', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ repo, name, category, aliases, status: 'official' })
+    })
+      .then(r => r.json())
+      .then(res => {
+        if (res.ok) {
+          showToast(zh ? `✅ 概念標籤「${name}」儲存成功！` : `✅ Concept '${name}' saved!`);
+          closeConceptActionModal();
+          fetchConceptsData();
+          loadMasterGraphAndFilter();
+          setTimeout(() => { if (typeof buildProjectTree === 'function') buildProjectTree(); }, 150);
+          if (typeof onConceptCardClick === 'function') onConceptCardClick(name);
+        } else {
+          alert(res.error || 'Failed to save concept');
+        }
+      })
+      .catch(e => alert('Request error: ' + e));
+
+  } else if (mode === 'merge') {
+    const selTarget = document.getElementById('sel-cpt-target');
+    const target = selTarget ? selTarget.value : '';
+    const source = data.sourceName;
+
+    if (!target) {
+      alert(zh ? '請選擇要合併的目標概念！' : 'Please select a target concept!');
+      return;
+    }
+
+    fetch('/api/concepts/merge', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ repo, source, target, addAsAlias: true })
+    })
+      .then(r => r.json())
+      .then(res => {
+        if (res.ok) {
+          showToast(zh ? `✅ 已將「${source}」合併至「${target}」！` : `✅ Merged '${source}' into '${target}'!`);
+          closeConceptActionModal();
+          fetchConceptsData();
+          loadMasterGraphAndFilter();
+          setTimeout(() => { if (typeof buildProjectTree === 'function') buildProjectTree(); }, 150);
+          if (typeof onConceptCardClick === 'function') onConceptCardClick(target);
+        } else {
+          alert(res.error || 'Failed to merge concepts');
+        }
+      })
+      .catch(e => alert('Merge error: ' + e));
+  }
+};
+
+
+
+
+window.deleteConcept = function(conceptName, event) {
+  if (event) {
+    event.stopPropagation();
+    event.preventDefault();
+  }
+  const zh = currentLanguage === 'zh';
+  const ja = currentLanguage === 'ja';
+  const repo = getActiveRepoPath();
+
+  const title = zh ? '⚠ 永久刪除概念標籤' : (ja ? '⚠ コンセプトタグの完全削除' : '⚠ Delete Concept Tag Permanently');
+  const msg = zh 
+    ? `確定要永久刪除概念標籤「${conceptName}」嗎？\n\n⚠ 此操作將：\n1. 從 SQLite 資料庫註冊表中徹底清除該概念。\n2. 自動搜尋並清除所有引用此標籤之 Markdown 文件的關聯標記！\n3. 刪除對應的標籤說明文件。`
+    : (ja 
+      ? `コンセプトタグ「${conceptName}」を完全に削除しますか？\n\n⚠ この操作により：\n1. SQLite データベースから完全に削除されます。\n2. 参照しているすべての Markdown ファイルから該当タグが削除されます。\n3. 対応するタグ定義ファイルも削除されます。`
+      : `Are you sure you want to permanently delete concept tag '${conceptName}'?\n\n⚠ This action will:\n1. Completely remove it from the SQLite registry.\n2. Automatically wipe this tag mark from all referencing Markdown documents!\n3. Remove the corresponding tag document.`);
+
+  const confirmText = zh ? '永久刪除' : (ja ? '完全に削除' : 'Delete Permanently');
+  const cancelText = zh ? '取消' : (ja ? 'キャンセル' : 'Cancel');
+  const tip = zh ? '💡 提示：此標籤在所有 Markdown 文檔內的 [[Tag]] 參照標記將被一併移除。' : (ja ? '💡 ヒント：すべての Markdown ドキュメント内の [[Tag]] 参照も削除されます。' : '💡 Note: References in all Markdown files will be cleaned automatically.');
+
+  showCyberConfirm(title, msg, () => {
+    fetch('/api/concepts/delete', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ repo, name: conceptName, cleanDisk: true })
+    })
+      .then(async res => {
+        const text = await res.text();
+        try {
+          return { status: res.status, ok: res.ok, data: JSON.parse(text) };
+        } catch (err) {
+          throw new Error(`Server returned ${res.status}: ${text.slice(0, 150)}`);
+        }
+      })
+      .then(({ status, ok, data }) => {
+        if (ok && data && data.ok) {
+          showToast(zh ? `🗑️ 已徹底刪除概念標籤「${conceptName}」！` : (ja ? `🗑️ コンセプト「${conceptName}」を削除しました！` : `🗑️ Deleted concept '${conceptName}'!`));
+          fetchConceptsData();
+          loadMasterGraphAndFilter();
+          setTimeout(() => {
+            if (typeof buildProjectTree === 'function') buildProjectTree();
+          }, 150);
+          // If viewing this tag page, reset viewer
+          if (selectedConceptName === conceptName) {
+            selectedConceptName = null;
+            const container = document.getElementById('d-code-markdown');
+            if (container) {
+              container.innerHTML = `<div class="doc-placeholder-state"><div style="font-size:28px; margin-bottom:8px;">📄</div><div style="font-size:14px; color:#8b949e;">${zh ? '標籤已被刪除' : 'Tag was deleted'}</div></div>`;
+            }
+          }
+        } else {
+          alert(data?.error || `Failed to delete concept (HTTP ${status})`);
+        }
+      })
+      .catch(e => alert('Delete error: ' + e.message));
+  }, { confirmText, cancelText, tip });
+};
+
