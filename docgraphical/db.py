@@ -178,6 +178,7 @@ def _FnInsertFileNodes(cur: sqlite3.Connection, repo_path: str,
     headings_in_file = 0
     in_code_block = False
     wikilink_pat = re.compile(r"\[\[([^\]|#\n]+)(?:#[^\]|\n]+)?(?:\|([^\]\n]+))?\]\]")
+    taglink_pat = re.compile(r"\[([^\]\n]+)\]\(([^)\n]*\.docgraphical/tags/[^)\n]*\.md[^)\n]*)\)")
     b_is_catalog = (os.path.basename(rel_path).upper() == "DOC_CATALOG.MD")
 
     for idx, line in enumerate(lines, 1):
@@ -234,6 +235,35 @@ def _FnInsertFileNodes(cur: sqlite3.Connection, repo_path: str,
                     edge_id = f"wikilink::{src_id}::L{idx}->{cid}"
                     cur.execute("INSERT OR IGNORE INTO edges VALUES (?, ?, ?, ?, ?)",
                         (edge_id, src_id, cid, "wiki_link", idx))
+            # Physical tag links [Name](../.docgraphical/tags/Name.md) count
+            # exactly like legacy brackets (same node/edge shape).
+            # Identity comes from the URL basename (canonical), NOT the
+            # display text: staged links preserve surface case ([Chenbro]),
+            # but must attach to the one canonical node.
+            for tm in taglink_pat.finditer(line_clean):
+                conc = tm.group(1).strip()
+                if not conc or len(conc) > 60:
+                    continue
+                try:
+                    _base = tm.group(2).split("/")[-1].split("#")[0].split("?")[0]
+                    if _base.lower().endswith(".md"):
+                        _base = _base[:-3]
+                    from urllib.parse import unquote as _unq
+                    _base = _unq(_base).strip()
+                except Exception:
+                    _base = ""
+                if _base:
+                    conc = _base
+                cur.execute("SELECT 1 FROM concept_exclusions WHERE concept_name = ? AND file_path = ?", (conc, rel_path))
+                if cur.fetchone():
+                    continue
+                cid = f"concept::{conc}"
+                cur.execute("INSERT OR IGNORE INTO nodes VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    (cid, rel_path, "concept", conc, 0, idx, idx, 1, f"Concept tag: {conc}"))
+                tsrc = file_node_id if (not heading_stack) else heading_stack[-1][1]
+                edge_id = f"taglink::{tsrc}::L{idx}->{cid}"
+                cur.execute("INSERT OR IGNORE INTO edges VALUES (?, ?, ?, ?, ?)",
+                    (edge_id, tsrc, cid, "wiki_link", idx))
 
     cur.execute("UPDATE files SET node_count = ? WHERE path = ?",
             (headings_in_file + 1, rel_path))
@@ -742,6 +772,66 @@ def get_db_stats(repo_path: str) -> Dict[str, Any]:
     return {"has_db": False, "nodes": 0, "links": 0}
 
 
+HUMAN_TABLES = ("concepts", "rejected_terms", "scan_evidence",
+                "staged_items", "staged_runs", "operation_logs",
+                "concept_exclusions")
+
+
+def FnBackupHumanTables(db_path):
+    """Dump human-decision tables (registry, blacklist, evidence, staged,
+    logs, exclusions) as {table: (schema, rows)}. Derived nodes/edges are
+    NOT included — they rebuild. Missing tables are skipped silently."""
+    import sqlite3 as _sq3
+    out = {}
+    if not db_path or not os.path.isfile(db_path):
+        return out
+    try:
+        con = _sq3.connect(db_path)
+        for t in HUMAN_TABLES:
+            try:
+                sch = con.execute(
+                    "SELECT sql FROM sqlite_master WHERE type='table' AND name=?",
+                    (t,)).fetchone()
+                rows = con.execute(
+                    "SELECT * FROM [%s]" % t.replace("]", "")).fetchall()
+                out[t] = (sch[0] if sch else None, rows)
+            except Exception:
+                continue
+        con.close()
+    except Exception:
+        pass
+    return out
+
+
+def FnRestoreHumanTables(db_path, dump):
+    """Restore a FnBackupHumanTables dump (core tables may already exist
+    empty — IF NOT EXISTS, then fill). Returns {table: n_restored}."""
+    import sqlite3 as _sq3
+    restored = {}
+    if not dump or not db_path:
+        return restored
+    try:
+        con = _sq3.connect(db_path)
+        for t, (sch, rows) in dump.items():
+            try:
+                if sch:
+                    con.execute(sch.replace(
+                        "CREATE TABLE", "CREATE TABLE IF NOT EXISTS", 1))
+                if rows:
+                    cols = len(rows[0])
+                    con.executemany(
+                        "INSERT OR IGNORE INTO [%s] VALUES (%s)" % (
+                            t, ",".join("?" * cols)), rows)
+                    restored[t] = len(rows)
+            except Exception:
+                continue
+        con.commit()
+        con.close()
+    except Exception:
+        pass
+    return restored
+
+
 def uninit_repository(repo_path: str) -> bool:
     """Delete .docgraphical and .docgraph directories for a repository."""
     import shutil
@@ -848,6 +938,24 @@ def get_concepts_tree(repo_path: str) -> dict:
                     "createdAt": time.strftime("%Y-%m-%d %H:%M:%S")
                 }
                 candidates.append(cand_item)
+
+        # Crawl candidates (Vine) have no wiki_link edges by design —
+        # their "Refs" is the number of staged nodes (kept link/tag pairs)
+        # bound to them, so the pill reflects real work, not a bare 0.
+        try:
+            staged = {}
+            for cname, n in cur.execute(
+                    "SELECT concept, COUNT(DISTINCT file || '|' || mention)"
+                    " FROM staged_items WHERE concept <> ''"
+                    " AND status IN ('kept', 'applied') GROUP BY concept"):
+                if cname:
+                    staged[cname] = n or 0
+            for c in candidates:
+                if (c.get("category") or "").strip() in ("順藤摸瓜", "Vine"):
+                    c["refs"] = staged.get(c["name"], 0)
+                    c["staged"] = staged.get(c["name"], 0)
+        except Exception:
+            pass
 
         return {
             "ok": True,
@@ -1206,6 +1314,33 @@ def unlink_concept_file(repo_path: str, concept_name: str, rel_file_path: str, r
 
         cur.execute("DELETE FROM concept_exclusions WHERE concept_name = ? AND file_path = ?", (concept_name, clean_file))
         conn.commit()
+
+        # Global-dismiss hook: the candidates pool calls unlink with
+        # filePath='*' meaning "reject this concept everywhere". Record a
+        # persistent blacklist row so future scans skip it. Per-file unlinks
+        # (real paths) intentionally do NOT blacklist.
+        if clean_file == "*":
+            try:
+                cur.execute("""
+                    CREATE TABLE IF NOT EXISTS rejected_terms (
+                        term TEXT PRIMARY KEY,
+                        decided_by TEXT DEFAULT '',
+                        decided_at TEXT NOT NULL
+                    )
+                """)
+                cur.execute(
+                    "INSERT OR IGNORE INTO rejected_terms(term, decided_by, decided_at)"
+                    " VALUES(?, 'drawer-dismiss', ?)",
+                    (concept_name, time.strftime("%Y-%m-%d %H:%M:%S")))
+                # Drop its pending candidate row too, or the pool keeps
+                # showing a term the human just rejected. Official rows
+                # are never touched here (delete flow owns those).
+                cur.execute(
+                    "DELETE FROM concepts WHERE name = ? AND status = 'candidate'",
+                    (concept_name,))
+                conn.commit()
+            except Exception:
+                pass
 
         # 3. Force re-parsing this file to sync node/edge topology reliably
         abs_p = os.path.join(repo_path, clean_file)

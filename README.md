@@ -59,6 +59,13 @@ In one line: **CPU decides which cuts to read; the LLM only reads those cuts int
 - REST API: `/api/browse` + `/api/browse/mkdir`, `/api/ingest/{upload,summarize,save,delete,source}`, `/api/sync*`, `/api/doc/section` (slicing + `full_chars` true denominator)
 - 3D knowledge map (screen-space flight, pole guards), Electron copy byte-synced with web
 
+### Concept layer (Prospect + Vine) — v1.5.0
+- **Two miners, one pool**: Prospect (corpus frequency: DF/TF recount with mtime-fingerprint cache, one LLM review per round) and Vine (user seed + DFS stack-walk, batched at 5 files per LLM call) propose candidates; **nothing touches disk until a human promotes**
+- **Staged, then human-ruled**: candidates accumulate in `staged_items` with file/heading evidence; draft review pages carry a preview banner plus a dashed preview of the exact tag line to be written; Promote writes inline links + section tag lines + `tags/<Name>.md`, Remove/Blacklist never writes
+- **Crawler guardrails proven in production**: per-call `max_completion_tokens` caps (gpt-5 series rejects legacy `max_tokens`), 150 s total hard deadline with fuse-and-requeue (a timed-out batch retries once, skips after two consecutive failures), LIFO drain livelock fixed, per-stage trace log
+- **Viewer navigation**: browser-like back/forward across document, section, tag, and draft pages, restored through the same selection entry points (explorer + 3D + viewer stay synced)
+- REST API: `/api/concepts/scan*` (mine/review/confirm/blacklist), `/api/crawl/{start,next,finish,confirm,refresh}` (runs live in server memory), `/api/concepts/candidates/draft` (evidence groups)
+
 ---
 
 ## Target architecture
@@ -259,7 +266,7 @@ console.log(slice);
 
 ## Development Status
 
-- Iterating locally, **no rush for a GitHub release** (see PLAN §8).
+- **v1.5.0** — concept layer live (Prospect + Vine, staged pool, human promote), crawler hardened (drain-livelock fix, token caps, hard deadlines, requeue), draft-review UX (preview banner, plain-words progress, page history).
 - Web studio (port 5002 main DB / 5003 clean instance) + Electron desktop copy (`app/`, byte-synced).
 - Open issues (O1–O5) and acceptance criteria: see [`PLAN.zh-TW.md`](PLAN.zh-TW.md) §7, §9.
 

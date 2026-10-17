@@ -59,6 +59,13 @@
 - REST API：`/api/browse`＋`/api/browse/mkdir`、`/api/ingest/{upload,summarize,save,delete,source}`、`/api/sync*`、`/api/doc/section`（切片＋`full_chars` 真分母）
 - 3D 知識地圖（screen-space 飛行、極點保護）、Electron 副本與 Web 版 byte 級同步
 
+### 概念層（探礦 Prospect＋順藤 Vine）——v1.5.0
+- **雙礦工、同一池**：探礦（全庫頻次：mtime 指紋快取的 DF/TF 重算，每輪一次 LLM 評審）與順藤（使用者種子＋DFS 棧行走，每 5 檔併一批判）只提名候選；**人按轉正之前，一字不落檔**
+- **先暫存、再由人裁**：候選帶檔／段證據積在 `staged_items`；底稿審核頁掛預覽橫幅＋虛線預覽（轉正後標籤行的原樣）；轉正寫內文連結＋段落標籤行＋`tags/<名>.md`，移除／黑名單永不寫檔
+- **生產環境驗證過的護欄**：逐通 `max_completion_tokens` 配額（gpt-5 系列送舊名 `max_tokens` 會 400）、150 秒總時限硬殺＋熔斷重排（超時退回重判一次，連跪兩次才跳過）、LIFO 取排水栓修復、逐段計時 trace
+- **檢視器翻頁**：瀏覽器式上一頁／下一頁（文件、段落、標籤頁、底稿頁全記），還原走同一選取入口（左樹＋3D＋檢視器連動）
+- REST API：`/api/concepts/scan*`（挖／審／收／黑名單）、`/api/crawl/{start,next,finish,confirm,refresh}`（runs 駐 server 記憶體）、`/api/concepts/candidates/draft`（證據分組）
+
 ---
 
 ## 目標架構
@@ -259,7 +266,7 @@ console.log(slice);
 
 ## 開發狀態
 
-- 本地迭代中，**不急於發佈 GitHub**（見 PLAN 第八節）。
+- **v1.5.0**——概念層上線（探礦＋順藤、暫存池、人轉正）、爬行加固（取排水栓修復、token 配額、硬時限、重排）、底稿審核 UX（預覽橫幅、白話進度、翻頁歷史）。
 - Web 工作站（port 5002 主庫／5003 乾淨實例）＋ Electron 桌面副本（`app/`，byte 級同步）。
 - 未決事項（O1–O5）與驗收標準見 [`PLAN.zh-TW.md`](PLAN.zh-TW.md) 第七、九節。
 

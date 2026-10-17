@@ -189,7 +189,7 @@ function createFileLabelSprite(n) {
   if (!n) return null;
 
   const isFile = (n.kind === 'file');
-  const labelText = isFile ? (n.file || n.name || '').split(/[\\/]/).pop() : (n.name || '');
+  const labelText = stripMdLinks(isFile ? (n.file || n.name || '').split(/[\\/]/).pop() : (n.name || ''));
   if (!labelText) return null;
 
   const color = KIND_COLORS[n.kind] || '#58a6ff';
@@ -225,7 +225,7 @@ function createCustomNodeObject(n) {
     if (typeof SpriteText !== 'undefined') {
       try {
         // 純標籤牌直接作為 3D 本體實體！完全移除 3D 方塊與 Halo，居中對齊連線
-        const sprite = new SpriteText(`🏷️ ${n.name}`);
+         const sprite = new SpriteText(`🏷️ ${stripMdLinks(n.name)}`);
         sprite.color = '#ffffff';
         sprite.textHeight = 2.4;
         sprite.backgroundColor = 'rgba(10, 14, 22, 0.92)';
@@ -268,17 +268,13 @@ function init3DGraph() {
     .nodeLabel(n => {
       if (n.kind === 'concept') {
         return `<div class="scene-tooltip">
-          <div class="tooltip-title" style="color:#f0883e;">🏷️ ${escapeHtml(n.name)}</div>
+          <div class="tooltip-title" style="color:#f0883e;">🏷️ ${escapeHtml(stripMdLinks(n.name))}</div>
           <div class="tooltip-sub">Concept Tag</div>
         </div>`;
       }
       const typeLabel = n.kind === 'file' ? 'Document' : `H${n.level || 1} Section`;
-      const fileName = (n.file || '').split(/[\\/]/).pop();
-      const nodeColor = KIND_COLORS[n.kind] || '#58a6ff';
-      return `<div class="scene-tooltip">
-        <div class="tooltip-title" style="color:${nodeColor};">${escapeHtml(n.name)}</div>
-        <div class="tooltip-sub">${typeLabel} · ${escapeHtml(fileName)} · Line ${n.line || 1}</div>
-      </div>`;
+      // Shared plate: identical look to the tag-table crumb cell.
+      return `<div class="scene-tooltip">${nodePlateHtml({ title: n.name, kind: n.kind, level: n.level, file: n.file, line: n.line, clickable: false })}</div>`;
     })
     .nodeColor(n => {
       if (highlightNodes.size > 0) {
@@ -446,17 +442,9 @@ function focusOnNode(node) {
   if (!liveNode) return;
   activeNode = liveNode;
 
-  // 1. 真·近祖置中 (Focus on 1-level Direct Immediate Parent for sections, NEVER skip to root file!)
-  let centerNode = liveNode;
-  if (liveNode.kind !== 'file' && liveNode.kind !== 'concept') {
-    const gNodes = (Graph && Graph.graphData) ? (Graph.graphData().nodes || []) : (rawData.nodes || []);
-    const nearAncestor = findImmediateAncestor(liveNode, gNodes);
-    if (nearAncestor && nearAncestor.x !== undefined) {
-      centerNode = nearAncestor;
-    }
-  }
-
-  if (centerNode.x === undefined) centerNode = liveNode;
+  // 1. Center the SELECTED node itself — never its ancestor. Explorer +
+  // 3D + viewer all sync to the same node (selection decree).
+  const centerNode = liveNode;
   if (centerNode.x === undefined) return;
 
   if (Graph) {
@@ -1083,8 +1071,8 @@ function buildProjectTree() {
       <span class="tree-arrow ${isProjOpen ? 'open' : ''}">▸</span>
       <input type="checkbox" ${isSelected ? 'checked' : ''} title="Toggle project inclusion" />
       <span title="${escapeHtml(projName)}" style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:600;color:#58a6ff;">📦 ${escapeHtml(projName)}</span>
-      <button class="mini-btn" style="margin-left:auto; width:22px; height:20px; padding:0; font-size:11px; display:inline-flex; align-items:center; justify-content:center; flex-shrink:0;" title="${vProjZh ? '在此專案新增文件…（開啟 LLM 摘要入庫對話框）' : 'New document here… (open LLM summary ingest dialog)'}" onclick="event.stopPropagation();treeNewDocument('${vProjEsc}')">＋</button>
-      <span class="node-kind-tag" style="margin-left:6px;">${proj.files || Object.keys(projData.files).length} md</span>
+      <button class="mini-btn txbtn" style="margin-left:auto; width:22px; height:20px; padding:0; font-size:11px; display:inline-flex; align-items:center; justify-content:center; flex-shrink:0;" title="${vProjZh ? '在此專案新增文件…（開啟 LLM 摘要入庫對話框）' : 'New document here… (open LLM summary ingest dialog)'}" onclick="event.stopPropagation();treeNewDocument('${vProjEsc}')">＋</button>
+      <span class="node-kind-tag txbadge" style="margin-left:6px;">${proj.files || Object.keys(projData.files).length} md</span>
       ${vProjIndexed ? '' : `<button class="mini-btn" style="margin-left:6px; padding:1px 8px; font-size:10px; border-color:#9e6a03; color:#d29922;" title="${vProjZh ? '建立索引後才會出現在圖上' : 'Index it to show its nodes in the graph'}" onclick="event.stopPropagation();initRepo('${vProjEsc}', this)">${vProjZh ? '＋ 建立索引' : '＋ Create Index'}</button>`}
     `;
 
@@ -1325,9 +1313,9 @@ function renderDirContents(projName, dirObj, parentEl, openDirs, openFiles, sele
     dirNodeEl.innerHTML = `
       <span class="tree-arrow ${isDirOpen ? 'open' : ''}">▸</span>
       <span title="${escapeHtml(dName)}" style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:500;color:#e6edf3;">📁 ${escapeHtml(dName)}</span>
-      <button class="mini-btn" style="margin-left:auto; width:22px; height:20px; padding:0; font-size:11px; display:inline-flex; align-items:center; justify-content:center; flex-shrink:0;" title="${vDirZh ? `在此資料夾新增文件…（${escapeHtml(vDirAbs)}）` : (vDirJa ? `このフォルダに新規ドキュメント…（${escapeHtml(vDirAbs)}）` : `New document here… (${escapeHtml(vDirAbs)})`)}" onclick="event.stopPropagation();treeNewDocument('${vDirEsc}')">＋</button>
-      <button class="mini-btn" style="margin-left:4px; width:22px; height:20px; padding:0; font-size:11px; display:inline-flex; align-items:center; justify-content:center; flex-shrink:0; border-color:#5a2d2d; color:#f85149;" title="${vDirZh ? `刪除資料夾「${escapeHtml(dName)}」（包含全部子文件與索引，需確認）` : (vDirJa ? `フォルダ「${escapeHtml(dName)}」を削除（全サブファイルとインデックス含む、要確認）` : `Delete folder "${escapeHtml(dName)}" (all files + index, asks first)`)}" onclick="event.stopPropagation();treeDeleteDir('${vDirEsc}', '${vDNameEsc}')">−</button>
-      ${vDirCount > 0 ? `<span class="node-kind-tag" style="margin-left:6px;">${vDirCount} md</span>` : ''}
+      <button class="mini-btn txbtn" style="margin-left:auto; width:22px; height:20px; padding:0; font-size:11px; display:inline-flex; align-items:center; justify-content:center; flex-shrink:0;" title="${vDirZh ? `在此資料夾新增文件…（${escapeHtml(vDirAbs)}）` : (vDirJa ? `このフォルダに新規ドキュメント…（${escapeHtml(vDirAbs)}）` : `New document here… (${escapeHtml(vDirAbs)})`)}" onclick="event.stopPropagation();treeNewDocument('${vDirEsc}')">＋</button>
+      <button class="mini-btn txbtn" style="margin-left:4px; width:22px; height:20px; padding:0; font-size:11px; display:inline-flex; align-items:center; justify-content:center; flex-shrink:0; border-color:#5a2d2d; color:#f85149;" title="${vDirZh ? `刪除資料夾「${escapeHtml(dName)}」（包含全部子文件與索引，需確認）` : (vDirJa ? `フォルダ「${escapeHtml(dName)}」を削除（全サブファイルとインデックス含む、要確認）` : `Delete folder "${escapeHtml(dName)}" (all files + index, asks first)`)}" onclick="event.stopPropagation();treeDeleteDir('${vDirEsc}', '${vDNameEsc}')">−</button>
+      ${vDirCount > 0 ? `<span class="node-kind-tag txbadge" style="margin-left:6px;">${vDirCount} md</span>` : ''}
     `;
 
     const dirChildrenEl = document.createElement('div');
@@ -1391,9 +1379,9 @@ function renderDirContents(projName, dirObj, parentEl, openDirs, openFiles, sele
       <span class="tree-arrow ${isFileOpen ? 'open' : ''}" style="${bUnindexed ? 'visibility:hidden;' : ''}">▸</span>
       ${getDocIconSvg(bUnindexed ? '#d29922' : (KIND_COLORS.file || '#f0883e'))}
       <span title="${escapeHtml(fName)}" style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:${bUnindexed ? '#d29922' : '#c9d1d9'};">${escapeHtml(fName)}</span>
-      ${vIsMd ? `<button class="mini-btn" style="width:22px; height:20px; padding:0; font-size:11px; display:inline-flex; align-items:center; justify-content:center; flex-shrink:0; border-color:#5a2d2d; color:#f85149;" title="${bUzh ? `刪除「${escapeHtml(fName)}」（md＋來源檔＋索引，需確認）` : `Delete "${escapeHtml(fName)}" (md + sources + index, asks first)`}" onclick="event.stopPropagation();treeDeleteFile('${vFileEsc}', '${vNameEsc}')">−</button>` : ''}
+      ${vIsMd ? `<button class="mini-btn txbtn" style="width:22px; height:20px; padding:0; font-size:11px; display:inline-flex; align-items:center; justify-content:center; flex-shrink:0; border-color:#5a2d2d; color:#f85149;" title="${bUzh ? `刪除「${escapeHtml(fName)}」（md＋來源檔＋索引，需確認）` : `Delete "${escapeHtml(fName)}" (md + sources + index, asks first)`}" onclick="event.stopPropagation();treeDeleteFile('${vFileEsc}', '${vNameEsc}')">−</button>` : ''}
       ${bUnindexed
-        ? `<span class="node-kind-tag" style="flex-shrink:0;margin-left:6px;background:#3a2e12;color:#d29922;border:1px solid #9e6a03;">${bUzh ? '⏳ 待索引' : '⏳ unindexed'}</span>`
+        ? `<span class="node-kind-tag txbadge" style="flex-shrink:0;margin-left:6px;background:#3a2e12;color:#d29922;border:1px solid #9e6a03;">${bUzh ? '⏳ 待索引' : '⏳ unindexed'}</span>`
         : ''}
     `;
 
@@ -1453,7 +1441,7 @@ function renderDirContents(projName, dirObj, parentEl, openDirs, openFiles, sele
             <span style="font-size:12px;">📎</span>
             <span style="color:#c9d1d9;">${escapeHtml(sName)}</span>
           </span>
-          <span class="node-kind-tag" style="flex-shrink:0;margin-left:6px;background:rgba(56, 139, 253, 0.1);color:#58a6ff;border:1px solid rgba(56, 139, 253, 0.3);font-size:9px;font-weight:600;padding:0 5px;">${escapeHtml(sExt) || 'SRC'}</span>
+          <span class="node-kind-tag txbadge" style="flex-shrink:0;margin-left:6px;background:rgba(56, 139, 253, 0.1);color:#58a6ff;border:1px solid rgba(56, 139, 253, 0.3);font-size:9px;font-weight:600;padding:0 5px;">${escapeHtml(sExt) || 'SRC'}</span>
         `;
 
         // 1. Single click: select only (no auto opening)
@@ -1702,7 +1690,7 @@ function selectActiveNode(node, bSkipDelegates = false) {
 
   const dName = document.getElementById('d-name');
   const dSub = document.getElementById('d-sub');
-  if (dName) dName.innerText = node.name || 'Unnamed';
+   if (dName) dName.innerText = stripMdLinks(node.name) || 'Unnamed';
   if (dSub) dSub.innerText = `${node.file || ''} · Line ${node.line || 1}`;
 
   const badge = document.getElementById('d-kind-badge');
@@ -1756,6 +1744,87 @@ function selectActiveNode(node, bSkipDelegates = false) {
 
   // Update Right Column Lower Pane via decoupled handler
   renderConnectedRelationsPanel(node);
+  // Browser-history record (skipped during navGo restores via navLock).
+  try {
+    if (node && typeof navRecord === 'function') navRecord({
+      view: 'node', id: node.id || ((node.file || '') + '::L' + (node.line || 1)),
+      node: { id: node.id, name: node.name, file: node.file,
+              abs_path: node.abs_path, kind: node.kind, line: node.line }
+    });
+  } catch (e) {}
+}
+
+
+// Jump to any node by id (exact, then namespace-suffix). Used by the
+// relations panel rows — one shared hop for explorer + 3D + viewer.
+function jumpToNodeById(encId) {
+  let id = '';
+  try { id = decodeURIComponent(encId || ''); } catch (e) { id = encId || ''; }
+  if (!id || typeof selectActiveNode !== 'function') return;
+  try {
+    const g = (typeof rawData !== 'undefined' && rawData && rawData.nodes) ? rawData.nodes : [];
+    const nd = g.find(n => n && (n.id === id || (typeof n.id === 'string' && n.id.endsWith('::' + id))));
+    if (nd) selectActiveNode(nd);
+    else if (typeof showToast === 'function') showToast('❌ 節點不在圖上');
+  } catch (e) {}
+}
+// Connected Links hub: every edge touching the selected node, rendered
+// with the ONE shared plate. Rows click through to the neighbor.
+function renderConnectedRelationsPanel(node) {
+  const box = document.getElementById('d-relations');
+  const cnt = document.getElementById('d-rel-count');
+  const empty = '<div style="font-size:11px; color:#8b949e; padding:8px;">Select a node to view relationships</div>';
+  if (!box) return;
+  const nid = node && node.id;
+  let links = [];
+  try {
+    links = ((typeof rawData !== 'undefined' && rawData && rawData.links) ? rawData.links : [])
+      .filter(l => l && ((typeof l.source === 'object' ? l.source.id : l.source) === nid
+        || (typeof l.target === 'object' ? l.target.id : l.target) === nid));
+  } catch (e) { links = []; }
+  if (!nid || !links.length) {
+    if (cnt) cnt.textContent = '0';
+    box.innerHTML = empty;
+    return;
+  }
+  const esc = (typeof escapeHtml === 'function') ? escapeHtml : (x => String(x));
+  const nodes = (typeof rawData !== 'undefined' && rawData && rawData.nodes) ? rawData.nodes : [];
+  const seen = new Set();
+  let h = '';
+  let shown = 0;
+  for (const l of links) {
+    if (shown >= 60) break;
+    const sId = typeof l.source === 'object' ? l.source.id : l.source;
+    const tId = typeof l.target === 'object' ? l.target.id : l.target;
+    const other = (sId === nid) ? tId : sId;
+    if (!other || other === nid || seen.has(other)) continue;
+    seen.add(other);
+    const nd = nodes.find(n => n && n.id === other) || null;
+    const kind = (nd && nd.kind) || (String(other).startsWith('heading::') ? 'heading_2' : (String(other).startsWith('file::') ? 'file' : 'concept'));
+    const title = nd ? (nd.name || other) : String(other).split('::').pop();
+    const file = nd ? (nd.file || '') : '';
+    const line = nd ? (nd.line || 1) : 1;
+    const enc = encodeURIComponent(other).replace(/'/g, '%27');
+    // Relation marker at the START (pill with direction arrow, never a
+    // raw bottom line): parent=above ↑, child=below ↓, cross-doc=sideways →.
+    // parent_child resolves by edge direction (source=parent).
+    const lk = String((l && l.kind) || 'link');
+    let arrw = '→', blbl = (lk || 'link').slice(0, 8);
+    if (lk === 'parent_child') {
+      if (sId === nid) { arrw = '↓'; blbl = 'child'; } else { arrw = '↑'; blbl = 'parent'; }
+    } else if (lk === 'doc_link') { arrw = '→'; blbl = 'doc'; }
+    else if (lk === 'wiki_link') { arrw = '→'; blbl = 'wiki'; }
+    else if (lk === 'contains') { arrw = '↓'; blbl = 'has'; }
+    h += `<div style="border:1px solid #21262d;border-radius:8px;padding:6px 8px;margin-bottom:6px;cursor:pointer;" onclick="jumpToNodeById('${enc}')" title="${esc(other)}">`
+      + `<div style="display:flex;align-items:flex-start;gap:6px;">`
+      + `<span title="${esc(lk)}" style="flex-shrink:0;font-size:11px;color:#c9d1d9;border:1px solid #30363d;border-radius:10px;padding:1px 7px;margin-top:1px;white-space:nowrap;">${arrw} ${esc(blbl)}</span>`
+      + `<div style="flex:1;min-width:0;font-size:12px;">${nodePlateHtml({ title, kind, file, line, clickable: false })}</div>`
+      + `</div></div>`;
+    shown++;
+  }
+  if (cnt) cnt.textContent = String(seen.size);
+  box.innerHTML = h || empty;
+  if (links.length > shown) box.innerHTML += `<div style="font-size:11px;color:#8b949e;">+${links.length - shown} more</div>`;
 }
 
 
@@ -1811,7 +1880,7 @@ function updateDocTagsBar(mdText, filePath) {
   });
 }
 
-function renderMarkdown(mdText) {
+function renderMarkdown(mdText, extraSources) {
   const container = document.getElementById('d-code-markdown');
   if (!container) return;
 
@@ -1826,9 +1895,14 @@ function renderMarkdown(mdText) {
     return `<span class="inline-concept-badge" style="display:inline-flex; align-items:center; background:#1f6feb22; border:1px solid #388bfd55; color:#58a6ff; font-weight:600; padding:1px 6px; border-radius:4px; cursor:pointer; font-size:11px;" onclick="onConceptCardClick('${escapeHtml(cName.trim())}', event)">🏷️ ${escapeHtml(displayName)}</span>`;
   });
   // Ingest-md header sources: `> - `rel`` lines — remembered for linkify + menu.
+  // extraSources (server-provided, from the FULL file) keeps source links
+  // working in section-slice views, whose text has no header block.
   viewCtx.sources = [];
   ((mdText || '').match(/^> - `(.+)`$/gm) || []).forEach(l => {
     const r = l.replace(/^> - `|`$/g, '');
+    if (r && viewCtx.sources.indexOf(r) < 0) viewCtx.sources.push(r);
+  });
+  (Array.isArray(extraSources) ? extraSources : []).forEach(r => {
     if (r && viewCtx.sources.indexOf(r) < 0) viewCtx.sources.push(r);
   });
   if (window.marked) {
@@ -1837,6 +1911,7 @@ function renderMarkdown(mdText) {
       if (window.hljs) hljs.highlightElement(block);
     });
     linkifySources(container);
+    linkifyConceptLinks(container);
     bindMarkdownInternalLinks(container);
   } else {
     container.innerText = mdText || '';
@@ -1874,6 +1949,38 @@ function linkifySources(container) {
     a.title = (zh ? '開啟來源檔案：' : 'Open source file: ') + rel;
     code.replaceWith(a);
   });
+  linkifyConceptLinks(container);
+}
+// Physical tag links [Name](../.docgraphical/tags/Name.md): intercept
+// clicks into the in-app tag page instead of navigating away.
+// Standalone from linkifySources (which early-returns without header
+// sources); bound once per container, markers re-applied every render.
+function linkifyConceptLinks(container) {
+  if (!container) return;
+  container.querySelectorAll('a[href*="tags/"]').forEach((a) => {
+    a.classList.add('concept-link');
+    if (!a.title) {
+      const zh2 = (typeof currentLanguage !== 'undefined' && currentLanguage === 'zh');
+      a.title = (zh2 ? '開啟概念頁：' : 'Open concept page: ') + (a.textContent || '').trim();
+    }
+  });
+  if (!container.dataset.taglinkBound) {
+    container.dataset.taglinkBound = '1';
+    container.addEventListener('click', (ev) => {
+      const a = ev.target && ev.target.closest ? ev.target.closest('a.concept-link') : null;
+      if (!a) return;
+      const href = a.getAttribute('href') || '';
+      const base = href.split('/').pop().split('#')[0].split('?')[0];
+      let name = '';
+      try { name = decodeURIComponent(base); } catch (e) { name = base; }
+      if (name.toLowerCase().endsWith('.md')) name = name.slice(0, -3);
+      name = (name || '').trim();
+      if (!name) return;
+      ev.preventDefault();
+      ev.stopPropagation();
+      if (typeof onConceptCardClick === 'function') onConceptCardClick(name, null);
+    });
+  }
 }
 
 // ─── md viewer custom context menu ───
@@ -3529,7 +3636,7 @@ function updateNavTelemetry(camera, controls) {
   }
   if (lockEl) {
     if (activeNode) {
-      lockEl.textContent = activeNode.name;
+      lockEl.textContent = stripMdLinks(activeNode.name);
     } else {
       lockEl.textContent = currentLanguage === 'zh' ? '全景' : 'ALL';
     }
@@ -4130,6 +4237,11 @@ function bindMarkdownInternalLinks(container) {
       a.setAttribute('rel', 'noopener noreferrer');
       return;
     }
+    // A0: Tag-page links belong to the concept-link interceptor below —
+    // leave them alone or the doc opener swallows tag clicks.
+    // (Matches raw href: CJK names stay percent-encoded here, but the
+    // ASCII ".docgraphical/tags/" segment never is.)
+    if (/\.docgraphical\/tags\//i.test(href)) return;
     // Intercept internal markdown links (.md or #anchor)
     let dec = href;
     try { dec = decodeURIComponent(href); } catch (e) {}
@@ -4348,8 +4460,10 @@ function switchConceptSubTab(subTab) {
   currentConceptSubTab = subTab;
   const btnOfficial = document.getElementById('btn-cpt-official');
   const btnCandidates = document.getElementById('btn-cpt-candidates');
+  const btnBlacklist = document.getElementById('btn-cpt-blacklist');
   if (btnOfficial) btnOfficial.classList.toggle('active', subTab === 'official');
   if (btnCandidates) btnCandidates.classList.toggle('active', subTab === 'candidates');
+  if (btnBlacklist) btnBlacklist.classList.toggle('active', subTab === 'blacklist');
   renderConceptsDrawerList();
 }
 
@@ -4377,12 +4491,135 @@ function fetchConceptsData() {
         conceptsTreeData = data;
         // Expand all categories by default
         Object.keys(data.tree || {}).forEach(c => expandedCategories.add(c));
-        renderConceptsDrawerList();
+        // llm-scan evidence overlay (DF/TF/snippets per mined term).
+        // Additive: failure leaves the map empty and the old render intact.
+        const evUrl = repoParam ? `/api/concepts/scan/evidence?repo=${encodeURIComponent(repoParam)}` : '/api/concepts/scan/evidence';
+        fetch(evUrl)
+          .then(r => r.json())
+          .then(ev => {
+            try { scanEvidenceMap = (ev && ev.evidence) || {}; }
+            catch (e) { scanEvidenceMap = {}; }
+            return fetchBlacklistData(repoParam);
+          })
+          .then(() => renderConceptsDrawerList())
+          .catch(() => { scanEvidenceMap = {}; renderConceptsDrawerList(); });
       }
     })
     .catch(err => console.error('fetchConceptsData error:', err));
 }
+// Mining evidence by term (DF/TF/snippets); empty until fetched.
+let scanEvidenceMap = {};
+// Global blacklist rows (rejected_terms); empty until fetched.
+let blacklistData = [];
+function fetchBlacklistData(repoParam) {
+  const url = repoParam ? `/api/concepts/scan/blacklist?repo=${encodeURIComponent(repoParam)}` : '/api/concepts/scan/blacklist';
+  return fetch(url).then(r => r.json()).then(d => {
+    blacklistData = ((d && d.blacklist) || []).slice();
+    return blacklistData;
+  }).catch(() => { blacklistData = []; return blacklistData; });
+}
+// Un-blacklist: term becomes eligible for future scans again.
+// restore=true also puts it straight back into the candidates pool.
+function unblacklistTerm(name, restore) {
+  const zh = (typeof currentLanguage !== 'undefined' && currentLanguage === 'zh');
+  fetch('/api/concepts/scan/blacklist/remove', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ term: name, restore: !!restore })
+  })
+    .then(r => r.json())
+    .then(d => {
+      if (d && d.ok) {
+        showToast(restore
+          ? (zh ? `已送回候選池：${name}` : `Returned to candidates: ${name}`)
+          : (zh ? `已移出黑名單：${name}（下次掃描可再發現）` : `Un-blacklisted ${name}`));
+        if (typeof fetchConceptsData === 'function') fetchConceptsData();
+        if (restore && typeof switchConceptSubTab === 'function') switchConceptSubTab('candidates');
+      } else {
+        showToast('❌ ' + ((d && d.error) || 'remove failed'));
+      }
+    })
+    .catch(err => showToast('❌ ' + err));
+}
 
+
+// Breadcrumb for raw edge source ids. Internals never display (no
+// heading::, no L13): doc (orange, opens file) › heading (green, opens at
+// line). Colours match KIND_COLORS (file / H2).
+function parseRefId(src) {
+  const s = String(src || '');
+  let m = s.match(/^heading::(.+?)::L(\d+)::([\s\S]*)$/);
+  if (m) return { kind: 'heading', file: m[1], line: parseInt(m[2], 10) || 1, title: (m[3] || '').trim() };
+  m = s.match(/^file::([\s\S]*)$/);
+  if (m) return { kind: 'file', file: m[1], line: 1, title: '' };
+  return { kind: 'file', file: s, line: 1, title: '' };
+}
+// Display-only: strip md link syntax ([t](u) -> t, [[t]] -> t). Used by
+// crumbs, 3D labels and telemetry so raw `[...](...)` never reaches eyes.
+// Node ids truncate long titles mid-URL (`[T](.doc`), so broken trailing
+// links are stripped too — otherwise the crumb shows raw markup.
+function stripMdLinks(s) {
+  return String(s || '').replace(/\[([^\]]+)\]\([^)]+\)/g, '$1').replace(/\[\[([^\]]+)\]\]/g, '$1').replace(/\[([^\]]+)\]\([^)]*$/g, '$1');
+}
+function refCrumbText(src) {
+  const p = parseRefId(src);
+  const docName = p.file.split(/[\\/]/).pop() || p.file;
+  return (p.kind === 'heading' && p.title)
+    ? `${docName} › ${stripMdLinks(p.title)}` : docName;
+}
+// ONE shared node plate: title line (kind colour) + sub line
+// (`Kind · file · Line n`). Used by the 3D hover tooltip AND the tag-table
+// crumb cell — identical look both places, single source of truth.
+// o: {title, kind, level?, file, line?, clickable?} (clickable wires the
+// canonical file/section openers; tooltip passes false).
+function nodePlateHtml(o) {
+  o = o || {};
+  const esc = (typeof escapeHtml === 'function') ? escapeHtml : (x => String(x));
+  const strip = (typeof stripMdLinks === 'function') ? stripMdLinks : (x => String(x || ''));
+  const clean = s => String(s || '').replace(/\|/g, '/');
+  const noQ = s => String(s || '').replace(/"/g, '');
+  const kind = o.kind || 'file';
+  const color = (typeof KIND_COLORS !== 'undefined' && KIND_COLORS[kind]) || '#58a6ff';
+  let level = o.level;
+  if (level == null) { const m = String(kind).match(/(\d+)$/); level = m ? parseInt(m[1], 10) : 1; }
+  const kindLabel = kind === 'concept' ? 'Concept Tag'
+    : (kind === 'file' ? 'Document' : ('H' + level + ' Section'));
+  const docName = clean(String(o.file || '').split(/[\\/]/).pop() || String(o.file || ''));
+  const title = clean(strip(o.title));
+  const line = o.line || 1;
+  const js = String(o.file || '').replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+  let titleHtml, subInner;
+  if (kind === 'file') {
+    titleHtml = `<span style="color:${color};font-weight:600;${o.clickable ? 'cursor:pointer;' : ''}"${o.clickable ? ` onclick="openFileInEditor('${js}', 1)"` : ''} title="${esc(noQ(o.file || ''))}">${esc(docName)}</span>`;
+    const fileHtml = o.clickable
+      ? `<span style="cursor:pointer;" onclick="openFileInEditor('${js}', 1)" title="${esc(noQ(o.file || ''))}">${esc(docName)}</span>`
+      : `<span>${esc(docName)}</span>`;
+    subInner = `${esc(kindLabel)} · ${fileHtml} · Line ${line}`;
+  } else {
+    const enc = encodeURIComponent(o.title || '').replace(/'/g, '%27');
+    const open = o.clickable ? `openHeadingInEditor('${js}', ${line}, '${enc}')` : '';
+    titleHtml = `<span style="color:${color};font-weight:600;${o.clickable ? 'cursor:pointer;' : ''}"${o.clickable ? ` onclick="${open}"` : ''} title="${esc(noQ(title))}">${esc(title)}</span>`;
+    const fileHtml = o.clickable
+      ? `<span style="cursor:pointer;" onclick="openFileInEditor('${js}', 1)" title="${esc(noQ(o.file || ''))}">${esc(docName)}</span>`
+      : `<span>${esc(docName)}</span>`;
+    subInner = `${esc(kindLabel)} · ${fileHtml} · Line ${line}`;
+  }
+  return `${titleHtml}<div style="font-size:11px;color:#8b949e;">${subInner}</div>`;
+}
+function refCrumbHtml(src) {
+  // Delegates to the ONE shared plate (same look as the 3D tooltip):
+  // title line in kind colour + `Kind · file · Line n` sub line.
+  const p = parseRefId(src);
+  let nodeKind = (p.kind === 'heading') ? 'heading_2' : 'file';
+  try {
+    const g = (typeof rawData !== 'undefined' && rawData && rawData.nodes) ? rawData.nodes : [];
+    const nd = g.find(n => n && (n.id === src || (typeof n.id === 'string' && n.id.endsWith('::' + src))));
+    if (nd && nd.kind) nodeKind = nd.kind;
+  } catch (e) {}
+  if (p.kind === 'heading' && p.title) {
+    return nodePlateHtml({ title: p.title, kind: nodeKind, file: p.file, line: p.line, clickable: true });
+  }
+  return nodePlateHtml({ title: (p.file.split(/[\\/]/).pop() || p.file), kind: 'file', file: p.file, line: 1, clickable: true });
+}
 
 function renderLinkedFilesHtml(conceptName, files, zh) {
   if (!files || files.length === 0) {
@@ -4393,7 +4630,7 @@ function renderLinkedFilesHtml(conceptName, files, zh) {
   files.forEach(f => {
     h += `
       <div style="background:#0d1117; border:1px solid #30363d; border-radius:4px; padding:4px 8px; font-size:11px; display:flex; justify-content:space-between; align-items:center;">
-        <span style="color:#c9d1d9; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:180px; display:flex; align-items:center;" title="${escapeHtml(f.filePath)}">${(f.filePath||'').startsWith('heading::') ? '<span style="color:#58a6ff; font-weight:700; margin-right:4px;">#</span>' : getDocIconSvg('#f0883e')} <span style="margin-left:3px;">${escapeHtml(f.filePath)}</span></span>
+        <span style="color:#c9d1d9; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:180px; display:flex; align-items:center;" title="${escapeHtml(refCrumbText(f.filePath))}">${(f.filePath||'').startsWith('heading::') ? '<span style="color:#58a6ff; font-weight:700; margin-right:4px;">#</span>' : getDocIconSvg('#f0883e')} <span style="margin-left:3px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${refCrumbHtml(f.filePath)}</span></span>
         <button class="mini-btn" style="color:#f85149; border-color:#da3633; padding:1px 4px; font-size:10px;" onclick="unlinkConcept('${escapeHtml(conceptName)}', '${escapeHtml(f.filePath)}', event)" title="${zh ? '解除關聯並永久排除' : 'Unlink & Exclude'}">✕</button>
       </div>
     `;
@@ -4414,9 +4651,12 @@ function renderConceptsDrawerList(filterKw = '') {
 
   const offCount = (conceptsTreeData.counts && conceptsTreeData.counts.official) || 0;
   const candCount = (conceptsTreeData.counts && conceptsTreeData.counts.candidates) || 0;
+  const blCount = (typeof blacklistData !== 'undefined') ? blacklistData.length : 0;
 
   if (countOfficialEl) countOfficialEl.innerText = offCount;
   if (countCandidatesEl) countCandidatesEl.innerText = candCount;
+  const countBlacklistEl = document.getElementById('count-cpt-blacklist');
+  if (countBlacklistEl) countBlacklistEl.innerText = blCount;
   if (badgeEl) {
     badgeEl.innerText = candCount;
     badgeEl.style.display = candCount > 0 ? 'inline-block' : 'none';
@@ -4435,17 +4675,80 @@ function renderConceptsDrawerList(filterKw = '') {
     }
 
     let h = '<div style="display:flex; flex-direction:column; gap:8px; padding:4px;">';
+    // Legend: the two productive sources. (Edge-auto has no entry: with no
+    // bracket pipeline it never fires; its blue branch below stays only as
+    // a fallback in case hand brackets ever produce one.)
+    const SRC_LEGEND = [
+      { k: 'mined', icon: '⛏', fg: '#e3b341', label: zh ? '探礦' : 'Prospect' },
+      { k: 'crawl', icon: '🌿', fg: '#3fb950', label: 'Vine' }
+    ];
+    h += `<div style="display:flex; gap:10px; flex-wrap:wrap; font-size:11px; color:#8b949e; padding:0 2px 2px;">${SRC_LEGEND.map(s => `<span><span style="color:${s.fg};">${s.icon} ${s.label}</span></span>`).join('')}</div>`;
     candidates.forEach(c => {
+      // Source is encoded in category: mining (②) vs crawl (③) vs
+      // edge-autodiscovery. Distinct colour per source, and never show
+      // a bare "0 Refs" (crawl candidates have no edges yet by design).
+      const cat = (c.category || '').trim();
+      const isCrawl = (cat === 'Vine' || cat === '順藤摸瓜');
+      const isAuto = (cat === '待審候選' || cat === '' || cat === 'Uncategorized');
+      const col = isCrawl
+        ? { bd: '#2ea043', nm: '#3fb950', bg: '#0f2a17', fg: '#3fb950', icon: '🌿', label: 'Vine' }
+        : (isAuto
+          ? { bd: '#1f6feb', nm: '#58a6ff', bg: '#0d1a2e', fg: '#58a6ff', icon: '🕸', label: zh ? '多檔同框' : 'Cited' }
+          : { bd: '#9e6a03', nm: '#f0883e', bg: '#382800', fg: '#e3b341', icon: '⛏', label: zh ? '探礦' : 'Prospect' });
+      const evd = (typeof scanEvidenceMap !== 'undefined') ? scanEvidenceMap[c.name] : null;
+      // Crawl candidates have no edges yet — their number IS the staged
+      // node count (kept link/tag pairs). Others show mining DF/TF or refs.
+      const stagedN = (typeof c.staged === 'number') ? c.staged : (c.refs || 0);
+      const pillTxt = isCrawl
+        ? (zh ? `${stagedN} 節點暫存` : `${stagedN} staged`)
+        : (evd && (evd.df || evd.tf))
+          ? (zh ? `出現${evd.df || 0}檔·${evd.tf || 0}次` : `${evd.df || 0} docs·${evd.tf || 0} hits`)
+          : `${c.refs} ${zh ? '次引用' : 'Refs'}`;
+      const pillTitle = isCrawl ? (zh ? 'Vine 暫存的節點數，轉正後套用' : 'Vine staged nodes; applied on promote') : '';
+      const firstEv = (evd && evd.files && evd.files[0]) || null;
+      const note = (c.aliases && c.aliases !== 'AI 自動偵測') ? ` · ${escapeHtml(c.aliases)}` : '';
       h += `
-        <div class="concept-card" style="border:1px dashed #e3b341; background:#161b22; border-radius:6px; padding:10px;">
+        <div class="concept-card" style="border:1px dashed ${col.bd}; background:#161b22; border-radius:6px; padding:10px; cursor:pointer;" onclick="openCandidatePage('${escapeHtml(c.name)}', '${isCrawl ? 'vine' : 'prospect'}', event)" title="${zh ? '點開審核底稿' : 'Open draft review'}">
           <div style="display:flex; justify-content:space-between; align-items:center;">
-            <span style="font-weight:600; color:#f0883e; font-size:13px;">🏷️ ${escapeHtml(c.name)}</span>
-            <span class="concept-status-pill candidate" style="background:#382800; color:#e3b341; border:1px solid #9e6a03; font-size:11px; padding:2px 6px; border-radius:10px;">${c.refs} ${zh ? '次引用' : 'Refs'}</span>
+            <span style="font-weight:600; color:${col.nm}; font-size:13px; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${col.icon} ${escapeHtml(c.name)}</span>
+            <span class="concept-status-pill candidate" title="${escapeHtml(pillTitle)}" style="background:${col.bg}; color:${col.fg}; border:1px solid ${col.bd}; font-size:11px; padding:2px 6px; border-radius:10px; flex-shrink:0;">${pillTxt}</span>
           </div>
-          <div style="font-size:11px; color:#8b949e; margin-top:4px;">${zh ? '來源' : 'Source'}: ${escapeHtml(c.aliases || (zh ? 'AI 頻繁偵測' : 'Auto-detected'))}</div>
+          <div style="font-size:11px; color:#8b949e; margin-top:4px;">${zh ? '來源' : 'Source'}: <span style="color:${col.fg};">${col.label}</span>${note}</div>
+          ${firstEv ? `<div style="font-size:11px; color:#a5d6ff; margin-top:4px; word-break:break-word;" title="${escapeHtml(firstEv.rel || '')}">“${escapeHtml((firstEv.snippet || '').slice(0, 60))}” — ${escapeHtml((firstEv.rel || '').split('/').pop() || '')}</div>` : ''}
+          <div style="display:flex; gap:2px; justify-content:flex-end; margin-top:8px;">
+            <button class="mini-btn" style="background:transparent; border:1px solid #1f6feb; color:#58a6ff;padding:2px 6px;font-size:11px;white-space:nowrap;" onclick="openCardRefresh('${escapeHtml(c.name)}')" title="${zh ? '更新此候選（探礦重算 / 順藤深挖）' : 'Refresh this candidate (Prospect / Vine)'}">↻ ${zh ? '更新' : 'Refresh'}</button>
+            <button class="mini-btn" style="background:#238636; border-color:#2ea043; color:#fff;padding:2px 6px;font-size:11px;white-space:nowrap;" onclick="promoteCandidate('${escapeHtml(c.name)}')">✓ ${zh ? '審批入典' : 'Promote'}</button>
+            <button class="mini-btn" style="background:#21262d; border-color:#30363d; color:#f85149;padding:2px 6px;font-size:11px;white-space:nowrap;" onclick="dismissCandidate('${escapeHtml(c.name)}')">✕ ${zh ? '移除' : 'Remove'}</button>
+          </div>
+        </div>
+      `;
+    });
+    h += '</div>';
+    container.innerHTML = h;
+    return;
+  }
+
+  if (currentConceptSubTab === 'blacklist') {
+    // ─── Render Blacklist (rejected_terms: dismissed, may return) ───
+    const rows = (typeof blacklistData !== 'undefined' ? blacklistData : []).filter(b => {
+      if (!kw) return true;
+      return (b.term || '').toLowerCase().includes(kw);
+    });
+    if (!rows.length) {
+      container.innerHTML = `<div style="color:#8b949e; font-size:12px; text-align:center; padding:30px 10px;">${zh ? '黑名單是空的 — 駁回的候選會進到這裡' : 'Blacklist is empty — dismissed candidates land here'}</div>`;
+      return;
+    }
+    let h = '<div style="display:flex; flex-direction:column; gap:8px; padding:4px;">';
+    rows.forEach(b => {
+      h += `
+        <div class="concept-card" style="border:1px dashed #5a2d2d; background:#161b22; border-radius:6px; padding:10px;">
+          <div style="display:flex; justify-content:space-between; align-items:center;">
+            <span style="font-weight:600; color:#f85149; font-size:13px;">🚫 ${escapeHtml(b.term)}</span>
+            <span style="font-size:11px; color:#8b949e;">${escapeHtml(b.decided_at || '')}</span>
+          </div>
           <div style="display:flex; gap:6px; justify-content:flex-end; margin-top:8px;">
-            <button class="mini-btn" style="background:#238636; border-color:#2ea043; color:#fff;" onclick="promoteCandidate('${escapeHtml(c.name)}')">✓ ${zh ? '審批入典' : 'Promote'}</button>
-            <button class="mini-btn" style="background:#21262d; border-color:#30363d; color:#f85149;" onclick="dismissCandidate('${escapeHtml(c.name)}')">✕ ${zh ? '駁回除名' : 'Dismiss'}</button>
+            <button class="mini-btn" style="background:transparent; border:1px solid #238636; color:#3fb950;" onclick="unblacklistTerm('${escapeHtml(b.term)}', true)" title="${zh ? '送回待審候選池' : 'Return to candidates pool'}">↩ ${zh ? '返回候選' : 'To candidates'}</button>
+            <button class="mini-btn" style="background:transparent; border:1px solid #1f6feb; color:#58a6ff;" onclick="unblacklistTerm('${escapeHtml(b.term)}', false)" title="${zh ? '只移出黑名單，下次掃描可能再發現' : 'Remove from blacklist only'}">↩ ${zh ? '移出黑名單' : 'Un-blacklist'}</button>
           </div>
         </div>
       `;
@@ -4502,16 +4805,17 @@ function renderConceptsDrawerList(filterKw = '') {
       html += `
         <div class="concept-card" style="border:1px solid ${isSelected ? '#388bfd' : '#21262d'}; background:${isSelected ? '#131d2e' : '#161b22'}; border-radius:6px; padding:8px; cursor:pointer;" onclick="onConceptCardClick('${escapeHtml(c.name)}', event)">
           <div style="display:flex; justify-content:space-between; align-items:center;">
-            <span style="font-weight:600; color:#e2e8f0; font-size:13px;">🏷️ ${escapeHtml(c.name)}</span>
-            <span class="concept-status-pill official" style="background:#1f6feb22; color:#58a6ff; border:1px solid #388bfd44; font-size:11px; padding:2px 6px; border-radius:10px;">${c.refs} ${zh ? '引用' : 'Refs'}</span>
+            <span style="font-weight:600; color:#e2e8f0; font-size:13px; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">🏷️ ${escapeHtml(c.name)}</span>
+            <span class="concept-status-pill official" style="background:#1f6feb22; color:#58a6ff; border:1px solid #388bfd44; font-size:11px; padding:2px 6px; border-radius:10px; flex-shrink:0;">${c.refs} ${zh ? '引用' : 'Refs'}</span>
           </div>
           <div style="font-size:11px; color:#8b949e; margin-top:4px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">
             ${zh ? '別名' : 'Aliases'}: ${escapeHtml(c.aliases || (zh ? '無' : 'None'))}
           </div>
-          <div style="display:flex; justify-content:flex-end; gap:6px; margin-top:6px;">
-            <button class="mini-btn" onclick="openEditConceptModal('${escapeHtml(c.name)}', '${escapeHtml(c.category)}', '${escapeHtml(c.aliases || '')}', event)">✏️ ${zh ? '編輯' : (currentLanguage === 'ja' ? '編集' : 'Edit')}</button>
-            <button class="mini-btn" onclick="openMergeConceptModal('${escapeHtml(c.name)}', event)">🔗 ${zh ? '合併' : (currentLanguage === 'ja' ? '統合' : 'Merge')}</button>
-            <button class="mini-btn" style="color:#f85149; border-color:#da363388;" onclick="deleteConcept('${escapeHtml(c.name)}', event)">🗑️ ${zh ? '刪除' : (currentLanguage === 'ja' ? '削除' : 'Delete')}</button>
+          <div style="display:flex; justify-content:flex-end; gap:2px; margin-top:6px;">
+            <button class="mini-btn" onclick="openCardRefresh('${escapeHtml(c.name)}', event)" title="${zh ? '更新此概念（探礦重算 / 順藤深挖）' : 'Refresh this concept (Prospect / Vine)'}" style="padding:2px 6px;font-size:11px;white-space:nowrap;">↻ ${zh ? '更新' : 'Refresh'}</button>
+            <button class="mini-btn" onclick="openEditConceptModal('${escapeHtml(c.name)}', '${escapeHtml(c.category)}', '${escapeHtml(c.aliases || '')}', event)" style="padding:2px 6px;font-size:11px;white-space:nowrap;">✏️ ${zh ? '編輯' : (currentLanguage === 'ja' ? '編集' : 'Edit')}</button>
+            <button class="mini-btn" onclick="openMergeConceptModal('${escapeHtml(c.name)}', event)" style="padding:2px 6px;font-size:11px;white-space:nowrap;">🔗 ${zh ? '合併' : (currentLanguage === 'ja' ? '統合' : 'Merge')}</button>
+            <button class="mini-btn" style="color:#f85149; border-color:#da363388;padding:2px 6px;font-size:11px;white-space:nowrap;" onclick="deleteConcept('${escapeHtml(c.name)}', event)">🗑️ ${zh ? '刪除' : (currentLanguage === 'ja' ? '削除' : 'Delete')}</button>
           </div>
 
           <!-- Dynamic Linked Files Drawer Area -->
@@ -4812,6 +5116,11 @@ function spotlightConceptNode(conceptName) {
     .linkWidth(l => highlightLinks.has(l) ? 0.7 : 0.12)
     .linkDirectionalParticles(l => highlightLinks.has(l) ? 4 : 0);
 
+  // 3b. Refresh label sprites too (balls/links dim above, but labels keep
+  // stale opacity without this — every Document label stays bright and the
+  // whole library crowds the view on tag spotlight).
+  if (typeof updateLabelsVisibility === 'function') updateLabelsVisibility();
+
   // 4. Smooth 3D Camera Flight to the cluster center with resilient retry
   const attemptFly = () => {
     const curNodes = (rawData && rawData.nodes) ? rawData.nodes : [];
@@ -4883,13 +5192,19 @@ function onConceptCardClick(name, event) {
 
 function renderConceptTagPageInViewer(tagData) {
   const zh = currentLanguage === 'zh';
+  // Browser-history record (tag page view).
+  try {
+    if (tagData && tagData.concept && typeof navRecord === 'function') {
+      navRecord({ view: 'tag', name: tagData.concept });
+    }
+  } catch (e) {}
   const dName = document.getElementById('d-name');
   const dSub = document.getElementById('d-sub');
   const badge = document.getElementById('d-kind-badge');
   const codeTitle = document.getElementById('d-code-title');
 
-  if (dName) dName.innerText = `🏷️ ${tagData.concept} (Tag Page)`;
-  if (dSub) dSub.innerText = `${tagData.path} · ${tagData.files.length} Referenced Documents`;
+  if (dName) dName.innerText = zh ? `🏷️ ${tagData.concept}（標籤頁）` : `🏷️ ${tagData.concept} (Tag Page)`;
+  if (dSub) dSub.innerText = `${tagData.path} · ${tagData.files.length} ${zh ? '個引用文件' : 'Referenced Documents'}`;
   if (badge) {
     badge.innerText = 'TAG';
     badge.style.background = '#8957e5';
@@ -4897,16 +5212,18 @@ function renderConceptTagPageInViewer(tagData) {
     badge.style.fontWeight = '700';
     badge.style.textShadow = '0 1px 2px rgba(0,0,0,0.7)';
   }
-  if (codeTitle) codeTitle.innerText = '🏷️ Tag Definition & Reference Manager';
+  if (codeTitle) codeTitle.innerText = zh ? '🏷️ 標籤定義與引用管理' : '🏷️ Tag Definition & Reference Manager';
 
   // Build composite Markdown: Content + Dynamic Link Management Table
   let fullMd = tagData.content + '\n\n---\n\n### 🔗 關聯文檔引用管理 (Referenced Documents)\n';
   if (!tagData.files || tagData.files.length === 0) {
-    fullMd += '\n*(目前尚無任何文檔引用此概念標籤。可在閱讀文檔時點選頂部「🏷️ + 貼標籤」或於 3D 圖右鍵貼上)*\n';
+    fullMd += zh ? '\n*(目前尚無任何文檔引用此概念標籤。可在閱讀文檔時點選頂部「🏷️ + 貼標籤」或於 3D 圖右鍵貼上)*\n'
+                 : '\n*(No documents cite this tag yet. Click "🏷️ + Tag" at the top while reading, or right-click → paste in 3D.)*\n';
   } else {
-    fullMd += '\n| 序號 | 引用檔案路徑 | 提及段落摘要 | 操作 |\n| :--- | :--- | :--- | :--- |\n';
+    fullMd += zh ? '\n| 序號 | 引用檔案路徑 | 提及段落摘要 | 操作 |\n| :--- | :--- | :--- | :--- |\n'
+                 : '\n| # | File | Snippet | Action |\n| :--- | :--- | :--- | :--- |\n';
     tagData.files.forEach((f, idx) => {
-      fullMd += `| ${idx + 1} | \`${f.filePath}\` | ${f.snippet ? f.snippet.replace(/\|/g, '/') : '(章節內文)'} | <button class="mini-btn" style="color:#f85149; border-color:#da3633; padding:3px 12px; font-weight:600; white-space:nowrap; min-width:54px; display:inline-block;" onclick="unlinkConcept('${tagData.concept}', '${f.filePath}', event)">解除</button> |\n`;
+      fullMd += `| ${idx + 1} | ${refCrumbHtml(f.filePath)} | ${f.snippet ? f.snippet.replace(/\|/g, '/') : (zh ? '(章節內文)' : '(Section body)')} | <button class="mini-btn" style="color:#f85149; border-color:#da3633; padding:3px 12px; font-weight:600; white-space:nowrap; min-width:54px; display:inline-block;" onclick="unlinkConcept('${tagData.concept}', '${f.filePath}', event)">${zh ? '解除' : 'Unlink'}</button> |\n`;
     });
   }
 
@@ -5100,6 +5417,530 @@ function openAddConceptModal() {
   openConceptActionModal('add');
 }
 
+// Server-spoken display strings (crawl pick reasons, crawl trace) arrive
+// in zh; normalize to the UI language so EN mode never shows 直接命中目標.
+// (LLM-written content — titles, terms — is left untouched.)
+function crawlUiSay(s) {
+  const t = String(s || '');
+  if ((typeof currentLanguage !== 'undefined' && currentLanguage === 'zh')) return t;
+  if (t === '直接命中目標') return 'direct hit';
+  let m = t.match(/^標籤 (.*)：CPU 按邊展開，推入 (\d+)$/);
+  if (m) return 'tag ' + m[1] + ': CPU expand, +' + m[2];
+  m = t.match(/^檔 (.*)：嚮導沒回，跳過$/);
+  if (m) return 'file ' + m[1] + ': guide silent, skipped';
+  m = t.match(/^檔 (.*)：念 (\d+)，入 (\d+)$/);
+  if (m) return 'file ' + m[1] + ': read ' + m[2] + ' terms, push ' + m[3];
+  return t;
+}
+// llm-scan review dialog: settings -> scanning -> results -> confirm.
+// State machine in ONE overlay (fixed 480px, grows DOWNWARD, list scrolls
+// internally). dry_run proposes; NOTHING is written until Confirm.
+let scanDlg = null;
+function conceptScanAll(btn) {
+  const zh = (typeof currentLanguage !== 'undefined' && currentLanguage === 'zh');
+  if (document.getElementById('scan-opt-overlay')) return;
+  scanDlg = { mode: 'full', maxNew: 3, minTf: 5, items: [], busy: false, dug: 0 };
+  const o = document.createElement('div');
+  o.id = 'scan-opt-overlay';
+  o.style.cssText = 'position:fixed;inset:0;z-index:1000005;background:rgba(0,0,0,.6);display:flex;align-items:center;justify-content:center;';
+  o.innerHTML = `
+  <div style="width:480px;max-width:94vw;max-height:88vh;display:flex;flex-direction:column;background:#0d1117;border:1px solid #30363d;border-radius:12px;padding:16px;color:#e6edf3;gap:10px;">
+    <div style="display:flex;align-items:center;justify-content:space-between;">
+      <span style="font-weight:600;font-size:15px;">${zh ? '🔍 發掘新概念' : '🔍 Discover concepts'}</span>
+      <button onclick="document.getElementById('scan-opt-overlay').remove()" style="background:transparent;border:none;color:#8b949e;cursor:pointer;font-size:15px;">✕</button>
+    </div>
+    <div id="scan-settings">
+      <div style="display:flex;flex-direction:column;gap:8px;">
+        <label style="display:flex;gap:8px;align-items:flex-start;border:1px solid #21262d;border-radius:8px;padding:8px 10px;cursor:pointer;">
+          <input type="radio" name="scan-mode" value="full" checked style="margin-top:3px;" />
+          <span><b style="font-size:14px;">${zh ? '① 探礦（全庫頻次挖）' : '① Prospect (corpus frequency)'}</b><br/>
+          <span style="font-size:12px;color:#8b949e;">${zh ? '先更新數字，再找最高頻新詞，LLM 挑過後按檔勾選收錄（花一次 LLM）。' : 'Refresh counts, then take the top new term; check files to approve (one LLM call).'}</span></span>
+        </label>
+        <label style="display:flex;gap:8px;align-items:flex-start;border:1px solid #21262d;border-radius:8px;padding:8px 10px;cursor:pointer;">
+          <input type="radio" name="scan-mode" value="crawl" style="margin-top:3px;" />
+          <span style="flex:1;min-width:0;"><b style="font-size:14px;">${zh ? '② Vine（種子＋DFS）' : '② Vine (seed + DFS)'}</b><br/>
+          <span style="font-size:12px;color:#8b949e;">${zh ? '先打一段要找的字→LLM 找語意落點→stack 摸（相關才入）→薦標題手改確認。暫存不落檔，轉正才套上。' : 'Type what you seek first — LLM finds semantic footholds, then stack-walks (relevant only) to an editable title. Staged, applied on promote.'}</span></span>
+        </label>
+        <div id="scan-crawl-opts" style="display:none;flex-direction:column;gap:8px;border:1px dashed #30363d;border-radius:8px;padding:8px 10px;">
+          <label style="font-size:13px;color:#c9d1d9;">${zh ? '要找什麼（必填，不打不給摸）' : 'What do you seek (required)'}
+            <input id="scan-crawl-seed" placeholder="${zh ? '如：想找的設備或主題' : 'e.g. equipment or topic you seek'}" style="display:block;width:100%;box-sizing:border-box;margin-top:4px;background:#010409;border:1px solid #30363d;border-radius:6px;padding:6px 10px;color:#e6edf3;font-size:13px;" />
+            <div style="font-size:11px;color:#8b949e;margin-top:2px;">${zh ? 'LLM 按這段話找語意落點；摸瓜全程只收跟它相關的，無關不入 stack。' : 'The LLM finds semantic footholds for this text; only related nodes enter the stack.'}</div>
+          </label>
+          <label style="font-size:13px;color:#c9d1d9;">${zh ? '最多摸幾檔' : 'Max files to read'}
+            <input id="scan-crawl-max" type="number" min="1" max="50" value="10" style="width:64px;margin-left:8px;background:#010409;border:1px solid #30363d;border-radius:6px;padding:4px 8px;color:#e6edf3;" />
+            <div style="font-size:11px;color:#8b949e;margin-top:2px;">${zh ? '大庫加碼（1–50）。批量判：每 5 檔一通 LLM，比逐檔快。' : 'Raise for big libraries (1-50). Batched: one LLM call per 5 files.'}</div>
+          </label>
+        </div>
+        <div id="scan-full-opts" style="display:none;flex-direction:column;gap:8px;border:1px dashed #30363d;border-radius:8px;padding:8px 10px;">
+          <label style="font-size:13px;color:#c9d1d9;">${zh ? '最低出現次數' : 'Min occurrences'}
+            <input id="scan-min-tf" type="number" min="1" max="999" value="5" style="width:64px;margin-left:8px;background:#010409;border:1px solid #30363d;border-radius:6px;padding:4px 8px;color:#e6edf3;" />
+            <div style="font-size:11px;color:#8b949e;margin-top:2px;">${zh ? '全庫總共出現不到幾次就不考慮，擋偶然出現的詞。' : 'Ignore terms seen fewer times corpus-wide.'}</div>
+          </label>
+          <div style="font-size:11px;color:#8b949e;">${zh ? '檔案有改動會自動偵測並重挖（依 mtime 指紋）。' : 'File changes auto-detected via mtime fingerprint.'}</div>
+        </div>
+      </div>
+    </div>
+    <div id="scan-settings-done" style="display:none;font-size:12px;color:#8b949e;"></div>
+    <div id="scan-progress" style="display:none;align-items:center;gap:8px;font-size:14px;color:#58a6ff;"></div>
+    <div id="scan-results" style="display:none;flex-direction:column;gap:6px;overflow-y:auto;max-height:300px;min-height:40px;border:1px solid #21262d;border-radius:8px;padding:8px;"></div>
+    <div id="scan-crawl-titlebar" style="display:none;flex-direction:column;gap:6px;border:1px solid #1f6feb;border-radius:8px;padding:8px 10px;background:#0d1a2e;">
+      <div style="font-size:12px;color:#8b949e;">${zh ? '薦標題（可手改，確認後進候選池；轉正才寫檔）：' : 'Title (editable, goes to candidates; files written on promote):'}</div>
+      <input id="scan-crawl-title" value="" style="background:#010409;border:1px solid #30363d;border-radius:6px;padding:6px 10px;color:#e6edf3;font-size:14px;font-weight:600;width:100%;box-sizing:border-box;" />
+    </div>
+    <div style="display:flex;gap:8px;align-items:center;">
+      <button onclick="document.getElementById('scan-opt-overlay').remove()" style="background:transparent;border:1px solid #30363d;color:#c9d1d9;border-radius:6px;padding:7px 14px;cursor:pointer;">${zh ? '取消' : 'Cancel'}</button>
+      <button id="scan-go-btn" onclick="conceptScanStart()" style="flex:1;background:#1f6feb;border:1px solid #388bfd;color:#fff;border-radius:6px;padding:7px 14px;cursor:pointer;font-weight:600;">${zh ? '✦ 開始掃描' : '✦ Start scan'}</button>
+      <button id="scan-confirm-btn" onclick="conceptScanConfirm()" style="display:none;background:#238636;border:1px solid #2ea043;color:#fff;border-radius:6px;padding:7px 14px;cursor:pointer;font-weight:600;"></button>
+    </div>
+  </div>`;
+  document.body.appendChild(o);
+  // Locked: outside clicks do NOT dismiss (scan state + picks would be
+  // lost silently). Close only via Cancel / X buttons.
+  const radios = o.querySelectorAll('input[name="scan-mode"]');
+  const fullBox = o.querySelector('#scan-full-opts');
+  const crawlBox = o.querySelector('#scan-crawl-opts');
+  const syncModeBoxes = () => {
+    const v = o.querySelector('input[name="scan-mode"]:checked').value;
+    if (fullBox) fullBox.style.display = v === 'full' ? 'flex' : 'none';
+    if (crawlBox) crawlBox.style.display = v === 'crawl' ? 'flex' : 'none';
+  };
+  radios.forEach(r => r.addEventListener('change', syncModeBoxes));
+  syncModeBoxes();
+}
+// Render the review list as Vine-identical blocks: one block per mined
+// term (top-1 per round, highest TF first), sub-rows per evidence file.
+// Keep/drop unit = the file row (only checked files get staged); the
+// term itself is read-only, unwanted terms are simply left for 繼續挖.
+function scanRenderResults() {
+  const zh = (typeof currentLanguage !== 'undefined' && currentLanguage === 'zh');
+  const box = document.getElementById('scan-results');
+  if (!box || !scanDlg) return;
+  const items = scanDlg.items;
+  if (!items.length) {
+    box.innerHTML = `<div style="font-size:12px;color:#8b949e;text-align:center;padding:12px;">${zh ? '還沒有候選 — 按開始掃描，或把門檻調低再掃' : 'No candidates yet — start a scan or lower the threshold'}</div>`;
+  } else {
+    box.innerHTML = items.map((e, i) => {
+      const files = e.files || [];
+      const sub = files.map((f, fi) => {
+        const rel = (f && f.rel) || '';
+        const mf = rel.split(/[\\/]/).pop() || rel;
+        const full = String((f && f.snippet) || '');
+        const sn = full.slice(0, 80);
+        return `<div style="display:flex;gap:8px;margin-top:4px;align-items:center;">`
+          + `<div style="flex:1.15;min-width:0;"><div style="font-size:11px;color:#f0883e;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${escapeHtml(rel)}">${escapeHtml(mf)}</div></div>`
+          + `<div style="flex:1;min-width:0;border-left:1px solid #21262d;padding-left:8px;color:#a5d6ff;font-size:11px;word-break:break-word;" title="${escapeHtml(full)}">${escapeHtml(sn)}${full.length > 80 ? '…' : ''}</div>`
+          + `<input type="checkbox" data-scan-file="${i}:${fi}" checked onclick="scanSubToggle(this)" style="flex-shrink:0;width:14px;height:14px;" /></div>`;
+      }).join('');
+      return `<div data-scan-block="${i}" style="margin-top:4px;border:1px solid #21262d;border-radius:8px;padding:6px 8px;">`
+        + `<label style="display:flex;gap:8px;align-items:center;cursor:pointer;">`
+        + `<span style="flex:1;min-width:0;color:#f0883e;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${escapeHtml(e.term)}">▸ ${escapeHtml(e.term)} <span style="font-size:11px;color:#8b949e;">(${zh ? `出現${e.df || 0}檔·${e.tf || 0}次` : `${e.df || 0} docs·${e.tf || 0}`})</span></span>`
+        + `<input type="checkbox" data-scan-master="${i}" checked onclick="scanFileToggle(this)" style="flex-shrink:0;width:15px;height:15px;" /></label>`
+        + (e.reason ? `<div style="font-size:11px;color:#8b949e;margin-top:2px;">${escapeHtml(e.reason)}</div>` : '')
+        + sub + `</div>`;
+    }).join('');
+  }
+  scanPaintConfirm();
+}
+function scanPaintConfirm() {
+  const zh = (typeof currentLanguage !== 'undefined' && currentLanguage === 'zh');
+  const btn = document.getElementById('scan-confirm-btn');
+  if (!btn || !scanDlg) return;
+  if (!scanDlg.items.length) {
+    btn.style.display = 'none';
+    return;
+  }
+  const n = document.querySelectorAll('#scan-results [data-scan-file]:checked').length;
+  btn.style.display = '';
+  btn.disabled = !n;
+  btn.style.opacity = n ? '' : '0.45';
+  btn.textContent = zh ? '確認收錄' : 'Confirm';
+}
+// Fires one dry-run round; results APPEND below previous rounds.
+  function conceptScanStart() {
+  const zh = (typeof currentLanguage !== 'undefined' && currentLanguage === 'zh');
+  const o = document.getElementById('scan-opt-overlay');
+  if (!o || !scanDlg || scanDlg.busy) return;
+  const mode = ((o.querySelector('input[name="scan-mode"]:checked') || {}).value || 'full');
+  // Decree: one top term per round, no count picking (max_new input retired).
+  const maxNew = 1;
+  const minTf = parseInt(((o.querySelector('#scan-min-tf') || {}).value || '5'), 10) || 5;
+  if (mode === 'crawl') {
+    // Emperor crawl: user seed -> LLM semantic footholds -> DFS (LLM per
+    // file, LIFO, relevant-only) -> judged staged + ONE recommended title
+    // (EDITABLE) -> confirm. Nothing touches disk until a later promote.
+    // No seed, no crawl: without the user's text the stack would eat the
+    // whole library.
+    const seedText = (((o.querySelector('#scan-crawl-seed') || {}).value || '').trim()).slice(0, 200);
+    if (!seedText) {
+      showToast(zh ? '先打一段要找的字，不打不給摸' : 'Type what you seek first');
+      const si = o.querySelector('#scan-crawl-seed');
+      if (si) si.focus();
+      return;
+    }
+    const maxFiles = Math.max(1, Math.min(50, parseInt(((o.querySelector('#scan-crawl-max') || {}).value || '10'), 10) || 10));
+    scanDlg.mode = mode;
+    scanDlg.busy = true;
+    const goBtn = o.querySelector('#scan-go-btn');
+    if (goBtn) { goBtn.disabled = true; goBtn.textContent = zh ? '摸瓜中…' : 'Crawling…'; }
+    const prog = o.querySelector('#scan-progress');
+    const resBox = o.querySelector('#scan-results');
+    const t0 = Date.now();
+    let phase = zh ? '讀總綱選點中' : 'Picking starts';
+    const tick = () => {
+      if (prog) {
+        prog.style.display = 'flex';
+        prog.innerHTML = `<span class="ing-spin">◌</span> ${phase}… ${Math.floor((Date.now() - t0) / 1000)}s`;
+      }
+    };
+    tick();
+    const timer = setInterval(tick, 500);
+    const CS = { run: null, spent: 0, files: 0, steps: 0, pushed: 0 };
+    if (resBox) { resBox.style.display = 'flex'; resBox.innerHTML = ''; }
+    // Vine layout decree: BIG dialog, ONLY the kept checklist scrolls,
+    // everything else fixed. (Prospect keeps template defaults.)
+    const dlgBox = o.firstElementChild;
+    if (dlgBox) { dlgBox.style.width = '640px'; dlgBox.style.height = 'min(880px, 92vh)'; }
+    if (resBox) {
+      resBox.style.display = 'flex'; resBox.style.flexDirection = 'column';
+      resBox.style.flex = '1'; resBox.style.minHeight = '0';
+      resBox.style.overflow = 'hidden'; resBox.style.maxHeight = 'none';
+    }
+    const line = (html) => {
+      if (!resBox) return;
+      const d = document.createElement('div');
+      d.style.cssText = 'font-size:12px;color:#c9d1d9;border-bottom:1px solid #21262d;padding:4px 2px;';
+      d.innerHTML = html;
+      resBox.appendChild(d);
+      resBox.scrollTop = resBox.scrollHeight;
+    };
+    const restore = () => {
+      clearInterval(timer);
+      scanDlg.busy = false;
+      if (goBtn) { goBtn.disabled = false; goBtn.textContent = zh ? '✦ 繼續摸' : '✦ Keep crawling'; }
+      if (prog) prog.style.display = 'none';
+    };
+    const snap = (extra) => {
+      try { window.__crawlLast = Object.assign({ run: CS.run, spent: CS.spent, files: CS.files, title: CS.title || '' }, extra || {}); } catch (e) {}
+    };
+    const fail = (msg) => {
+      restore();
+      line(`<span style="color:#f85149;">❌ ${escapeHtml(msg)}</span>`);
+      showToast('❌ ' + msg);
+      snap({ err: String(msg).slice(0, 80) });
+    };
+    const doFinish = () => {
+      phase = zh ? '終審薦標題中' : 'Judging + titling';
+      tick();
+      return fetch('/api/crawl/finish', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ run_id: CS.run })
+      }).then(r => r.json()).then(f => {
+        if (!(f && f.ok)) throw new Error((f && f.error) || 'finish failed');
+        CS.spent = f.spent || CS.spent;
+        CS.title = f.title || '';
+        restore();
+        const keptArr = (f.kept || []);
+        const keptN = keptArr.length;
+        // Per-NODE checklist (nodes are files: staged rows anchor to
+        // files, concepts only transit free). Checkbox per md; the terms
+        // underneath list WHAT related content that node holds.
+        let vineOrder = [];
+        let vineByFile = {};
+        if (keptN) {
+          keptArr.forEach((k, i) => {
+            const fk = k.file || '';
+            if (!vineByFile[fk]) { vineByFile[fk] = []; vineOrder.push(fk); }
+            vineByFile[fk].push(i);
+          });
+          line(`<b>${zh ? '挖到的（按節點勾留去留）：' : 'Dug up (tick nodes to keep):'}</b>` + vineOrder.map((fk, fi) => {
+            const mf = String(fk).split(/[\\/]/).pop() || fk;
+            // Per-mention sub-rows, draft-overlay style: LEFT section,
+            // RIGHT term. Each content-bearing row carries its OWN
+            // checkbox (that is the keep/drop unit); the md checkbox
+            // above is the master switch for the whole node.
+            const sub = vineByFile[fk].map(i => {
+              const k = keptArr[i];
+              const left = (k.heading && k.line)
+                ? `<div style="flex:1.15;min-width:0;"><div style="font-size:11px;color:#3fb950;">⤷ ${escapeHtml(String(k.heading).slice(0, 40))} · L${k.line}</div></div>`
+                : `<div style="flex:1.15;min-width:0;"><div style="font-size:10px;color:#6e7681;">${zh ? '（僅知檔案）' : '(file only)'}</div></div>`;
+              return `<div style="display:flex;gap:8px;margin-top:4px;align-items:center;">${left}`
+                + `<div style="flex:1;min-width:0;border-left:1px solid #21262d;padding-left:8px;color:#c9d1d9;word-break:break-word;">${escapeHtml(k.term)}</div>`
+                + `<input type="checkbox" data-vine-keep="${i}" checked onclick="vineSubToggle(this)" style="flex-shrink:0;width:14px;height:14px;" /></div>`;
+            }).join('');
+            return `<div data-vine-block="${fi}" style="margin-top:4px;border:1px solid #21262d;border-radius:8px;padding:6px 8px;">`
+              + `<label style="display:flex;gap:8px;align-items:center;cursor:pointer;">`
+              + `<span style="flex:1;min-width:0;color:#f0883e;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${escapeHtml(fk)}">▸ ${escapeHtml(mf)} <span style="font-size:11px;color:#8b949e;">(${vineByFile[fk].length})</span></span>`
+              + `<input type="checkbox" data-vine-file="${fi}" checked onclick="vineFileToggle(this)" style="flex-shrink:0;width:15px;height:15px;" /></label>`
+              + sub + `</div>`;
+          }).join(''));
+        }
+        // Plain-words round summary, always (this is the line humans read).
+        line(`<span style="color:#8b949e;">${zh ? `― 本輪：讀了 ${CS.files} 檔 · 找到 ${keptN} 個新概念` : `― Round: ${CS.files} files read · ${keptN} new concepts`}</span>`);
+        snap({ title: CS.title, kept: keptN });
+        if (!keptN && !CS.title) {
+          // Empty round: state BOTH facts (expansion + files read), then advice.
+          const facts = [];
+          if (CS.steps > 0 && CS.pushed === 0) facts.push(zh ? '沿邊 0 新節點' : '0 new nodes from expansion');
+          if (CS.files > 0) facts.push(zh ? `讀 ${CS.files} 檔都判無關` : `${CS.files} file(s) read, all unrelated`);
+          const why0 = zh ? `種子「${seedText}」：${facts.join('，') || '無暫存'}。換段種子再摸。`
+                          : `Seed "${seedText}": ${facts.join(', ') || 'nothing staged'}. Try another seed.`;
+          line(`<b style="color:#e3b341;">${zh ? '◇ 本輪沒挖到：' : '◇ Empty round: '}</b>${escapeHtml(why0)}`);
+          // Empty round: no title, no confirm (bottom bar stays clean).
+          scanDlg.vineKept = []; scanDlg.vineRun = null;
+          { const tb = o.querySelector('#scan-crawl-titlebar'); if (tb) tb.style.display = 'none'; }
+          { const cb = document.getElementById('scan-confirm-btn'); if (cb) cb.style.display = 'none'; }
+          return;
+        }
+        // Bottom confirm, same slot as Prospect: editable title lands in
+        // the fixed title bar, green confirm sits bottom-right beside
+        // 繼續摸 (no mid-list confirm box anymore).
+        scanDlg.vineKept = keptArr.slice();
+        scanDlg.vineRun = CS.run;
+        const titleBar = o.querySelector('#scan-crawl-titlebar');
+        const titleInp = o.querySelector('#scan-crawl-title');
+        if (titleInp) {
+          titleInp.value = CS.title || '';
+          titleInp.oninput = () => { if (typeof vinePaintConfirm === 'function') vinePaintConfirm(); };
+        }
+        if (titleBar) titleBar.style.display = 'flex';
+        // Auto-seed: 續挖 defaults to the recommended title so the user
+        // can edit the title and immediately click 繼續摸 without retyping.
+        const seedInp = o.querySelector('#scan-crawl-seed');
+        if (seedInp && CS.title) seedInp.value = CS.title;
+        if (typeof vinePaintConfirm === 'function') vinePaintConfirm();
+        else { const cb = document.getElementById('scan-confirm-btn'); if (cb) { cb.style.display = ''; cb.textContent = zh ? '確認收錄' : 'Confirm'; } }
+        snap({ title: CS.title, kept: (f.kept || []).length });
+      });
+    };
+    fetch('/api/crawl/start', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ repo: (typeof getActiveRepoPath === 'function') ? getActiveRepoPath() : '', seed: seedText, lang: zh ? 'zh' : 'en' })
+    }).then(r => r.json()).then(d => {
+      if (!(d && d.ok)) {
+        const g = (d && d.guide_text) ? '\n' + d.guide_text : '';
+        throw new Error(((d && d.error) || 'start failed') + g);
+      }
+      CS.run = d.run_id;
+      CS.spent = 1;
+      const repoTail = String(d.repo || '').split(/[/\\]/).filter(Boolean).pop() || '';
+      // Starts: one per line (count + trimmed name), never comma soup.
+      const pickArr = (d.picks || []);
+      const pickLines = pickArr.map(p => {
+        const nm = String(p.name || '');
+        const short = nm.length > 36 ? nm.slice(0, 36) + '…' : nm;
+        const why = crawlUiSay(p.why) || '?';
+        return zh ? `・${escapeHtml(short)}（${escapeHtml(why)}）` : `・${escapeHtml(short)} (${escapeHtml(why)})`;
+      }).join('<br/>');
+      line(`<b style="color:#58a6ff;">${zh ? `✦ 為「${escapeHtml(seedText)}」摸瓜，起點 ${pickArr.length} 個（總綱選的${repoTail ? '@' + repoTail : ''}）：` : `✦ Crawling for "${escapeHtml(seedText)}" — ${pickArr.length} starts (catalog picks${repoTail ? '@' + repoTail : ''}):`}</b>${pickLines ? '<br/>' + pickLines : ''}`);
+      // GC sweep runs silently — housekeeping, not user-facing news.
+      snap();
+      phase = zh ? '逐檔摸索中' : 'Crawling files';
+      tick();
+      const step = () => fetch('/api/crawl/next', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ run_id: CS.run, max_files: maxFiles })
+      }).then(r => r.json()).then(n => {
+        if (!(n && n.ok)) throw new Error((n && n.error) || 'next failed');
+        CS.spent = (typeof n.spent === 'number') ? n.spent : CS.spent;
+        // Batched rounds return batch:[{node,kind,concepts,pushed}]; the
+        // older single-node shape (node/kind/pushed) still works as 1 item.
+        const items = Array.isArray(n.batch) && n.batch.length
+          ? n.batch
+          : (n.node ? [{ node: n.node, kind: n.kind, pushed: n.pushed || [] }] : []);
+        // Plain-human rounds (emperor's decree): file names ONLY.
+        // No 念/入, kept/queued, fan-out, or trace jargon. Names prove
+        // the crawl is alive; the phase counter (x/10 read) is primary.
+        const rnames = [];
+        items.forEach(it => {
+          CS.steps++;
+          CS.pushed += ((it.pushed || []).length);
+          if (it.kind === 'file') {
+            CS.files++;
+            const nm = String(it.node || '');
+            rnames.push(nm.length > 32 ? '…' + nm.slice(-32) : nm);
+          }
+        });
+        if (rnames.length) {
+          const shown = escapeHtml(rnames.join(zh ? '、' : ', '));
+          if (n.error) {
+            line(`<span style="color:#e3b341;">⚠ ${shown} ${zh ? '未判讀，已跳過' : 'skipped (unreadable)'}</span>`);
+          } else {
+            line(`<span style="color:#8b949e;">📄 ${shown}</span>`);
+          }
+        }
+        phase = zh ? `逐檔摸索中（已讀 ${CS.files}/${maxFiles}，候選 ${CS.steps}）` : `Crawling files (${CS.files}/${maxFiles} read, ${CS.steps} rounds)`;
+        tick();
+        snap();
+        if (n.done) return doFinish();
+        return step();
+      });
+      return step();
+    }).catch(err => fail(err && err.message ? err.message : String(err)));
+    return;
+  }
+  scanDlg.mode = mode; scanDlg.maxNew = maxNew; scanDlg.minTf = minTf;
+  // Prospect rounds never show the Vine title bar.
+  { const tb = o.querySelector('#scan-crawl-titlebar'); if (tb) tb.style.display = 'none'; }
+  scanDlg.busy = true;
+  // Settings stay visible and editable across rounds: Dig more always
+  // reads live values, so thresholds can be tuned between rounds.
+  const stDone = o.querySelector('#scan-settings-done');
+  if (stDone) { stDone.style.display = 'none'; }
+  const goBtn = o.querySelector('#scan-go-btn');
+  if (goBtn) { goBtn.disabled = true; goBtn.textContent = zh ? '掃描中…' : 'Scanning…'; }
+  const prog = o.querySelector('#scan-progress');
+  const t0 = Date.now();
+  const tick = () => {
+    if (prog) {
+      prog.style.display = 'flex';
+      prog.innerHTML = `<span class="ing-spin">◌</span> ${zh ? '挖礦評審中' : 'Mining'}… ${Math.floor((Date.now() - t0) / 1000)}s`;
+    }
+  };
+  tick();
+  const timer = setInterval(tick, 500);
+  const seen = scanDlg.items.map(e => e.term);
+  fetch('/api/concepts/scan', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    // Pin the ACTIVE repo (like Vine does): without it the server fans out
+    // to every library while budget=1 is shared, and the top slot may go
+    // to some other repo's term — or nowhere useful.
+    body: JSON.stringify({ mode, max_new: maxNew, min_tf: minTf, dry_run: true, exclude: seen,
+      repo: (typeof getActiveRepoPath === 'function') ? getActiveRepoPath() : '' })
+  })
+    .then(r => r.json())
+    .then(d => {
+      clearInterval(timer);
+      scanDlg.busy = false;
+      if (goBtn) { goBtn.disabled = false; goBtn.textContent = zh ? '✦ 繼續挖' : '✦ Dig more'; }
+      if (prog) prog.style.display = 'none';
+      const got = ((d && d.inserted) || []).filter(x => x && x.term);
+      if (d && d.ok && got.length) {
+        got.forEach(x => {
+          if (!scanDlg.items.some(e => e.term === x.term)) {
+            scanDlg.items.push({ term: x.term, df: x.df || 0, tf: x.tf || 0,
+              files: x.files || [], reason: x.reason || '', repo: x.repo || '',
+              checked: true, rejected: false });
+          }
+        });
+      } else if (d && d.ok) {
+        // Empty round, but SAY WHY (mined/judged come back in the
+        // response): dry well vs all-decided vs judge-rejected.
+        const minedN = d.mined || 0, judgedN = d.judged || 0;
+        showToast(zh
+          ? (minedN <= 0 ? '這輪沒有新面孔（庫裡沒有頻次詞：未索引？換個庫？）'
+            : (judgedN > 0 ? `這輪沒有新面孔（LLM 看過 ${judgedN} 個，全判不收）`
+              : `這輪沒有新面孔（掃過 ${minedN} 個頻次詞，全是有主之詞：已收錄／黑名單／本輪見過）`))
+          : (minedN <= 0 ? 'No new faces (nothing mined — unindexed?)'
+            : (judgedN > 0 ? `No new faces (LLM judged ${judgedN}, kept none)`
+              : `No new faces (${minedN} mined, all decided)`)));
+      } else {
+        showToast('❌ ' + ((d && d.error) || 'scan failed'));
+      }
+      const resBox = o.querySelector('#scan-results');
+      if (resBox) resBox.style.display = 'flex';
+      scanRenderResults();
+    })
+    .catch(err => {
+      clearInterval(timer);
+      scanDlg.busy = false;
+      if (goBtn) { goBtn.disabled = false; goBtn.textContent = zh ? '✦ 繼續挖' : '✦ Dig more'; }
+      if (prog) prog.style.display = 'none';
+      showToast('❌ ' + err);
+    });
+}
+// Vine bottom confirm paint (same slot as Prospect's scanPaintConfirm:
+// green button bottom-right, enabled only with a non-empty title).
+function vinePaintConfirm() {
+  const zh = (typeof currentLanguage !== 'undefined' && currentLanguage === 'zh');
+  const o = document.getElementById('scan-opt-overlay');
+  const btn = document.getElementById('scan-confirm-btn');
+  if (!o || !btn || !scanDlg) return;
+  const titleInp = o.querySelector('#scan-crawl-title');
+  const ok = !!((titleInp || {}).value || '').trim();
+  btn.style.display = '';
+  btn.disabled = !ok;
+  btn.style.opacity = ok ? '' : '0.45';
+  btn.textContent = zh ? '確認收錄' : 'Confirm';
+}
+// Vine confirm: title + checked node rows -> candidate pool (same
+// FnCrawlConfirm as the old mid-list button used).
+function vineConfirmGo() {
+  const zh = (typeof currentLanguage !== 'undefined' && currentLanguage === 'zh');
+  const o = document.getElementById('scan-opt-overlay');
+  if (!o || !scanDlg || scanDlg.busy) return;
+  const t = (((o.querySelector('#scan-crawl-title') || {}).value) || '').trim();
+  if (!t) { showToast(zh ? '標題是空的，先打個標題再確認' : 'Title is empty — type one first'); return; }
+  const keptArr = scanDlg.vineKept || [];
+  // 去留以有內文的節點列為準（md 勾只是總開關）；只送勾的 pairs。
+  const pairs = [...document.querySelectorAll('#scan-results [data-vine-keep]:checked')]
+    .map(cb => keptArr[parseInt(cb.getAttribute('data-vine-keep'), 10)])
+    .filter(Boolean)
+    .map(k => ({ term: k.term, file: k.file }));
+  if (!pairs.length) { showToast(zh ? '至少留一個，否則無需確認' : 'Keep at least one item'); return; }
+  fetch('/api/crawl/confirm', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ run_id: scanDlg.vineRun, title: t, keep: pairs })
+  }).then(r => r.json()).then(d => {
+    if (d && d.ok) {
+      showToast(zh ? `已進候選池：${d.title}` : `Candidate: ${d.title}`);
+      try { window.__crawlLast = Object.assign(window.__crawlLast || {}, { confirmed: d.title }); } catch (e) {}
+      o.remove();
+      scanDlg = null;
+      if (typeof fetchConceptsData === 'function') fetchConceptsData();
+      if (typeof switchConceptSubTab === 'function') switchConceptSubTab('candidates');
+    } else {
+      showToast('❌ ' + ((d && d.error) || 'confirm failed'));
+    }
+  }).catch(err => showToast('❌ ' + err));
+}
+// Commit checked as candidates + rejected to blacklist, then close.
+function conceptScanConfirm() {
+  const zh = (typeof currentLanguage !== 'undefined' && currentLanguage === 'zh');
+  const o = document.getElementById('scan-opt-overlay');
+  if (!o || !scanDlg || scanDlg.busy) return;
+  // Vine confirms through the SAME bottom slot (title bar + green button).
+  if (scanDlg.mode === 'crawl') { vineConfirmGo(); return; }
+  // Prospect: approve carries only CHECKED files per term (Vine-identical
+  // keep/drop); terms with nothing checked are simply left for 繼續挖.
+  // There is no separate reject list here: unchecked files are just
+  // skipped (not blacklisted), so the payload is { approve } only.
+  const approve = [];
+  const _seenTerms = new Set();
+  scanDlg.items.forEach((e, i) => {
+    const t = (e.term || '').trim().slice(0, 30);
+    if (!t || _seenTerms.has(t)) return;
+    const files = (e.files || []).filter((f, fi) => {
+      const cb = document.querySelector(`#scan-results [data-scan-file="${i}:${fi}"]`);
+      return cb && cb.checked;
+    });
+    if (!files.length) return;
+    _seenTerms.add(t);
+    approve.push({ term: t, df: e.df || 0, tf: e.tf || 0, files, reason: e.reason || '', repo: e.repo || '' });
+  });
+  if (!approve.length) { showToast(zh ? '至少留一個檔案，否則無需確認' : 'Keep at least one file'); return; }
+  scanDlg.busy = true;
+  fetch('/api/concepts/scan/confirm', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ approve })
+  })
+    .then(r => r.json())
+    .then(d => {
+      scanDlg.busy = false;
+      if (d && d.ok) {
+        o.remove();
+        scanDlg = null;
+        const nApproved = new Set(d.approved || []).size;
+        showToast(zh ? `已收錄 ${nApproved} 個，黑名單 ${d.rejected.length} 個`
+                     : `Approved ${nApproved}, blacklisted ${d.rejected.length}`);
+        if (typeof fetchConceptsData === 'function') fetchConceptsData();
+        if (typeof switchConceptSubTab === 'function') switchConceptSubTab('candidates');
+      } else {
+        showToast('❌ ' + ((d && d.error) || 'confirm failed'));
+      }
+    })
+    .catch(err => { scanDlg.busy = false; showToast('❌ ' + err); });
+}
+
 function openEditConceptModal(name, category, aliases, event) {
   if (event) event.stopPropagation();
   openConceptActionModal('edit', { name, category, aliases });
@@ -5116,9 +5957,331 @@ function promoteCandidate(name) {
 
 function dismissCandidate(name) {
   const zh = currentLanguage === 'zh';
-  if (!confirm(zh ? `確定要將待審標籤「${name}」駁回除名嗎？` : `Dismiss candidate '${name}'?`)) return;
-  // Save as dismissed or unlink
-  const repo = getActiveRepoPath();
+  if (document.getElementById('dismiss-opt-overlay')) return;
+  const o = document.createElement('div');
+  o.id = 'dismiss-opt-overlay';
+  o.style.cssText = 'position:fixed;inset:0;z-index:1000005;background:rgba(0,0,0,.6);display:flex;align-items:center;justify-content:center;';
+  o.innerHTML = `
+  <div style="width:420px;max-width:92vw;background:#0d1117;border:1px solid #30363d;border-radius:12px;padding:16px;color:#e6edf3;display:flex;flex-direction:column;gap:10px;">
+    <div style="display:flex;align-items:center;justify-content:space-between;">
+      <span style="font-weight:600;font-size:15px;">${zh ? `移除「${escapeHtml(name)}」？` : `Remove "${escapeHtml(name)}"?`}</span>
+      <button onclick="document.getElementById('dismiss-opt-overlay').remove()" style="background:transparent;border:none;color:#8b949e;cursor:pointer;font-size:15px;">✕</button>
+    </div>
+    <button onclick="dismissCandidateGo('blacklist', '${escapeHtml(name)}')" title="${zh ? '以後掃描不再出現此詞' : 'Never surface this term in future scans'}" style="text-align:left;background:transparent;border:1px solid #5a2d2d;color:#f85149;border-radius:8px;padding:9px 12px;cursor:pointer;font-size:14px;">🚫 ${zh ? '移至黑名單' : 'Move to blacklist'}</button>
+    <button onclick="dismissCandidateGo('plain', '${escapeHtml(name)}')" title="${zh ? '只從清單移除，不進黑名單（下次掃描可能再出現）' : 'Remove from list only, not blacklisted (may reappear next scan)'}" style="text-align:left;background:transparent;border:1px solid #30363d;color:#c9d1d9;border-radius:8px;padding:9px 12px;cursor:pointer;font-size:14px;">🗑 ${zh ? '清除' : 'Remove'}</button>
+    <button onclick="document.getElementById('dismiss-opt-overlay').remove()" title="${zh ? '什麼都不做' : 'Do nothing'}" style="text-align:left;background:transparent;border:1px solid #30363d;color:#8b949e;border-radius:8px;padding:9px 12px;cursor:pointer;font-size:14px;">${zh ? '取消' : 'Cancel'}</button>
+  </div>`;
+  document.body.appendChild(o);
+  o.addEventListener('click', (ev) => { if (ev.target === o) o.remove(); });
+}
+// Candidate card click -> full-page draft review in the viewer, same look
+// as the official tag page (action bar + management table with per-row
+// 解除). The dialog overlay is retired.
+// Buttons inside the card (Refresh/Promote/Remove) must NOT trigger this.
+function openCandidatePage(name, source, ev) {
+  if (ev && ev.target && ev.target.closest && ev.target.closest('button')) return;
+  name = (name || '').trim();
+  if (!name) return;
+  const isVine = source === 'vine';
+  const repo = (typeof getActiveRepoPath === 'function') ? getActiveRepoPath() : '';
+  try {
+    window.__candName = name;
+    window.__candSource = source || '';
+    window.__candGroups = [];
+  } catch (e) {}
+  // Loading plate first (same skeleton as the tag page).
+  renderCandidatePageInViewer({ concept: name, source: source, repo: repo, groups: null, evd: null, loading: true });
+  const draftUrl = `/api/concepts/candidates/draft?repo=${encodeURIComponent(repo)}&name=${encodeURIComponent(name)}`;
+  const evP = !isVine
+    ? fetch(repo ? `/api/concepts/scan/evidence?repo=${encodeURIComponent(repo)}` : '/api/concepts/scan/evidence')
+        .then(r => r.json()).then(ev => ((ev && ev.evidence) || {})[name] || null).catch(() => null)
+    : Promise.resolve(null);
+  fetch(draftUrl)
+    .then(r => r.json()).then(d => {
+      if (!(d && d.ok)) {
+        renderCandidatePageInViewer({ concept: name, source: source, repo: repo, groups: [], evd: null, error: (d && d.error) || 'draft failed' });
+        return;
+      }
+      const rows = d.rows || [];
+      let linkRows = rows.filter(r => r.kind !== 'tag');
+      if (!linkRows.length) linkRows = rows;
+      evP.then(evd => {
+        const groups = [];
+        linkRows.forEach(r => {
+          const k = (r.file || '') + '\n' + (r.mention || '');
+          let g = null;
+          for (const x of groups) { if (x.k === k) { g = x; break; } }
+          if (!g) { g = { k, file: r.file, mention: r.mention, head: null }; groups.push(g); }
+          if (!g.head && r.heading && r.line) g.head = r;
+        });
+        try { window.__candGroups = groups.map(g => ({ file: g.file, mention: g.mention })); }
+        catch (e) {}
+        renderCandidatePageInViewer({ concept: name, source: source, repo: repo, groups, evd });
+      });
+    }).catch(err => {
+      renderCandidatePageInViewer({ concept: name, source: source, repo: repo, groups: [], evd: null, error: String((err && err.message) || err) });
+    });
+}
+// Candidate draft page: official-tag-page look. Header + action bar +
+// management table (Keep | crumb | snippet | 解除 per row).
+function renderCandidatePageInViewer(p) {
+  const zh = currentLanguage === 'zh';
+  const dName = document.getElementById('d-name');
+  const dSub = document.getElementById('d-sub');
+  const badge = document.getElementById('d-kind-badge');
+  const codeTitle = document.getElementById('d-code-title');
+  const name = p.concept || '';
+  const isVine = p.source === 'vine';
+  const groups = p.groups || [];
+  const repoTail = String(p.repo || '').split(/[/\\]/).filter(Boolean).pop() || '';
+  const srcLabel = isVine ? 'Vine' : (zh ? '探礦' : 'Prospect');
+
+  // Browser-history record (candidate draft view).
+  try {
+    if (name && typeof navRecord === 'function') {
+      navRecord({ view: 'candidate', name: name, source: isVine ? 'vine' : 'prospect' });
+    }
+  } catch (e) {}
+  if (dName) dName.innerText = zh ? `🏷️ ${name}（候選審核）` : `🏷️ ${name} (Candidate)`;
+  if (dSub) dSub.innerText = `${repoTail} · ${p.groups === null ? '…' : groups.length} ${zh ? '處落點' : 'spots'} · ${zh ? '來源' : 'Source'} ${srcLabel}`;
+  if (badge) {
+    badge.innerText = 'CANDIDATE';
+    badge.style.background = '#9e6a03';
+    badge.style.color = '#ffffff';
+    badge.style.fontWeight = '700';
+    badge.style.textShadow = '0 1px 2px rgba(0,0,0,0.7)';
+  }
+  if (codeTitle) codeTitle.innerText = zh ? '🗂️ 候選底稿審核' : '🗂️ Candidate Draft Review';
+
+  const escName = escapeHtml(name);
+  // (5) Draft-preview banner: the WHOLE page is a preview — nothing on
+  // disk. Staged rows live in DB only until Promote.
+  let fullMd = `<div style="background:#0d1a2e;border:1px solid #1f6feb;border-radius:8px;padding:8px 12px;margin-bottom:10px;font-size:12px;color:#a5d6ff;">${zh ? '👁 本頁為轉正預覽 — 檔案尚未寫入任何標籤；按 ✓ 審批入典才會落檔' : '👁 Draft preview — no tags written to any file yet; they land on disk only after Promote'}</div>\n\n`;
+  fullMd += `${zh ? '分類' : 'Category'}: ${srcLabel} ｜ ${zh ? '狀態：候選（轉正才寫檔）' : 'Status: candidate (applied on promote)'}\n\n`;
+  // No <hr> here: the banner above already separates, and a bare rule
+  // collides with the button row below (white line on buttons).
+  fullMd += `<div style="display:flex;gap:8px;flex-wrap:wrap;margin:12px 0 10px;">`
+    + `<button class="mini-btn" style="background:#238636;border-color:#2ea043;color:#fff;padding:4px 14px;font-weight:600;" onclick="promoteCandidate('${escName}')">✓ ${zh ? '審批入典' : 'Promote'}</button>`
+    + `<button class="mini-btn" style="background:transparent;border:1px solid #1f6feb;color:#58a6ff;padding:4px 14px;" onclick="openCardRefresh('${escName}')">↻ ${zh ? '更新' : 'Refresh'}</button>`
+    + `<button class="mini-btn" style="background:#21262d;border:1px solid #30363d;color:#f85149;padding:4px 14px;" onclick="dismissCandidate('${escName}')">✕ ${zh ? '移除' : 'Remove'}</button>`
+    + `</div>\n\n`;
+  fullMd += `### 🔗 ${zh ? '落點底稿（轉正才寫檔）' : 'Staged spots (applied on promote)'}\n`;
+  if (p.loading) {
+    fullMd += zh ? '\n*(讀取中…)*\n' : '\n*(Loading…)*\n';
+  } else if (p.error) {
+    fullMd += `\n*❌ ${escapeHtml(p.error)}*\n`;
+  } else if (!groups.length) {
+    fullMd += zh ? '\n*(暫存已空（可能已轉正，或被過期清掃掉了）。)*\n' : '\n*(Draft is empty (promoted or swept).)*\n';
+  } else {
+    const baseName = (x) => String(x || '').split(/[\\/]/).pop() || x || '';
+    const cleanMention = (s) => String(s || '').replace(/^["'「『‘“\s]+|["'」』’”\s]+$/g, '');
+    // (2) Dashed DRAFT sample: exactly what one applied tag line will
+    // look like under each spot's heading after Promote. Rendered as
+    // CODE (not a link — tags/<name>.md may not exist yet; a dead link
+    // in a preview is a fresh confusion).
+    fullMd += `<div style="position:relative;border:1px dashed #8b949e;border-radius:8px;padding:10px 12px;margin:10px 0 4px;background:rgba(139,148,158,.06);">`
+      + `<span style="position:absolute;top:-9px;right:10px;background:#0d1117;border:1px solid #8b949e;border-radius:8px;font-size:10px;color:#8b949e;padding:0 8px;">${zh ? '預覽 PREVIEW' : 'PREVIEW'}</span>`
+      + `<div style="font-size:11px;color:#8b949e;margin-bottom:4px;">${zh ? '轉正後，每處落點的段標下會多出這一行：' : 'After Promote, this line lands under each spot heading:'}</div>`
+      + `<div style="font-size:12px;color:#c9d1d9;"><code>&gt; 🏷️ ${zh ? '標籤' : 'tag'}： [${escName}](.docgraphical/tags/${escName}.md)</code></div>`
+      + `</div>\n`;
+    fullMd += zh ? '\n| 引用檔案路徑 | 提及段落摘要 | 操作 |\n| :--- | :--- | :--- |\n'
+                 : '\n| File | Snippet | Action |\n| :--- | :--- | :--- |\n';
+    groups.forEach((g, gi) => {
+      const h = g.head || {};
+      const crumb = (h.heading && h.line)
+        ? refCrumbHtml(`heading::${g.file}::L${h.line}::${h.heading}`)
+        : refCrumbHtml(g.file || '');
+      let snip;
+      if (!isVine && p.evd && p.evd.files) {
+        const mf = baseName(g.file);
+        const hit = p.evd.files.find(f => baseName(f.rel) === mf) || null;
+        const sn = hit && hit.snippet ? String(hit.snippet).slice(0, 140).replace(/\|/g, '/') : '';
+        snip = sn ? `“${escapeHtml(sn)}”` : (zh ? '(章節內文)' : '(Section body)');
+      } else if (isVine) {
+        const men = cleanMention(g.mention);
+        snip = men ? escapeHtml(men) : (zh ? '(章節內文)' : '(Section body)');
+      } else {
+        snip = zh ? '(章節內文)' : '(Section body)';
+      }
+      fullMd += `| ${crumb} | ${snip} | <button class="mini-btn" style="color:#f85149; border-color:#da3633; padding:3px 12px; font-weight:600; white-space:nowrap; min-width:54px; display:inline-block;" onclick="detachCandidateRow(${gi}, event)">${zh ? '解除' : 'Unlink'}</button> |\n`;
+    });
+    fullMd += `\n${zh ? '＊每處落點轉正含內文連結＋段落🏷️標籤行' : '* each spot applies inline link + section tag line on promote'}\n`;
+  }
+  viewCtx = { project: '', file: '', repo: p.repo || getActiveRepoPath(), heading: '', candidate: name };
+  renderMarkdown(fullMd);
+}
+// Candidate page: drop ONE staged spot (same meaning as 解除 on the tag page).
+function detachCandidateRow(gi, ev) {
+  if (ev) { ev.stopPropagation(); ev.preventDefault(); }
+  const zh = currentLanguage === 'zh';
+  const groups = window.__candGroups || [];
+  const g = groups[gi];
+  const name = window.__candName || '';
+  if (!g || !name) {
+    showToast(zh ? '❌ 底稿已過期，重開候選卡' : '❌ draft expired, reopen the card');
+    return;
+  }
+  const repo = (typeof getActiveRepoPath === 'function') ? getActiveRepoPath() : '';
+  fetch('/api/concepts/candidates/detach', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ repo, name, drop: [{ file: g.file, mention: g.mention }] })
+  }).then(r => r.json()).then(d => {
+    if (d && d.ok) {
+      showToast(zh ? '已解除 1 處' : 'Detached 1 spot');
+      if (typeof fetchConceptsData === 'function') fetchConceptsData();
+      openCandidatePage(name, (window.__candSource || 'vine'), null);
+    } else {
+      showToast('❌ ' + ((d && d.error) || 'detach failed'));
+    }
+  }).catch(err => showToast('❌ ' + err));
+}
+// (detachCandidateUnchecked removed with the Keep column; per-row 解除
+// plus page-level 移除 cover detach flows.)
+// Prospect block tree-checks: mirror of the Vine toggles (master per
+// term block, keep/drop unit per evidence-file row).
+function scanFileToggle(master) {
+  const blk = master && master.closest ? master.closest('[data-scan-block]') : null;
+  if (!blk) return;
+  blk.querySelectorAll('[data-scan-file]').forEach(b => { b.checked = master.checked; });
+  master.indeterminate = false;
+  if (typeof scanPaintConfirm === 'function') scanPaintConfirm();
+}
+function scanSubToggle(sub) {
+  const blk = sub && sub.closest ? sub.closest('[data-scan-block]') : null;
+  if (!blk) return;
+  const master = blk.querySelector('[data-scan-master]');
+  if (!master) return;
+  const boxes = [...blk.querySelectorAll('[data-scan-file]')];
+  const n = boxes.filter(b => b.checked).length;
+  master.checked = n > 0;
+  master.indeterminate = n > 0 && n < boxes.length;
+  if (typeof scanPaintConfirm === 'function') scanPaintConfirm();
+}
+// Vine dialog tree-checks: md checkbox is the master switch for its
+// node; each content row keeps its own box (the true keep/drop unit).
+function vineFileToggle(master) {
+  const blk = master && master.closest ? master.closest('[data-vine-block]') : null;
+  if (!blk) return;
+  blk.querySelectorAll('[data-vine-keep]').forEach(b => { b.checked = master.checked; });
+  master.indeterminate = false;
+}
+function vineSubToggle(sub) {
+  const blk = sub && sub.closest ? sub.closest('[data-vine-block]') : null;
+  if (!blk) return;
+  const master = blk.querySelector('[data-vine-file]');
+  if (!master) return;
+  const boxes = [...blk.querySelectorAll('[data-vine-keep]')];
+  const n = boxes.filter(b => b.checked).length;
+  master.checked = n > 0;
+  master.indeterminate = n > 0 && n < boxes.length;
+}
+// (closeDraftAndJump retired with the draft overlay;
+// section jumps go through refCrumbHtml now.)
+// (detachDraftUnchecked retired with the draft overlay; candidate-page
+// detachment lives in detachCandidateRow / detachCandidateUnchecked.)
+// Per-card refresh chooser: Prospect recounts this term (free), Vine opens
+// Discover in crawl mode with the tag name prefilled as seed.
+function openCardRefresh(term) {
+  const zh = currentLanguage === 'zh';
+  if (document.getElementById('refresh-opt-overlay')) return;
+  term = (term || '').trim();
+  if (!term) return;
+  const o = document.createElement('div');
+  o.id = 'refresh-opt-overlay';
+  o.style.cssText = 'position:fixed;inset:0;z-index:1000005;background:rgba(0,0,0,.6);display:flex;align-items:center;justify-content:center;';
+  o.innerHTML = `
+  <div style="width:420px;max-width:92vw;background:#0d1117;border:1px solid #30363d;border-radius:12px;padding:16px;color:#e6edf3;display:flex;flex-direction:column;gap:10px;">
+    <div style="display:flex;align-items:center;justify-content:space-between;">
+      <span style="font-weight:600;font-size:15px;">${zh ? `更新「${escapeHtml(term)}」？` : `Refresh "${escapeHtml(term)}"?`}</span>
+      <button onclick="document.getElementById('refresh-opt-overlay').remove()" style="background:transparent;border:none;color:#8b949e;cursor:pointer;font-size:15px;">✕</button>
+    </div>
+    <button onclick="cardRefreshGo('prospect', '${escapeHtml(term)}')" title="${zh ? '重算此詞出現幾檔幾次＋補上缺少的落點，不花 LLM 錢' : 'Recount DF/TF + top up missing staged spots, no LLM cost'}" style="text-align:left;background:transparent;border:1px solid #9e6a03;color:#e3b341;border-radius:8px;padding:9px 12px;cursor:pointer;font-size:14px;">⛏ ${zh ? '探礦重算＋補落點' : 'Prospect recount + top-up'}</button>
+    <button onclick="cardRefreshGo('vine', '${escapeHtml(term)}')" title="${zh ? '以此為種子重摸一輪，新落點併入同一候選（花 LLM，不另開候選）' : 'Re-crawl seeded by this; new spots merge into THIS candidate (LLM cost, no new candidate)'}" style="text-align:left;background:transparent;border:1px solid #2ea043;color:#3fb950;border-radius:8px;padding:9px 12px;cursor:pointer;font-size:14px;">🌿 ${zh ? '順藤深挖' : 'Vine dig'}</button>
+    <button onclick="document.getElementById('refresh-opt-overlay').remove()" title="${zh ? '什麼都不做' : 'Do nothing'}" style="text-align:left;background:transparent;border:1px solid #30363d;color:#8b949e;border-radius:8px;padding:9px 12px;cursor:pointer;font-size:14px;">${zh ? '取消' : 'Cancel'}</button>
+  </div>`;
+  document.body.appendChild(o);
+  o.addEventListener('click', (ev) => { if (ev.target === o) o.remove(); });
+}
+// Executes one per-card refresh path.
+function cardRefreshGo(how, term) {
+  const o = document.getElementById('refresh-opt-overlay');
+  if (o) o.remove();
+  const zh = currentLanguage === 'zh';
+  const repo = (typeof getActiveRepoPath === 'function') ? getActiveRepoPath() : '';
+  if (how === 'prospect') {
+    fetch('/api/concepts/scan/recount-one', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ repo, term })
+    })
+      .then(r => r.json())
+      .then(d => {
+        if (d && d.ok) {
+          const added = d.staged_added || 0;
+          const cntTxt = zh ? `「${term}」：出現${d.df || 0}檔·${d.tf || 0}次`
+                            : `"${term}": ${d.df || 0} docs·${d.tf || 0} hits`;
+          showToast(added > 0
+            ? (zh ? `${cntTxt}，補上 ${added} 處落點（未花 LLM）` : `${cntTxt}, +${added} spots (no LLM)`)
+            : (zh ? `${cntTxt}（已是最新，無新增，未花 LLM）` : `${cntTxt} (up to date, no LLM)`));
+          if (typeof fetchConceptsData === 'function') fetchConceptsData();
+          // If the candidate page for this term is open, re-render it so
+          // the topped-up spots show without reopening the card.
+          try {
+            if ((window.__candName || '') === term && typeof openCandidatePage === 'function') {
+              openCandidatePage(term, (window.__candSource || 'prospect'), null);
+            }
+          } catch (e) {}
+        } else {
+          showToast('❌ ' + ((d && d.error) || 'recount failed'));
+        }
+      })
+      .catch(err => showToast('❌ ' + err));
+    return;
+  }
+  // Vine: PURE refresh - re-crawl seeded by this title, fresh spots merge
+  // into THIS candidate (never a new one). Costs LLM, takes minutes.
+  showToast(zh ? `🌿 深挖「${term}」中（花幾通 LLM，完成即報）`
+               : `🌿 Digging "${term}" (LLM calls, report on done)`);
+  fetch('/api/crawl/refresh', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ repo, name: term })
+  })
+    .then(r => r.json())
+    .then(d => {
+      if (d && d.ok) {
+        const added = d.added || 0;
+        showToast(added > 0
+          ? (zh ? `「${term}」：補上 ${added} 處落點（花 ${d.spent || 0} 通）`
+                 : `"${term}": +${added} spots (${d.spent || 0} calls)`)
+          : (zh ? `「${term}」：無新增（花 ${d.spent || 0} 通）`
+                 : `"${term}": nothing new (${d.spent || 0} calls)`));
+        if (typeof fetchConceptsData === 'function') fetchConceptsData();
+        try {
+          if ((window.__candName || '') === term && typeof openCandidatePage === 'function') {
+            openCandidatePage(term, (window.__candSource || 'vine'), null);
+          }
+        } catch (e) {}
+      } else {
+        showToast('❌ ' + ((d && d.error) || 'refresh failed'));
+      }
+    })
+    .catch(err => showToast('❌ ' + err));
+  return;
+}
+function dismissCandidateGo(how, name) {
+  const o = document.getElementById('dismiss-opt-overlay');
+  if (o) o.remove();
+  const zh = currentLanguage === 'zh';
+  const repo = (typeof getActiveRepoPath === 'function') ? getActiveRepoPath() : '';
+  if (how === 'plain') {
+    fetch('/api/concepts/scan/candidates/remove', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ repo, name })
+    }).then(() => {
+      if (typeof fetchConceptsData === 'function') fetchConceptsData();
+    });
+    return;
+  }
+  // Blacklist path: existing unlink flow (records rejected_terms server-side).
   fetch('/api/concepts/unlink', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -5151,14 +6314,23 @@ function updateConceptsI18n() {
   // Sub Tab Buttons
   const btnOfficial = document.getElementById('btn-cpt-official');
   const btnCandidates = document.getElementById('btn-cpt-candidates');
+  const btnBlacklist = document.getElementById('btn-cpt-blacklist');
   const countOff = document.getElementById('count-cpt-official')?.innerText || '0';
   const countCand = document.getElementById('count-cpt-candidates')?.innerText || '0';
+  const countBlack = document.getElementById('count-cpt-blacklist')?.innerText || '0';
 
   const txtOff = lang === 'zh' ? '正式概念' : (lang === 'ja' ? '公式コンセプト' : 'Official');
   const txtCand = lang === 'zh' ? '待審候選' : (lang === 'ja' ? '審査待ち候補' : 'Candidates');
+  const txtBlack = lang === 'zh' ? '黑名單' : (lang === 'ja' ? 'ブラックリスト' : 'Blacklist');
 
   if (btnOfficial) btnOfficial.innerHTML = `${txtOff} (<span id="count-cpt-official">${countOff}</span>)`;
   if (btnCandidates) btnCandidates.innerHTML = `${txtCand} (<span id="count-cpt-candidates">${countCand}</span>)`;
+  if (btnBlacklist) btnBlacklist.innerHTML = `${txtBlack} (<span id="count-cpt-blacklist">${countBlack}</span>)`;
+
+  // Discover button + clear-filter (both hardcoded in template HTML)
+  set('btn-scan-concept', lang === 'zh' ? '🔍 發掘' : (lang === 'ja' ? '🔍 発掘' : '🔍 Discover'));
+  setAttr('btn-scan-concept', 'title', lang === 'zh' ? '全庫挖礦＋LLM評審，新候選入池' : (lang === 'ja' ? '全ライブラリ発掘＋LLM審査、新候補をプール' : 'Mine corpus + LLM review; new candidates staged'));
+  setAttr('btn-clear-cpt-filter', 'title', lang === 'zh' ? '清除篩選' : (lang === 'ja' ? 'フィルタをクリア' : 'Clear filter'));
 
   // Re-render list with updated language
   renderConceptsDrawerList(cptSearch ? cptSearch.value : '');
@@ -5271,6 +6443,7 @@ function applyAppLanguage() {
   updateExplorerI18n();
   updateConceptsI18n();
   updateViewerTagToolbarI18n();
+  updateViewerNavI18n();
   updateSettingsModalI18n();
 
   const msg = currentLanguage === 'zh' ? '語系切換：繁體中文'
@@ -5345,6 +6518,85 @@ function openFileInEditor(filePath, targetLine = 1) {
     selectActiveNode({ id: fileId, name: filePath, file: filePath, abs_path: absPath, kind: 'file', line: targetLine });
   }
 }
+// Browser-like page history (doc viewer header ‹ ›): every viewed page
+// (document/section, tag page, candidate draft) is recorded; 上一頁 walks
+// back, 下一頁 walks forward. New page after going back truncates the
+// forward branch. Restores go through the SAME entry points (selection
+// decree: explorer + 3D + viewer stay synced).
+let navHist = [], navIdx = -1, navLock = false;
+function navKey(s) {
+  if (!s) return '';
+  return (s.view || 'node') + '|' + (s.id || s.name || '');
+}
+function navRecord(snap) {
+  if (navLock || !snap) return;
+  try {
+    const k = navKey(snap);
+    if (!k) return;
+    if (navIdx >= 0 && navHist[navIdx] && navKey(navHist[navIdx]) === k) return;
+    navHist = navHist.slice(0, navIdx + 1);
+    navHist.push(snap);
+    if (navHist.length > 100) navHist.shift();
+    navIdx = navHist.length - 1;
+    navPaint();
+  } catch (e) {}
+}
+function navRestore(snap) {
+  if (!snap) return;
+  if (snap.view === 'tag' && typeof onConceptCardClick === 'function') {
+    onConceptCardClick(snap.name, null);
+  } else if (snap.view === 'candidate' && typeof openCandidatePage === 'function') {
+    openCandidatePage(snap.name, snap.source || 'prospect', null);
+  } else if (typeof selectActiveNode === 'function' && snap.node) {
+    selectActiveNode(snap.node);
+  }
+}
+function navGo(dir) {
+  const lang = (typeof currentLanguage !== 'undefined') ? currentLanguage : 'en';
+  const zh = lang === 'zh', ja = lang === 'ja';
+  try {
+    const t = navIdx + dir;
+    if (t < 0 || t >= navHist.length) {
+      if (typeof showToast === 'function') showToast(t < 0
+        ? (zh ? '已經是最早一頁' : (ja ? 'これ以上前に戻れません' : 'Already at the oldest page'))
+        : (zh ? '已經是最新一頁' : (ja ? 'これ以上先に進めません' : 'Already at the newest page')));
+      return;
+    }
+    navIdx = t;
+    navLock = true;
+    try { navRestore(navHist[t]); } finally { navLock = false; }
+    navPaint();
+  } catch (e) {}
+}
+function navPaint() {
+  try {
+    const pv = document.getElementById('btn-prev-node');
+    const nx = document.getElementById('btn-next-node');
+    const canBack = navIdx > 0, canFwd = navIdx >= 0 && navIdx < navHist.length - 1;
+    if (pv) { pv.disabled = !canBack; pv.style.opacity = canBack ? '' : '0.4'; }
+    if (nx) { nx.disabled = !canFwd; nx.style.opacity = canFwd ? '' : '0.4'; }
+  } catch (e) {}
+}
+// Heading crumb (green › segment): open the SECTION, not the file top.
+// Breadcrumb carries file + line + title; the viewer has no line-scroll,
+// so we select a synthetic heading node and let /api/doc/section slice it
+// (same semantics as clicking a heading in 3D). Falls back to file open.
+function openHeadingInEditor(filePath, targetLine = 1, encTitle = '') {
+  let title = '';
+  try { title = decodeURIComponent(encTitle || ''); } catch (e) { title = encTitle || ''; }
+  title = (title || '').trim();
+  // Strip md link syntax BEFORE querying: the server substring-matches
+  // against plain file headings, so `[T](url)` would never hit.
+  if (typeof stripMdLinks === 'function') title = stripMdLinks(title).trim();
+  if (!title) { openFileInEditor(filePath, targetLine); return; }
+  // Bare path on purpose: resolve_file() searches every root server-side.
+  // Prefixing the ambient active repo here 404s on cross-repo crumbs.
+  selectActiveNode({
+    id: `heading::${filePath}::L${targetLine || 1}::${title}`,
+    name: title, file: filePath, abs_path: filePath,
+    kind: 'heading', line: targetLine || 1
+  });
+}
 
 window.browseFolderPath = function() { if (typeof openBrowsePicker === 'function') openBrowsePicker(); };
 
@@ -5417,7 +6669,7 @@ window.openConceptActionModal = function(mode, data = {}) {
   if (txtCat) txtCat.placeholder = zh ? '例如：架構, 硬體, 商業, 專案...' : (ja ? '例：アーキテクチャ, ハードウェア, ビジネス...' : 'e.g. Architecture, Hardware, Business...');
 
   if (lblName) lblName.textContent = zh ? '概念標準名稱 (Concept Name)' : (ja ? '標準コンセプト名 (Concept Name)' : 'Concept Name');
-  if (txtName) txtName.placeholder = zh ? '例如：微服務, 越南廠, LOO, CVX...' : (ja ? '例：マイクロサービス, ベトナム工場, LOO, CVX...' : 'e.g. Microservices, VietnamPlant, LOO, CVX...');
+  if (txtName) txtName.placeholder = zh ? '例如：微服務, 散熱模組, 電源管理...' : (ja ? '例：マイクロサービス, 熱設計, 電源管理...' : 'e.g. Microservices, Thermal Design, Power Management...');
 
   if (lblAliases) lblAliases.textContent = zh ? '別名與同義詞 (Aliases / 以逗號分隔)' : (ja ? '別名・同義語 (Aliases / カンマ区切り)' : 'Aliases & Synonyms (Comma separated)');
   if (txtAliases) txtAliases.placeholder = zh ? '例如：微服務架構, SOA, 分散式系統...' : (ja ? '例：SOA, 分散システム, マイクロサービス...' : 'e.g. SOA, Distributed Systems, Microservice Arch...');
@@ -5452,6 +6704,22 @@ window.openConceptActionModal = function(mode, data = {}) {
 
     if (txtCat) txtCat.value = '';
     if (txtName) { txtName.value = ''; txtName.disabled = false; }
+    if (txtAliases) txtAliases.value = '';
+
+  } else if (mode === 'promote') {
+    // Approve a candidate into the official registry. The candidate's
+    // name is the default (editable); same-name save flips its status.
+    if (titleEl) titleEl.textContent = zh ? `✓ 審批入典「${data.name}」` : (ja ? `✓ コンセプト「${data.name}」の承認` : `✓ Promote '${data.name}'`);
+    if (descEl) descEl.textContent = zh ? '將候選詞確立為正式核心概念，可調整分類與別名；確認後寫入官方註冊表。' : (ja ? '候補を公式コア概念として確定します。カテゴリと別名を調整できます。' : 'Promote this candidate into the official registry; adjust category and aliases.');
+    if (submitBtn) submitBtn.textContent = zh ? '審批為正式' : (ja ? '承認して正式化' : 'Promote to Official');
+
+    if (fieldCat) fieldCat.style.display = 'block';
+    if (fieldName) fieldName.style.display = 'block';
+    if (fieldAliases) fieldAliases.style.display = 'block';
+    if (fieldTarget) fieldTarget.style.display = 'none';
+
+    if (txtCat) txtCat.value = data.category || '';
+    if (txtName) { txtName.value = data.name || ''; txtName.disabled = false; }
     if (txtAliases) txtAliases.value = '';
 
   } else if (mode === 'edit') {
@@ -5518,7 +6786,7 @@ window.submitConceptActionModal = function() {
   const zh = currentLanguage === 'zh';
   const repo = getActiveRepoPath();
 
-  if (mode === 'add' || mode === 'edit') {
+  if (mode === 'add' || mode === 'edit' || mode === 'promote') {
     const name = (document.getElementById('txt-cpt-name').value || '').trim();
     let rawCategory = (document.getElementById('txt-cpt-category').value || '').trim();
     const category = (!rawCategory || rawCategory === '未分類' || rawCategory === 'Uncategorized') ? 'Uncategorized' : rawCategory;

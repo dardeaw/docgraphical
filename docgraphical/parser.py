@@ -100,6 +100,10 @@ def extract_section(
         lines = f.readlines()
 
     target_clean = target_heading.strip().lower().lstrip("#").strip()
+    # Strip md link syntax on BOTH sides: file headings may carry inline
+    # tag links ([T](tags/T.md)), and crumb titles may too. Compare plain.
+    target_clean = re.sub(r"\[([^\]]+)\]\([^)]+\)", r"\1", target_clean)
+    target_clean = re.sub(r"\[\[([^\]]+)\]\]", r"\1", target_clean)
     matched_idx = -1
     matched_level = -1
     in_code_block = False
@@ -118,6 +122,8 @@ def extract_section(
             level = len(m.group(1))
             title = m.group(2).strip().lower()
             title = re.sub(r"\s+#+$", "", title)
+            title = re.sub(r"\[([^\]]+)\]\([^)]+\)", r"\1", title)
+            title = re.sub(r"\[\[([^\]]+)\]\]", r"\1", title)
             if target_clean in title or target_clean == title:
                 matched_idx = idx
                 matched_level = level
@@ -217,7 +223,11 @@ class WikiLinkNode:
 
 
 def extract_wikilinks(file_path_or_content: str, is_content: bool = False) -> List[WikiLinkNode]:
-    """Extract all [[Concept]] and [[Concept|Alias]] occurrences outside code blocks."""
+    """Extract [[Concept]] / [[Concept|Alias]] plus physical tag links.
+
+    Physical links [Name](../.docgraphical/tags/Name.md) count exactly like
+    legacy brackets (same WikiLinkNode shape); legacy syntax keeps working.
+    """
     if is_content:
         lines = file_path_or_content.splitlines(keepends=True)
     else:
@@ -229,6 +239,7 @@ def extract_wikilinks(file_path_or_content: str, is_content: bool = False) -> Li
     wikilinks: List[WikiLinkNode] = []
     in_code_block = False
     pattern = re.compile(r'\[\[([^\]|#\n]+)(?:#[^\]|\n]+)?(?:\|([^\]\n]+))?\]\]')
+    tag_pattern = re.compile(r'\[([^\]\n]+)\]\(([^)\n]*\.docgraphical/tags/[^)\n]*\.md[^)\n]*)\)')
 
     for idx, line in enumerate(lines, 1):
         stripped = line.strip()
@@ -248,6 +259,16 @@ def extract_wikilinks(file_path_or_content: str, is_content: bool = False) -> Li
             wikilinks.append(WikiLinkNode(
                 concept=concept,
                 alias=alias,
+                line_number=idx,
+                raw_match=m.group(0)
+            ))
+        for m in tag_pattern.finditer(line_clean):
+            concept = m.group(1).strip()
+            if not concept or len(concept) > 60:
+                continue
+            wikilinks.append(WikiLinkNode(
+                concept=concept,
+                alias="",
                 line_number=idx,
                 raw_match=m.group(0)
             ))

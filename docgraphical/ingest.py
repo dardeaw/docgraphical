@@ -409,6 +409,78 @@ def FnVisionSummarize(images: List[Dict[str, str]],
         return {"ok": False, "error": "%s: %s" % (type(e).__name__, e)}
 
 
+def FnLinkifyConcepts(text: str, official_map: Dict[str, str],
+                     md_dir: str, tags_dir: str, *,
+                     case_insensitive: bool = False,
+                     skip_lines=None) -> str:
+    """Wrap known concept mentions as physical md links to tag pages.
+
+    official_map: {surface form -> canonical name} (official concepts only).
+    Link target is the tag page path relative to the md's own directory, so
+    the link works in any markdown renderer (Obsidian / VS Code preview).
+    Skips fenced blocks, inline code, existing [...](...) links and
+    legacy [[...]] brackets. Longest surface first.
+    """
+    if not text or not official_map:
+        return text
+    surfaces = sorted(
+        (s for s in official_map.keys()
+         if s and not any(c in s for c in "]()")),
+        key=len, reverse=True)
+    if not surfaces:
+        return text
+    skip_pat = re.compile(r"`[^`\n]+`|\[[^\]\n]*\]\([^)\n]*\)|\[\[[^\]\n]+\]\]")
+    out_lines = []
+    in_fence = False
+    skip = skip_lines or set()
+    for idx, line in enumerate(text.splitlines()):
+        s = line.strip()
+        if s.startswith("```") or s.startswith("~~~"):
+            in_fence = not in_fence
+            out_lines.append(line)
+            continue
+        if in_fence:
+            out_lines.append(line)
+            continue
+        if idx in skip:
+            # Caller-excluded lines (e.g. H1 title zone): verbatim.
+            out_lines.append(line)
+            continue
+        for surf in surfaces:
+            canon = official_map[surf]
+            tag_rel = os.path.relpath(
+                os.path.join(tags_dir, canon + ".md"), md_dir).replace("\\", "/")
+            spans = [(m.start(), m.end()) for m in skip_pat.finditer(line)]
+
+            def _in_skip(a, b, _spans=spans):
+                return any(a < e and b > st for st, e in _spans)
+
+            if any(ord(c) > 127 for c in surf):
+                pat = re.compile(re.escape(surf))
+            else:
+                # ASCII-word boundary ONLY: CJK neighbours are \w too and
+                # must NOT block (e.g. 字CrawlNewA字 still linkifies).
+                # Pure-ASCII behaviour is unchanged. case_insensitive is
+                # opt-in (staged apply: evidence surface varies in case).
+                flags = re.IGNORECASE if case_insensitive else 0
+                pat = re.compile(r"(?<![A-Za-z0-9_])" + re.escape(surf) + r"(?![A-Za-z0-9_])",
+                                 flags)
+            res = []
+            last = 0
+            hit = False
+            for m in pat.finditer(line):
+                if _in_skip(m.start(), m.end()):
+                    continue
+                res.append(line[last:m.start()])
+                res.append("[%s](%s)" % (m.group(0), tag_rel))
+                last = m.end()
+                hit = True
+            if hit:
+                line = "".join(res) + line[last:]
+        out_lines.append(line)
+    return "\n".join(out_lines)
+
+
 def FnUniqueMdPath(target_dir: str, filename: str) -> str:
     """Collision-safe md path inside target_dir (adds -2, -3, ...)."""
     name = FnSanitizeFilename(filename)

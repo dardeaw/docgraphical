@@ -1,10 +1,11 @@
 """Flask web server application factory and RESTful API routing for DocGraphical."""
+import json
 import os
 import shutil
 import tempfile
 import time
 import uuid
-from typing import Optional, List
+from typing import Dict, List, Optional
 from flask import Flask, jsonify, request, Response, render_template, send_file
 from .config import load_config, save_config, get_search_roots
 from .scanner import scan_doc_repositories, get_dir_file_tree, get_repo_doc_metrics
@@ -24,6 +25,20 @@ from .ingest import (
     FnExtractText, FnChatSummarize, FnExtractImages, FnVisionSummarize,
     VISION_MAX_TOTAL, FnUniqueMdPath, FnBuildMd,
 )
+
+
+def _extract_source_rels(text):
+    """Source-file rels from ingest header lines (`> - `rel``). Same rule
+    the viewer applies client-side; the section endpoint ships them along
+    so slice views keep working source-file links."""
+    out = []
+    for ln in (text or "").splitlines():
+        s = ln.strip()
+        if s.startswith("> - `") and s.endswith("`"):
+            r = s[4:-1].strip()
+            if r and r not in out:
+                out.append(r)
+    return out
 
 
 def create_app(initial_paths: Optional[List[str]] = None, search_roots: Optional[List[str]] = None) -> Flask:
@@ -179,16 +194,18 @@ def create_app(initial_paths: Optional[List[str]] = None, search_roots: Optional
             with open(file_path, "r", encoding="utf-8", errors="replace") as f:
                 content = f.read()
             return jsonify({"heading": "Full Document", "content": content,
-                            "sliced": False, "full_chars": len(content)})
+                            "sliced": False, "full_chars": len(content),
+                            "sources": _extract_source_rels(content)})
 
         sec = extract_section(file_path, heading, include_subsections=include_sub)
         try:
             with open(file_path, "r", encoding="utf-8", errors="replace") as f:
-                full_chars = len(f.read())
+                full_text = f.read()
         except OSError:
-            full_chars = len(sec)
+            full_text = sec
         return jsonify({"heading": heading, "content": sec, "sliced": True,
-                        "full_chars": full_chars})
+                        "full_chars": len(full_text),
+                        "sources": _extract_source_rels(full_text)})
 
     @app.route("/api/doc/search", methods=["GET"])
     def search_documents():
@@ -376,9 +393,24 @@ def create_app(initial_paths: Optional[List[str]] = None, search_roots: Optional
         target_path = data.get("path", "").strip()
         if not target_path or not os.path.exists(target_path):
             return jsonify({"success": False, "error": "Invalid project path"}), 400
+        # Human data survives a rebuild (see db.FnBackupHumanTables): only
+        # derived nodes/edges/files are truly rebuilt. A bare reindex must
+        # never eat human decisions again.
+        from .db import FnBackupHumanTables, FnRestoreHumanTables, get_db_path as _FnDbPath
+        _dump = {}
+        try:
+            _dump = FnBackupHumanTables(_FnDbPath(target_path))
+        except Exception:
+            _dump = {}
         # Delete old DB then rebuild fresh
         uninit_repository(target_path)
         res = index_repository(target_path)
+        _restored = {}
+        try:
+            _restored = FnRestoreHumanTables(_FnDbPath(target_path), _dump)
+        except Exception:
+            _restored = {}
+        res["human_restored"] = _restored
         return jsonify({"success": True, **res})
 
     @app.route("/api/uninit", methods=["POST"])
@@ -610,6 +642,36 @@ def create_app(initial_paths: Optional[List[str]] = None, search_roots: Optional
             rels.append(os.path.relpath(a, repo_root).replace("\\", "/") if repo_root else os.path.basename(a))
         md_path = FnUniqueMdPath(target_dir, filename)
         title = os.path.splitext(os.path.basename(md_path))[0]
+        # Physical concept links: wrap official concept mentions as
+        # [name](rel/path/to/tags/name.md) so any md renderer jumps.
+        try:
+            from .ingest import FnLinkifyConcepts
+            _omap: Dict[str, str] = {}
+            if repo_root:
+                import sqlite3 as _sq
+                from .db import get_db_path as _FnDbPath
+                _dbp = _FnDbPath(repo_root)
+                if _dbp and os.path.isfile(_dbp):
+                    _con = _sq.connect(_dbp)
+                    try:
+                        for _n, _a in _con.execute(
+                                "SELECT name, aliases FROM concepts"
+                                " WHERE status <> 'candidate'"):
+                            if _n:
+                                _omap[_n] = _n
+                            for _al in ((_a or "").replace("、", ",").split(",")):
+                                _al = _al.strip()
+                                if _al:
+                                    _omap.setdefault(_al, _n)
+                    except Exception:
+                        pass
+                    _con.close()
+                if _omap:
+                    summary = FnLinkifyConcepts(
+                        summary, _omap, os.path.dirname(os.path.abspath(md_path)),
+                        os.path.join(os.path.realpath(repo_root), ".docgraphical", "tags"))
+        except Exception:
+            pass
         try:
             with open(md_path, "w", encoding="utf-8") as f:
                 f.write(FnBuildMd(title, rels, summary,
@@ -869,23 +931,33 @@ def create_app(initial_paths: Optional[List[str]] = None, search_roots: Optional
 
         return repo_list[0] if repo_list else (repo_val.split(",")[0].strip() if repo_val else "")
 
+    def _resolve_repos(repo_val: str):
+        """Multi-repo version of _resolve_repo: comma-split, realpath'd,
+        existing dirs first, else every scanned repo. One canonical listing
+        for all fan-out endpoints (was copy-pasted ~10 times)."""
+        out = []
+        if repo_val and repo_val.strip():
+            for p in (x.strip() for x in repo_val.split(",") if x.strip()):
+                if os.path.isdir(p):
+                    rp = os.path.realpath(p)
+                    if rp not in out:
+                        out.append(rp)
+        if not out:
+            try:
+                all_r = scan_doc_repositories(get_search_roots())
+            except Exception:
+                all_r = []
+            vals = all_r.values() if isinstance(all_r, dict) else (all_r or [])
+            for v in vals:
+                p = v.get("path", "") if isinstance(v, dict) else str(v)
+                if p and p not in out:
+                    out.append(p)
+        return out
+
     @app.route("/api/concepts", methods=["GET"])
     def api_get_concepts():
         repo_arg = request.args.get("repo", "").strip()
-        repos_list = []
-        if repo_arg:
-            repos_list = [r.strip() for r in repo_arg.split(",") if r.strip()]
-        else:
-            # Gather all scanned repos
-            all_r = scan_doc_repositories(get_search_roots())
-            if isinstance(all_r, dict):
-                for k, v in all_r.items():
-                    p = v.get("path", "") if isinstance(v, dict) else str(v)
-                    if p: repos_list.append(p)
-            elif isinstance(all_r, list):
-                for v in all_r:
-                    p = v.get("path", "") if isinstance(v, dict) else str(v)
-                    if p: repos_list.append(p)
+        repos_list = _resolve_repos(repo_arg)
 
         if not repos_list:
             return jsonify({"ok": True, "tree": {}, "candidates": [], "counts": {"official": 0, "candidates": 0}})
@@ -931,6 +1003,22 @@ def create_app(initial_paths: Optional[List[str]] = None, search_roots: Optional
         if not repo or not name:
             return jsonify({"ok": False, "error": "Repo and concept name are required"}), 400
         res = save_concept(repo, name, category, aliases, status)
+        # Step 5 of the vine crawl: a fresh official tag materializes its
+        # kept staged links/tags into the staged files (additive, ignored
+        # on failure). Candidates do NOT trigger this.
+        if (res or {}).get("ok") and status != "candidate":
+            try:
+                from .crawl import FnApplyStaged
+                applied = FnApplyStaged(repo, name)
+                if isinstance(applied, dict) and applied.get("applied"):
+                    res["staged_applied"] = applied.get("applied")
+                    try:
+                        from .db import index_repository
+                        index_repository(repo, incremental=True)
+                    except Exception:
+                        pass
+            except Exception:
+                pass
         return jsonify(res)
 
     @app.route("/api/concepts/files", methods=["GET"])
@@ -1013,5 +1101,747 @@ def create_app(initial_paths: Optional[List[str]] = None, search_roots: Optional
         if not repo or not name or not file_path:
             return jsonify({"ok": False, "error": "Repo, concept name and filePath are required"}), 400
         return jsonify(unlink_concept_file(repo, name, file_path, rewrite_disk))
+
+    @app.route("/api/concepts/scan", methods=["POST"])
+    def api_scan_concepts():
+        """llm-scan two-stage: CPU mines cross-doc terms, LLM judges,
+        approved terms land in the candidates pool. One LLM call max."""
+        from .concept_scan import FnRunScan
+        data = request.get_json(silent=True) or {}
+        repo_arg = (data.get("repo") or "").strip()
+        repos_list = _resolve_repos(repo_arg)
+        if not repos_list:
+            return jsonify({"ok": False, "error": "No repositories to scan"}), 400
+        agg = {"ok": True, "mined": 0, "judged": 0, "inserted": [],
+               "model": "", "repos": []}
+        mode = (data.get("mode") or "full").strip()
+        dry_run = bool(data.get("dry_run"))
+        # Force a fresh corpus re-mine (UI「重新掃描」鈕), bypassing the
+        # fingerprint+TTL cache inside FnMineCorpus.
+        refresh = bool(data.get("refresh"))
+        exclude = data.get("exclude") or []
+        if not isinstance(exclude, list):
+            exclude = []
+        try:
+            max_new = int(data.get("max_new", 3))
+        except (TypeError, ValueError):
+            max_new = 3
+        # Global budget shared across ALL repos in this call (not per repo).
+        budget = max(1, min(20, max_new))
+        try:
+            min_tf = int(data.get("min_tf", 5))
+        except (TypeError, ValueError):
+            min_tf = 5
+        min_tf = max(1, min_tf)
+        for rp in repos_list:
+            db_p = get_db_path(rp)
+            if not db_p:
+                continue
+            # Dry-run reviews must be side-effect free (except the audit
+            # line below): skip even the free recount so closing the dialog
+            # abandons literally everything.
+            recount = {"updated": 0}
+            if not dry_run:
+                try:
+                    # Free recount first: existing candidates' DF/TF refresh
+                    # with zero tokens, before any LLM judging below.
+                    from .concept_scan import FnRecountCandidates
+                    recount = FnRecountCandidates([rp], db_p)
+                except Exception:
+                    recount = {"updated": 0}
+            if mode == "recount":
+                rep = {"ok": True, "mined": 0, "judged": 0, "inserted": [],
+                       "model": "", "note": "僅更新引用數，未花 LLM"}
+            else:
+                if budget <= 0:
+                    # Global budget exhausted: still recount, no more mining.
+                    rep = {"ok": True, "mined": 0, "judged": 0, "inserted": [],
+                           "model": "", "note": "名額已用完，後面的庫只更新數字"}
+                else:
+                    try:
+                        rep = FnRunScan([rp], db_p, max_new=budget, min_tf=min_tf,
+                                        dry_run=dry_run, exclude=exclude,
+                                        refresh=refresh)
+                    except Exception as e:
+                        rep = {"ok": False, "error": "%s: %s" % (type(e).__name__, e)}
+                    if rep.get("ok"):
+                        budget -= len(rep.get("inserted", []))
+            rep["recounted"] = recount.get("updated", 0)
+            agg["repos"].append({"repo": rp, "report": rep})
+            if rep.get("ok"):
+                agg["mined"] += rep.get("mined", 0)
+                agg["judged"] += rep.get("judged", 0)
+                agg["inserted"].extend(
+                    dict(x, repo=rp) for x in rep.get("inserted", []))
+                if rep.get("model") and not agg["model"]:
+                    agg["model"] = rep["model"]
+            try:
+                record_log(rp, "CONCEPT_SCAN",
+                           summary="%smined=%d judged=%d inserted=%d model=%s" % (
+                               "dryrun " if dry_run else "",
+                               rep.get("mined", 0), rep.get("judged", 0),
+                               len(rep.get("inserted", [])) if rep.get("ok") else 0,
+                               rep.get("model", "") or "-"))
+            except Exception:
+                pass
+        if not agg["inserted"]:
+            agg["note"] = "掃過全庫，沒有新面孔"
+        return jsonify(agg)
+
+    @app.route("/api/concepts/scan/evidence", methods=["GET"])
+    def api_scan_evidence():
+        """DF/TF/snippets per mined term (potential display for the pool).
+
+        Edge-refs are 0 for unbracketed mined terms by construction; this
+        endpoint reports what mining actually saw: document/testimony counts
+        plus one evidence snippet each."""
+        import sqlite3
+        repo_arg = (request.args.get("repo") or "").strip()
+        repos_list = _resolve_repos(repo_arg)
+        out = {}
+        for rp in repos_list:
+            try:
+                db_p = get_db_path(rp)
+            except Exception:
+                continue
+            if not db_p or not os.path.isfile(db_p):
+                continue
+            try:
+                # Ensure v2 evidence columns even for pre-migration rows.
+                from .concept_scan import FnEnsureScanTables
+                FnEnsureScanTables(db_p)
+                con = sqlite3.connect(db_p)
+                try:
+                    rows = con.execute(
+                        "SELECT term, sources_json, score, model, df, tf"
+                        " FROM scan_evidence").fetchall()
+                except Exception:
+                    rows = []
+                con.close()
+            except Exception:
+                continue
+            for term, sj, score, model, df, tf in rows:
+                try:
+                    files = json.loads(sj or "[]")
+                except Exception:
+                    files = []
+                cur = out.get(term)
+                if cur is None or (df or 0) > (cur.get("df") or 0):
+                    out[term] = {"df": df or 0, "tf": tf or 0,
+                                 "files": files[:5], "model": model or "",
+                                 "repo": rp}
+        return jsonify({"ok": True, "evidence": out})
+
+    @app.route("/api/concepts/scan/recount-one", methods=["POST"])
+    def api_scan_recount_one():
+        """Per-card refresh, Prospect method: recount DF/TF/snippets for ONE
+        term PLUS top up missing staged spots (evidence files with no kept
+        row get link+tag rows, concept bound). Pure CPU, zero LLM.
+        Body: {repo?, term}."""
+        from .concept_scan import FnRecountOneTerm
+        data = request.get_json(silent=True) or {}
+        repo = _resolve_repo(data.get("repo") or "")
+        term = (data.get("term") or "").strip()
+        if not repo:
+            return jsonify({"ok": False, "error": "no repository"}), 400
+        if not term:
+            return jsonify({"ok": False, "error": "term required"}), 400
+        try:
+            from .db import get_db_path as _FnDbPath
+            res = FnRecountOneTerm([repo], _FnDbPath(repo), term)
+        except Exception as e:
+            res = {"ok": False, "error": "%s: %s" % (type(e).__name__, e)}
+        if not res.get("ok"):
+            return jsonify(res), 400
+        try:
+            from .crawl import FnRecountTopUpStaged
+            top = FnRecountTopUpStaged(_FnDbPath(repo), repo, term)
+            res["staged_added"] = top.get("added", 0) if top.get("ok") else 0
+            if top.get("skipped"):
+                res["topup_skipped"] = top["skipped"]
+        except Exception:
+            res["staged_added"] = 0
+        return jsonify(res)
+
+    @app.route("/api/concepts/scan/blacklist", methods=["GET"])
+    def api_scan_blacklist():
+        """List globally rejected terms (rejected_terms table).
+
+        Dismissals land here (see unlink global-wildcard hook); removing
+        a row makes the term eligible for future scans again.
+        """
+        import sqlite3
+        repo_arg = (request.args.get("repo") or "").strip()
+        repos_list = _resolve_repos(repo_arg)
+        out = []
+        for rp in repos_list:
+            try:
+                db_p = get_db_path(rp)
+            except Exception:
+                continue
+            if not db_p or not os.path.isfile(db_p):
+                continue
+            try:
+                from .concept_scan import FnEnsureScanTables
+                FnEnsureScanTables(db_p)
+                con = sqlite3.connect(db_p)
+                try:
+                    rows = con.execute(
+                        "SELECT term, decided_by, decided_at"
+                        " FROM rejected_terms ORDER BY decided_at DESC").fetchall()
+                except Exception:
+                    rows = []
+                con.close()
+            except Exception:
+                continue
+            for term, by, at in rows:
+                if term and not any(x["term"] == term for x in out):
+                    out.append({"term": term, "decided_by": by or "",
+                                "decided_at": at or "", "repo": rp})
+        return jsonify({"ok": True, "blacklist": out, "count": len(out)})
+
+    @app.route("/api/concepts/scan/blacklist/remove", methods=["POST"])
+    def api_scan_blacklist_remove():
+        """Un-blacklist a term: future scans may discover it again.
+
+        restore=true also puts it straight back into the candidates pool
+        (re-insert candidate row; its evidence row was never deleted).
+        """
+        import sqlite3
+        import time as _time
+        data = request.get_json(silent=True) or {}
+        term = (data.get("term") or "").strip()
+        repo_arg = (data.get("repo") or "").strip()
+        restore = bool(data.get("restore"))
+        if not term:
+            return jsonify({"ok": False, "error": "term required"}), 400
+        repos_list = _resolve_repos(repo_arg)
+        removed = 0
+        for rp in repos_list:
+            try:
+                db_p = get_db_path(rp)
+            except Exception:
+                continue
+            if not db_p or not os.path.isfile(db_p):
+                continue
+            try:
+                con = sqlite3.connect(db_p)
+                try:
+                    cur = con.execute(
+                        "DELETE FROM rejected_terms WHERE term = ?", (term,))
+                    removed += cur.rowcount or 0
+                    if restore:
+                        con.execute(
+                            "INSERT OR IGNORE INTO concepts"
+                            "(name, category, aliases, status, created_at)"
+                            " VALUES(?, '機器挖掘', '', 'candidate', ?)",
+                            (term, _time.strftime("%Y-%m-%d %H:%M:%S")))
+                    con.commit()
+                except Exception:
+                    pass
+                con.close()
+            except Exception:
+                continue
+            try:
+                record_log(rp, "BLACKLIST_REMOVE", target_file=term,
+                           summary=("restored to candidates by human"
+                                    if restore else "un-blacklisted by human"))
+            except Exception:
+                pass
+        return jsonify({"ok": True, "term": term, "removed": removed,
+                        "restored": bool(restore)})
+
+    @app.route("/api/concepts/scan/candidates/remove", methods=["POST"])
+    def api_scan_candidate_remove():
+        """Plain remove from the pool: drops the candidate row and its
+        wiki_link edges, but does NOT blacklist (a rescan may rediscover
+        it). Disk files are never touched. For permanent removal use the
+        blacklist flow (dismiss with filePath='*')."""
+        import sqlite3
+        data = request.get_json(silent=True) or {}
+        name = (data.get("name") or "").strip()
+        repo_arg = (data.get("repo") or "").strip()
+        if not name:
+            return jsonify({"ok": False, "error": "name required"}), 400
+        repos_list = _resolve_repos(repo_arg)
+        removed = 0
+        for rp in repos_list:
+            try:
+                db_p = get_db_path(rp)
+            except Exception:
+                continue
+            if not db_p or not os.path.isfile(db_p):
+                continue
+            try:
+                con = sqlite3.connect(db_p)
+                try:
+                    cur = con.execute(
+                        "DELETE FROM concepts WHERE name = ? AND status = 'candidate'",
+                        (name,))
+                    removed += cur.rowcount or 0
+                    con.execute(
+                        "DELETE FROM edges WHERE target IN (?, ?) AND kind = 'wiki_link'",
+                        ("concept::" + name, name))
+                    con.execute("DELETE FROM scan_evidence WHERE term = ?", (name,))
+                    con.commit()
+                except Exception:
+                    pass
+                con.close()
+            except Exception:
+                continue
+            try:
+                record_log(rp, "CANDIDATE_REMOVE", target_file=name,
+                           summary="removed from pool, not blacklisted")
+            except Exception:
+                pass
+        return jsonify({"ok": True, "name": name, "removed": removed})
+
+    @app.route("/api/concepts/scan/confirm", methods=["POST"])
+    def api_scan_confirm():
+        """Commit a reviewed dry-run: insert approved as candidates,
+        blacklist the rejected. One transaction per repo (no half writes).
+
+        Body: {repo?, approve: [{term, df, tf, files, reason}],
+               reject: [term]}. Terms are re-validated server-side
+        (format + not-already-decided); failures listed per term.
+        """
+        import sqlite3
+        import time as _time
+        data = request.get_json(silent=True) or {}
+        repo_arg = (data.get("repo") or "").strip()
+        approve = data.get("approve") or []
+        reject = data.get("reject") or []
+        if not isinstance(approve, list):
+            approve = []
+        if not isinstance(reject, list):
+            reject = []
+        repos_list = _resolve_repos(repo_arg)
+        if not repos_list:
+            return jsonify({"ok": False, "error": "No repositories to scan"}), 400
+        from .concept_scan import FnEnsureScanTables
+        from .crawl import FnEnsureStagedTables
+        approved, rejected, skipped = [], [], []
+        for rp in repos_list:
+            try:
+                db_p = get_db_path(rp)
+            except Exception:
+                continue
+            if not db_p or not os.path.isfile(db_p):
+                continue
+            try:
+                FnEnsureScanTables(db_p)
+                FnEnsureStagedTables(db_p)
+                con = sqlite3.connect(db_p)
+                try:
+                    known = {r[0] for r in
+                             con.execute("SELECT name FROM concepts")}
+                    rej = {r[0] for r in
+                           con.execute("SELECT term FROM rejected_terms")}
+                except Exception:
+                    known, rej = set(), set()
+                now = _time.strftime("%Y-%m-%d %H:%M:%S")
+                for item in approve:
+                    term = ((item or {}).get("term") or "").strip()
+                    if not term or len(term) > 30:
+                        skipped.append(term)
+                        continue
+                    # Per-item repo routing (vine items carry theirs): items
+                    # naming a different repo do not belong in this db.
+                    # Items without repo keep legacy fan-out behavior.
+                    _ir = ((item or {}).get("repo") or "").strip()
+                    if _ir and os.path.abspath(_ir) != os.path.abspath(rp):
+                        continue
+                    if term in known or term in rej:
+                        skipped.append(term)
+                        continue
+                    it = item or {}
+                    try:
+                        con.execute(
+                            "INSERT OR IGNORE INTO concepts"
+                            "(name, category, aliases, status, created_at)"
+                            " VALUES(?, '機器挖掘', '', 'candidate', ?)",
+                            (term, now))
+                        con.execute(
+                            "INSERT OR REPLACE INTO scan_evidence"
+                            "(term, sources_json, score, model, created_at, df, tf)"
+                            " VALUES(?, ?, ?, ?, ?, ?, ?)",
+                            (term, json.dumps(it.get("files", []), ensure_ascii=False),
+                             0, it.get("model", ""), now,
+                             int(it.get("df") or 0), int(it.get("tf") or 0)))
+                        approved.append(term)
+                        known.add(term)
+                        # ② staged like ③: the human's approval IS the judge,
+                        # so rows land 'kept' with concept bound at once (the
+                        # mined mention is the evidence). On promote the same
+                        # FnApplyStaged aligns hyperlinks for both flows.
+                        try:
+                            from .crawl import FnStageApproved
+                            FnStageApproved(con, rp, term, it.get("files"), now)
+                        except Exception:
+                            pass
+                    except Exception:
+                        skipped.append(term)
+                        continue
+                for term in reject:
+                    term = (term or "").strip()
+                    if not term:
+                        continue
+                    try:
+                        con.execute(
+                            "INSERT OR IGNORE INTO rejected_terms"
+                            "(term, decided_by, decided_at)"
+                            " VALUES(?, 'scan-dialog', ?)", (term, now))
+                        con.execute(
+                            "DELETE FROM concepts WHERE name = ? AND status = 'candidate'",
+                            (term,))
+                        rejected.append(term)
+                    except Exception:
+                        continue
+                con.commit()
+                con.close()
+            except Exception:
+                continue
+            try:
+                record_log(rp, "CONCEPT_SCAN_CONFIRM",
+                           summary="approved=%d rejected=%d skipped=%d" % (
+                               len(approved), len(rejected), len(skipped)))
+            except Exception:
+                pass
+        return jsonify({"ok": True, "approved": approved,
+                        "rejected": rejected, "skipped": skipped})
+
+    @app.route("/api/vine/map", methods=["GET"])
+    def api_vine_map():
+        """Whole-map overview for the guide (files x concepts + inventories)."""
+        from .vine import FnVineMap
+        repo_arg = (request.args.get("repo") or "").strip()
+        repos_list = _resolve_repos(repo_arg)
+        out = []
+        for rp in repos_list:
+            try:
+                db_p = get_db_path(rp)
+            except Exception:
+                continue
+            if not db_p:
+                continue
+            try:
+                m = FnVineMap(db_p)
+            except Exception as e:
+                m = {"ok": False, "error": "%s: %s" % (type(e).__name__, e)}
+            m["repo"] = rp
+            out.append(m)
+        return jsonify({"ok": True, "maps": out})
+
+    @app.route("/api/vine/walk", methods=["POST"])
+    def api_vine_walk():
+        """Walk from seed(s) up to depth (clamped 1..2 in vine.py).
+
+        Body: {seed | seeds[], depth?, repo?}. CPU only, zero LLM cost.
+        Newcomers carry evidence (file + line) for review UI.
+        """
+        from .vine import FnVineWalk, FnResolveSeed
+        data = request.get_json(silent=True) or {}
+        seeds = data.get("seeds") or []
+        if data.get("seed") and data["seed"] not in seeds:
+            seeds = [data["seed"]] + list(seeds)
+        seeds = [str(s).strip() for s in seeds if str(s or "").strip()][:5]
+        if not seeds:
+            return jsonify({"ok": False, "error": "seed required"}), 400
+        try:
+            depth = int(data.get("depth", 1))
+        except (TypeError, ValueError):
+            depth = 1
+        # Junction rounds pass visited back in (["file"|"concept", id]
+        # pairs); Walk skips them so no station is visited twice.
+        visited_in = []
+        try:
+            for pair in (data.get("visited") or []):
+                if (isinstance(pair, (list, tuple)) and len(pair) == 2
+                        and pair[0] in ("file", "concept")):
+                    visited_in.append((pair[0], str(pair[1])))
+        except Exception:
+            visited_in = []
+        repo_arg = (data.get("repo") or "").strip()
+        repos_list = _resolve_repos(repo_arg)
+        if not repos_list:
+            return jsonify({"ok": False, "error": "No repositories to walk"}), 400
+        walks, newcomers, visited_all, resolved = [], [], set(), []
+        for rp in repos_list:
+            try:
+                db_p = get_db_path(rp)
+            except Exception:
+                continue
+            if not db_p:
+                continue
+            for s in seeds:
+                try:
+                    rs = FnResolveSeed(db_p, s)
+                except Exception as e:
+                    rs = {"ok": False,
+                          "error": "%s: %s" % (type(e).__name__, e)}
+                starts = (rs.get("starts") or []) if rs.get("ok") else []
+                if not starts:
+                    walks.append({"ok": True, "seed": s, "depth": depth,
+                                  "path": [s], "newcomers": [], "visited": [],
+                                  "repo": rp, "start": s,
+                                  "note": (rs.get("note") or rs.get("error")
+                                           or "seed not found")})
+                    resolved.append({"seed": s, "repo": rp, "starts": [],
+                                     "note": "nothing found"})
+                    continue
+                resolved.append({"seed": s, "repo": rp,
+                                 "starts": [("file::" + x["id"]
+                                             if x["kind"] == "file" else x["id"])
+                                            for x in starts],
+                                 "note": rs.get("note", "")})
+                for st in starts[:6]:
+                    sid = (("file::" + st["id"]) if st["kind"] == "file"
+                           else st["id"])
+                    try:
+                        w = FnVineWalk(db_p, sid, depth=depth,
+                                       visited=visited_in)
+                    except Exception as e:
+                        w = {"ok": False, "error": "%s: %s" % (type(e).__name__, e)}
+                    w["repo"] = rp
+                    w["seed"] = s
+                    w["start"] = sid
+                    walks.append(w)
+                    if w.get("ok"):
+                        for v in w.get("visited", []):
+                            visited_all.add(v)
+                        for nc in w.get("newcomers", []):
+                            if not any(x["name"] == nc["name"] for x in newcomers):
+                                newcomers.append(dict(nc, repo=rp))
+            try:
+                record_log(rp, "VINE_WALK",
+                           summary="seeds=%d depth=%d newcomers=%d" % (
+                               len(seeds), depth, len(newcomers)))
+            except Exception:
+                pass
+        return jsonify({"ok": True, "walks": walks, "newcomers": newcomers,
+                        "visited": sorted(visited_all), "resolved": resolved})
+
+    @app.route("/api/vine/neighbors", methods=["GET"])
+    def api_vine_neighbors():
+        """One-hop neighborhood for a junction pick (files x concepts x
+        headings with snippets). Params: repo (single), seed."""
+        from .vine import FnVineNeighbors
+        repo = (request.args.get("repo") or "").strip()
+        seed = (request.args.get("seed") or "").strip()
+        if not repo or not seed:
+            return jsonify({"ok": False,
+                            "error": "repo and seed required"}), 400
+        try:
+            db_p = get_db_path(repo)
+        except Exception:
+            db_p = None
+        if not db_p:
+            return jsonify({"ok": False, "error": "unknown repo"}), 400
+        try:
+            nb = FnVineNeighbors(db_p, seed)
+        except Exception as e:
+            nb = {"ok": False, "error": "%s: %s" % (type(e).__name__, e)}
+        nb["repo"] = repo
+        return jsonify(nb)
+
+    @app.route("/api/vine/guide", methods=["POST"])
+    def api_vine_guide():
+        """Single route-planning LLM call. Caller builds options; guide picks.
+
+        Body: {messages: [...]}. Returns {ok, text, model}.
+        """
+        from .vine import FnVineGuide
+        data = request.get_json(silent=True) or {}
+        messages = data.get("messages") or []
+        if not isinstance(messages, list) or not messages:
+            return jsonify({"ok": False, "error": "messages required"}), 400
+        try:
+            res = FnVineGuide(messages)
+        except Exception as e:
+            res = {"ok": False, "error": "%s: %s" % (type(e).__name__, e)}
+        if not res.get("ok"):
+            return jsonify(res), 502
+        try:
+            record_log("", "VINE_GUIDE",
+                       summary="model=%s" % (res.get("model") or "-"))
+        except Exception:
+            pass
+        return jsonify(res)
+
+    @app.route("/api/crawl/start", methods=["POST"])
+    def api_crawl_start():
+        """Emperor crawl step 1: user seed -> literal + LLM semantic
+        footholds -> LIFO stack. Body: {repo?, seed (required), max_starts?, lang?}.
+        1 LLM call. No seed, no crawl."""
+        from .crawl import FnCrawlStart
+        data = request.get_json(silent=True) or {}
+        repo = _resolve_repo(data.get("repo") or "")
+        seed = ((data.get("seed") or "").strip())[:200]
+        lang = (data.get("lang") or "zh").strip().lower()[:2] or "zh"
+        if not repo:
+            return jsonify({"ok": False, "error": "no repository"}), 400
+        if not seed:
+            return jsonify({"ok": False, "error": "seed required"}), 400
+        try:
+            max_starts = int(data.get("max_starts", 3))
+        except (TypeError, ValueError):
+            max_starts = 3
+        try:
+            res = FnCrawlStart(repo, seed, max_starts=max_starts, lang=lang)
+        except Exception as e:
+            res = {"ok": False, "error": "%s: %s" % (type(e).__name__, e)}
+        if not res.get("ok"):
+            return jsonify(res), 502 if "guide" in str(res.get("error", "")) else 400
+        return jsonify(res)
+
+    @app.route("/api/crawl/next", methods=["POST"])
+    def api_crawl_next():
+        """Steps 2-3: pop ONE node (LIFO). FILE nodes cost 1 LLM call
+        (read + judge next); CONCEPT nodes expand via CPU edges, free.
+        Body: {run_id, max_files?}."""
+        from .crawl import FnCrawlNext
+        data = request.get_json(silent=True) or {}
+        run_id = (data.get("run_id") or "").strip()
+        if not run_id:
+            return jsonify({"ok": False, "error": "run_id required"}), 400
+        try:
+            max_files = int(data.get("max_files", 10))
+        except (TypeError, ValueError):
+            max_files = 10
+        try:
+            res = FnCrawlNext(run_id, max_files=max_files)
+        except Exception as e:
+            res = {"ok": False, "error": "%s: %s" % (type(e).__name__, e)}
+        return jsonify(res)
+
+    @app.route("/api/crawl/finish", methods=["POST"])
+    def api_crawl_finish():
+        """Step 4: ONE LLM call judges all staged + recommends ONE title.
+        Body: {run_id}."""
+        from .crawl import FnCrawlFinish
+        data = request.get_json(silent=True) or {}
+        run_id = (data.get("run_id") or "").strip()
+        if not run_id:
+            return jsonify({"ok": False, "error": "run_id required"}), 400
+        try:
+            res = FnCrawlFinish(run_id)
+        except Exception as e:
+            res = {"ok": False, "error": "%s: %s" % (type(e).__name__, e)}
+        if not res.get("ok"):
+            return jsonify(res), 502
+        return jsonify(res)
+
+    @app.route("/api/crawl/run", methods=["POST"])
+    def api_crawl_run():
+        """The whole crawl flow in ONE call (steps 1-4 minus human edit).
+
+        Long call (minutes, one LLM pass per file). The dialog does NOT
+        use this (it loops the step endpoints for per-file progress);
+        scripts and MCP do. Confirm stays a separate human-gated call.
+        Body: {repo?, seed (required), max_starts?, max_files?}."""
+        from .crawl import FnCrawlRun
+        data = request.get_json(silent=True) or {}
+        repo = _resolve_repo(data.get("repo") or "")
+        seed = ((data.get("seed") or "").strip())[:200]
+        if not repo:
+            return jsonify({"ok": False, "error": "no repository"}), 400
+        if not seed:
+            return jsonify({"ok": False, "error": "seed required"}), 400
+        try:
+            max_starts = int(data.get("max_starts", 3))
+        except (TypeError, ValueError):
+            max_starts = 3
+        try:
+            max_files = int(data.get("max_files", 10))
+        except (TypeError, ValueError):
+            max_files = 10
+        try:
+            res = FnCrawlRun(repo, seed, max_starts=max_starts, max_files=max_files)
+        except Exception as e:
+            res = {"ok": False, "error": "%s: %s" % (type(e).__name__, e)}
+        if not res.get("ok"):
+            return jsonify(res), 502
+        return jsonify(res)
+
+    @app.route("/api/crawl/refresh", methods=["POST"])
+    def api_crawl_refresh():
+        """Pure Vine refresh: re-crawl seeded by an EXISTING candidate
+        title; fresh kept rows merge into ITS draft (concept bound).
+        Never creates a candidate. Long call (minutes, LLM per file).
+        Body: {repo?, name, max_files?}."""
+        from .crawl import FnCrawlRefresh
+        data = request.get_json(silent=True) or {}
+        repo = _resolve_repo(data.get("repo") or "")
+        name = (data.get("name") or "").strip()
+        if not repo or not name:
+            return jsonify({"ok": False, "error": "repo and name required"}), 400
+        try:
+            max_files = int(data.get("max_files", 10))
+        except (TypeError, ValueError):
+            max_files = 10
+        try:
+            res = FnCrawlRefresh(repo, name, max_files=max_files)
+        except Exception as e:
+            res = {"ok": False, "error": "%s: %s" % (type(e).__name__, e)}
+        if not res.get("ok"):
+            return jsonify(res), 400
+        return jsonify(res)
+
+    @app.route("/api/crawl/sweep", methods=["POST"])
+    def api_crawl_sweep():
+        """GC for staged rows: dead-run staged, old dropped, orphan kept.
+        Body: {repo?}. Same sweep piggybacks every crawl start."""
+        from .crawl import FnSweepStaged
+        data = request.get_json(silent=True) or {}
+        repo = _resolve_repo(data.get("repo") or "")
+        if not repo:
+            return jsonify({"ok": False, "error": "no repository"}), 400
+        try:
+            res = FnSweepStaged(repo)
+        except Exception as e:
+            res = {"ok": False, "error": "%s: %s" % (type(e).__name__, e)}
+        return jsonify(res)
+
+    @app.route("/api/crawl/confirm", methods=["POST"])
+    def api_crawl_confirm():
+        """Human-edited title -> candidate pool; staged rows bound to it.
+        Disk untouched (application waits for promote). Body: {run_id, title, keep?}."""
+        from .crawl import FnCrawlConfirm
+        data = request.get_json(silent=True) or {}
+        run_id = (data.get("run_id") or "").strip()
+        title = (data.get("title") or "").strip()
+        keep = data.get("keep")
+        if not run_id or not title:
+            return jsonify({"ok": False, "error": "run_id and title required"}), 400
+        try:
+            res = FnCrawlConfirm(run_id, title, keep=keep)
+        except Exception as e:
+            res = {"ok": False, "error": "%s: %s" % (type(e).__name__, e)}
+        if not res.get("ok"):
+            return jsonify(res), 400
+        return jsonify(res)
+
+    @app.route("/api/concepts/candidates/draft", methods=["GET"])
+    def api_candidate_draft():
+        """Candidate card draft (read-only): kept staged rows bound to the
+        confirmed Vine title. Query: ?repo=&name= ."""
+        from .crawl import FnCandidateDraft
+        repo = _resolve_repo((request.args.get("repo") or "").strip())
+        name = (request.args.get("name") or "").strip()
+        if not repo or not name:
+            return jsonify({"ok": False, "error": "repo and name required"}), 400
+        return jsonify(FnCandidateDraft(repo, name))
+
+    @app.route("/api/concepts/candidates/detach", methods=["POST"])
+    def api_candidate_detach():
+        """Draft overlay 脫鉤: drop staged rows.
+        Body: {repo, name, drop:[{file, mention}]}."""
+        from .crawl import FnDetachStaged
+        data = request.get_json(silent=True) or {}
+        repo = _resolve_repo((data.get("repo") or "").strip())
+        name = (data.get("name") or "").strip()
+        if not repo or not name:
+            return jsonify({"ok": False, "error": "repo and name required"}), 400
+        return jsonify(FnDetachStaged(repo, name, data.get("drop")))
 
     return app

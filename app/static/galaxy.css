@@ -327,6 +327,28 @@ html, body {
 }
 .tree-children.open { display: flex; }
 
+/* Tree column alignment: every badge identical width so PDF/PPTX/count
+   badges line up vertically regardless of text length. */
+#tree-container .txbadge {
+  width: 60px;
+  min-width: 60px;
+  max-width: 60px;
+  flex-shrink: 0;
+  box-sizing: border-box;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* Tree action buttons: fixed 22px square. Beats the global
+   .mini-btn min-width:54px !important that otherwise steamrolls them. */
+#tree-container button.txbtn {
+  width: 22px !important;
+  min-width: 22px !important;
+  max-width: 22px !important;
+  padding-left: 0 !important;
+  padding-right: 0 !important;
+}
+
 .node-kind-tag,
 #d-kind-badge {
   display: inline-flex !important;
@@ -3015,6 +3037,16 @@ select.modal-input:focus,
   text-align: center !important;
   line-height: 1.4 !important;
   box-sizing: border-box !important;
+}
+/* Concept card action buttons: narrow, ONE row. Scoped + !important beats
+   the three global .mini-btn sledgehammers above (higher specificity). */
+#concepts-list-container .concept-card .mini-btn {
+  padding: 1px 4px !important;
+  min-width: 0 !important;
+  font-size: 11px !important;
+  gap: 2px !important;
+  flex-shrink: 0 !important;
+  line-height: 1.4 !important;
 }
 
 .doc-content-viewer table th:last-child,

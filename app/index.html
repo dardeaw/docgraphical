@@ -34,7 +34,7 @@ if (window.THREE && !window.THREE.Timer) {
 </script>
 <script src="/static/three-spritetext.min.js"></script>
 <script src="/static/3d-force-graph.min.js"></script>
-<link rel="stylesheet" href="/static/galaxy.css?v=5.9.11">
+<link rel="stylesheet" href="/static/galaxy.css?v=5.9.13">
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark-dimmed.min.css">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
@@ -124,11 +124,13 @@ if (window.THREE && !window.THREE.Timer) {
         <span class="drawer-title" id="lbl-drawer-concepts-title">CONCEPTS REGISTRY</span>
         <div style="display:flex; gap:4px; align-items:center;">
           <button onclick="openAddConceptModal()" class="mini-btn" id="btn-add-concept" title="定義正式概念">+ New</button>
+          <button onclick="conceptScanAll(this)" class="mini-btn" id="btn-scan-concept" title="scan">scan</button>
         </div>
       </div>
       <div class="concepts-tabs-bar">
         <button class="concept-tab-btn active" id="btn-cpt-official" onclick="switchConceptSubTab('official')">正式概念 (<span id="count-cpt-official">0</span>)</button>
         <button class="concept-tab-btn" id="btn-cpt-candidates" onclick="switchConceptSubTab('candidates')">待審候選 (<span id="count-cpt-candidates">0</span>)</button>
+        <button class="concept-tab-btn" id="btn-cpt-blacklist" onclick="switchConceptSubTab('blacklist')">blacklist (<span id="count-cpt-blacklist">0</span>)</button>
       </div>
       <div class="tree-search-box" style="display:flex; align-items:center; gap:6px; padding:6px 10px;">
         <input type="text" id="concept-search" class="tree-input" style="flex:1; min-width:0; margin:0;" placeholder="搜尋概念或別名..." oninput="filterConcepts(this.value)" />
@@ -152,6 +154,8 @@ if (window.THREE && !window.THREE.Timer) {
       <div class="doc-panel-header">
         <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:4px;">
           <div style="display:flex; align-items:center; gap:8px; flex:1; min-width:0;">
+            <button class="mini-btn" id="btn-prev-node" onclick="navGo(-1)" title="Previous section" style="padding:2px 8px;font-size:11px;white-space:nowrap;flex-shrink:0;">&#8249; Prev</button>
+            <button class="mini-btn" id="btn-next-node" onclick="navGo(1)" title="Next section" style="padding:2px 8px;font-size:11px;white-space:nowrap;flex-shrink:0;">Next &#8250;</button>
             <span class="node-kind-tag" id="d-kind-badge" style="background:#f0883e;">DOC</span>
             <span class="doc-title-text" id="d-name">Select a document or section</span>
           </div>
@@ -206,12 +210,7 @@ if (window.THREE && !window.THREE.Timer) {
       </button>
 
       <!-- Clean 3D Telemetry Bar -->
-      <div id="graph-telemetry" class="graph-telemetry-bar">
-        <div class="telemetry-item"><span class="t-key">POS:</span> <span id="t-pos" class="t-val">0, 0, 100</span></div>
-        <div class="telemetry-item"><span class="t-key">DIST:</span> <span id="t-dist" class="t-val">100</span></div>
-        <div class="telemetry-item"><span class="t-key">SPEED:</span> <span id="t-speed" class="t-val">1.0x</span></div>
-        <div class="telemetry-item"><span class="t-key">TARGET:</span> <span id="t-lock" class="t-val">ALL</span></div>
-      </div>
+      <!-- 3D Telemetry Bar removed (dev readout, not for end users) -->
 
       <!-- Professional 3D Navigation Controls Modal -->
       <div id="controls-help-modal" class="controls-modal-backdrop hidden">
@@ -693,7 +692,7 @@ function confirmBrowsePick() {
   closeBrowsePicker();
 }
 </script>
-<script src="/static/docgraph.js?v=5.9.16"></script>
+<script src="/static/docgraph.js?v=5.9.99"></script>
 
 <!-- Sleek In-App Concepts Action Modal (No ugly browser prompts!) -->
 <div id="concept-action-modal" class="modal-overlay" style="display:none; position:fixed; top:0; left:0; width:100vw; height:100vh; background:rgba(0,0,0,0.75); z-index:9999; align-items:center; justify-content:center; backdrop-filter:blur(3px);">

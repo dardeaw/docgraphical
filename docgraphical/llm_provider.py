@@ -33,6 +33,57 @@ import re
 import urllib.request
 from typing import Any, Dict, List, Optional
 
+
+# ------------------------------------------------------- hard deadline ----
+def FnPostJsonHardTimeout(url, payload_bytes, headers, total_secs=150):
+    """POST with a TOTAL deadline (urllib's timeout is per-recv, not total:
+    a degraded endpoint dribbling one token at a time never trips it and
+    res.read() blocks for many minutes — exactly the 5-min crawl hang).
+
+    Worker thread does the blocking read; join(total_secs) abandons it on
+    expiry (daemon thread, no shared state touched). Always returns quickly:
+    {ok, raw} or {ok: False, error}.
+    """
+    import queue
+    import threading
+    box = queue.Queue(maxsize=1)
+
+    def _do():
+        try:
+            req = urllib.request.Request(url, data=payload_bytes,
+                                         headers=headers or {}, method="POST")
+            with urllib.request.urlopen(req, timeout=60) as res:
+                try:
+                    box.put({"ok": True, "raw": res.read()})
+                except Exception:
+                    pass
+        except Exception as e:
+            try:
+                box.put({"ok": False,
+                         "error": "%s: %s" % (type(e).__name__, e)})
+            except Exception:
+                pass
+
+    t = threading.Thread(target=_do, daemon=True)
+    import time as _t
+    _t0 = _t.time()
+    t.start()
+    t.join(timeout=max(5, total_secs))
+    if t.is_alive():
+        try:
+            with open(r"C:\Users\A1081\AppData\Local\Temp\opencode\crawl_trace.log",
+                      "a", encoding="utf-8") as f:
+                f.write("%s HARD-TIMEOUT %.0fs url=%.60s\n"
+                        % (_t.strftime("%H:%M:%S"), _t.time() - _t0, url))
+        except Exception:
+            pass
+        return {"ok": False,
+                "error": "LLM total %ss exceeded, abandoned" % (total_secs,)}
+    try:
+        return box.get_nowait()
+    except Exception:
+        return {"ok": False, "error": "LLM no response"}
+
 LLM_PROVIDER = os.environ.get("DOCGRAPH_LLM_PROVIDER", "").strip().lower()
 LLM_MODEL = os.environ.get("DOCGRAPH_LLM_MODEL", "").strip()
 CUSTOM_BASE = os.environ.get("DOCGRAPH_LLM_BASE", "").rstrip("/")
