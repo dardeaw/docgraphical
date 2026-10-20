@@ -362,13 +362,13 @@ function updateLabelsVisibility() {
   const gNodes = (Graph && Graph.graphData) ? (Graph.graphData().nodes || []) : (rawData.nodes || []);
   const hasFilter = highlightNodes.size > 0;
 
-  // Determine which node's "牌位" (SpriteText) should be revealed
+  // Determine which node's label (SpriteText) should be revealed
   let revealedNodeId = null;
   if (activeNode) {
     if (!hiddenKinds.has(activeNode.kind) && gNodes.some(n => n.id === activeNode.id)) {
       revealedNodeId = activeNode.id;
     } else {
-      // If activeNode's layer is not shown, reveal closest visible ancestor's "牌位"
+      // If activeNode's layer is not shown, reveal closest visible ancestor's label
       const nearAnc = findImmediateAncestor(activeNode, gNodes);
       if (nearAnc) revealedNodeId = nearAnc.id;
     }
@@ -1211,7 +1211,7 @@ function treeDeleteDir(absPath, displayName) {
       ? `フォルダ「${name}」を削除しますか？\n\n⚠ この操作により：\n1. フォルダ内の全サブファイルおよび文書が完全に削除されます。\n2. ナレッジグラフのインデックスが同期更新されます。\n3. 元に戻すことはできません。`
       : `Delete folder "${name}"?\n\n⚠ This action will:\n1. Permanently delete the folder and ALL nested files/documents inside.\n2. Automatically update and remove them from the graph index.\n3. This cannot be undone.`);
 
-  const tip = zh ? '💡 警告：資料夾內之全部檔案都將被實體刪除！' : (ja ? '💡 警告：フォルダ内のすべてのファイルが物理削除されます！' : '💡 Warning: All nested files inside will be permanently erased!');
+  const tip = zh ? '💡 警告：資料夾內之全部檔案都將被實體刪除！' : (ja ? '💡 警告：フォルダ内の全ファイルが完全に削除されます（復元不可）' : '💡 Warning: All nested files inside will be permanently erased!');
   const confirmText = zh ? '永久刪除資料夾' : (ja ? 'フォルダを完全に削除' : 'Delete Folder');
   const cancelText = zh ? '取消' : (ja ? 'キャンセル' : 'Cancel');
 
@@ -1869,7 +1869,7 @@ function updateDocTagsBar(mdText, filePath) {
     const del = document.createElement('span');
     del.innerText = '✕';
     del.style.cssText = 'color:#f85149; margin-left:4px; font-size:11px; padding:0 2px; cursor:pointer;';
-    del.title = '脫鉤解除此標籤 (Unlink)';
+    del.title = '解除此標籤關聯 (Unlink)';
     del.onclick = (e) => {
       unlinkConcept(cName, filePath, e);
     };
@@ -1995,26 +1995,28 @@ function openViewCtxMenu(e) {
   const c = document.getElementById('d-code-markdown');
   if (!c || !c.contains(e.target)) return;
   e.preventDefault();
-  const zh = (typeof currentLanguage !== 'undefined' && currentLanguage === 'zh');
+  const lang = (typeof currentLanguage !== 'undefined') ? currentLanguage : 'en';
+  const zh = lang === 'zh', ja = lang === 'ja';
   const sel = (window.getSelection ? window.getSelection().toString() : '').trim();
   const items = [];
   if (sel) {
-    items.push({ label: zh ? '📋 複製選取文字' : '📋 Copy selection', fn: () => {
-      copyTextToClipboard(sel, zh ? '📋 已複製選取文字' : '📋 Selection copied');
-    }});
+    const lblSel = zh ? '📋 複製選取文字' : (ja ? '📋 選択テキストをコピー' : '📋 Copy selection');
+    const toastSel = zh ? '📋 已複製選取文字' : (ja ? '📋 選択テキストをコピーしました' : '📋 Selection copied');
+    items.push({ label: lblSel, fn: () => copyTextToClipboard(sel, toastSel) });
   }
-  items.push({ label: zh ? '📄 複製本節 Markdown' : '📄 Copy section markdown', fn: () => copyCurrentSection() });
-  items.push({ label: zh ? '🤖 複製給 Agent' : '🤖 Copy for Agent', fn: () => copyMcpPayload() });
+  items.push({ label: zh ? '📄 複製本節 Markdown' : (ja ? '📄 この見出しのMarkdownをコピー' : '📄 Copy section markdown'), fn: () => copyCurrentSection() });
+  items.push({ label: zh ? '🤖 複製給 Agent' : (ja ? '🤖 AIエージェント用にコピー' : '🤖 Copy for Agent'), fn: () => copyMcpPayload() });
   (viewCtx.sources || []).slice(0, 5).forEach(rel => {
     const base = rel.split('/').pop();
     const url = viewSourceUrl(rel);
     if (!url) return;
-    items.push({ label: (zh ? '📂 開啟來源檔案：' : '📂 Open source: ') + base, fn: () => window.open(url, '_blank', 'noopener') });
+    const prefix = zh ? '📂 開啟來源檔案：' : (ja ? '📂 ソースファイルを開く: ' : '📂 Open source: ');
+    items.push({ label: prefix + base, fn: () => window.open(url, '_blank', 'noopener') });
   });
   if (viewCtx.sources.length) {
-    items.push({ label: zh ? '📁 複製來源絕對路徑' : '📁 Copy source absolute path', fn: () => {
+    items.push({ label: zh ? '📁 複製來源絕對路徑' : (ja ? '📁 ソースの絶対パスをコピー' : '📁 Copy source absolute path'), fn: () => {
       const abs = viewCtx.sources.map(r => `${viewCtx.repo}\\${r.replace(/\//g, '\\')}`).join('\n');
-      copyTextToClipboard(abs, zh ? '📁 已複製來源路徑' : '📁 Source path copied');
+      copyTextToClipboard(abs, zh ? '📁 已複製來源路徑' : (ja ? '📁 ソースパスをコピーしました' : '📁 Source path copied'));
     }});
   }
   if (!items.length) return;
@@ -2243,6 +2245,14 @@ function updateSwapButtonI18n() {
       lbl.textContent = '左右對調';
       btn.title = '與 Markdown 瀏覽對調';
     }
+  } else if (currentLanguage === 'ja') {
+    if (isSwapped) {
+      lbl.textContent = '右へ戻す';
+      btn.title = '右側パネルへ戻す';
+    } else {
+      lbl.textContent = '左右切替';
+      btn.title = 'Markdownリーダーと配置を入れ替え';
+    }
   } else {
     if (isSwapped) {
       lbl.textContent = 'Swap Back';
@@ -2281,9 +2291,9 @@ function togglePanelsSwap() {
   updateActivityBarI18n();
 
   if (!isSwapped) {
-    showToast(currentLanguage === 'zh' ? '3D 圖已置中，Markdown 移至右側' : '3D Graph centered, Markdown in right panel');
+    showToast(currentLanguage === 'zh' ? '3D 圖已置中，Markdown 移至右側' : (currentLanguage === 'ja' ? '3Dグラフを中央に配置、Markdownを右側へ移動' : '3D Graph centered, Markdown in right panel'));
   } else {
-    showToast(currentLanguage === 'zh' ? '已恢復標準版面配置' : 'Standard layout restored');
+    showToast(currentLanguage === 'zh' ? '已恢復標準版面配置' : (currentLanguage === 'ja' ? '標準レイアウトに戻しました' : 'Standard layout restored'));
   }
 
   // Preserve center node focus and adjust 3D viewport dimensions smoothly
@@ -2447,18 +2457,19 @@ function renderRepoTable(projects) {
   if (!tbody) return;
   tbody.innerHTML = '';
 
-  const zh = currentLanguage === 'zh';
+  const lang = currentLanguage;
+  const zh = lang === 'zh', ja = lang === 'ja';
   const T = {
-    indexed: zh ? '已索引' : 'Indexed',
-    unindexed: zh ? '未索引' : 'Unindexed',
-    pendingTip: zh ? '尚未索引的檔案：' : 'Files not yet indexed: ',
-    sync: zh ? '增量同步' : 'Incremental Sync',
-    syncPending: (n) => zh ? `同步（${n} 待索引）` : `Sync (${n} pending)`,
-    rebuild: zh ? '完整重建' : 'Full Rebuild',
-    uninit: zh ? '移除索引' : 'Uninit',
-    create: zh ? '建立索引' : 'Create Index',
-    exclude: zh ? '排除' : 'Exclude',
-    pendingTag: (n) => zh ? `${n} 待索引` : `${n} pending`,
+    indexed: zh ? '已索引' : (ja ? 'インデックス済' : 'Indexed'),
+    unindexed: zh ? '未索引' : (ja ? '未インデックス' : 'Unindexed'),
+    pendingTip: zh ? '尚未索引的檔案：' : (ja ? '未インデックスのファイル: ' : 'Files not yet indexed: '),
+    sync: zh ? '增量同步' : (ja ? '増分同期' : 'Incremental Sync'),
+    syncPending: (n) => zh ? `同步（${n} 待索引）` : (ja ? `同期（未処理 ${n} 件）` : `Sync (${n} pending)`),
+    rebuild: zh ? '完整重建' : (ja ? '完全再構築' : 'Full Rebuild'),
+    uninit: zh ? '移除索引' : (ja ? 'インデックス削除' : 'Uninit'),
+    create: zh ? '建立索引' : (ja ? 'インデックス作成' : 'Create Index'),
+    exclude: zh ? '排除' : (ja ? '除外' : 'Exclude'),
+    pendingTag: (n) => zh ? `${n} 待索引` : (ja ? `${n} 件未処理` : `${n} pending`),
   };
 
   (projects || []).forEach((p, vIdx) => {
@@ -2641,12 +2652,14 @@ function togglePendingRow(idx, el) {
 // Global one-click incremental sync across every indexed repo.
 function syncAllRepos(btn) {
   const indexed = (allProjectsList || []).filter(q => q.status === 'ready' || q.is_indexed || q.has_db);
+  const lang = currentLanguage;
+  const zh = lang === 'zh', ja = lang === 'ja';
   if (!indexed.length) {
-    showToast(currentLanguage === 'zh' ? '沒有已索引的 repo 可同步' : 'No indexed repositories to sync');
+    showToast(zh ? '沒有已索引的 repo 可同步' : (ja ? '同期対象のインデックス済リポジトリがありません' : 'No indexed repositories to sync'));
     return;
   }
-  setBusy(btn, true, currentLanguage === 'zh' ? '⏳ 全域同步中…' : '⏳ Syncing all…');
-  showToast(currentLanguage === 'zh' ? `⏳ 正在同步 ${indexed.length} 個已索引 repo…` : `⏳ Syncing ${indexed.length} indexed repos…`);
+  setBusy(btn, true, zh ? '⏳ 全域同步中…' : (ja ? '⏳ 一括同期中…' : '⏳ Syncing all…'));
+  showToast(zh ? `⏳ 正在同步 ${indexed.length} 個已索引 repo…` : (ja ? `⏳ ${indexed.length} 件のリポジトリを同期中…` : `⏳ Syncing ${indexed.length} indexed repos…`));
   fetch('/api/sync_all', { method: 'POST' })
   .then(res => res.json())
   .then(res => {
@@ -2679,7 +2692,8 @@ function ingMsg(t, bad) {
   if (m) { m.textContent = t || ''; m.style.color = bad ? '#f85149' : '#8b949e'; }
 }
 function openIngestDialog(absDir) {
-  const zh = currentLanguage === 'zh';
+  const lang = currentLanguage;
+  const zh = lang === 'zh', ja = lang === 'ja';
   closeIngestDialog();
   const t = (absDir || '').replace(/\\/g, '/');
   let repoPath = '', projName = '';
@@ -2690,41 +2704,53 @@ function openIngestDialog(absDir) {
       if (!repoPath || r.length > repoPath.replace(/\\/g, '/').length) { repoPath = p.path; projName = p.name; }
     }
   });
-  if (!repoPath) { showToast(zh ? '❌ 找不到所屬 repo' : '❌ Owning repo not found'); return; }
+  if (!repoPath) { showToast(zh ? '❌ 找不到所屬 repo' : (ja ? '❌ 対象のリポジトリが見つかりません' : '❌ Owning repo not found')); return; }
   // Per-file batch state: each picked file carries its own staged path,
   // status and summary. md filename always equals the source stem.
-  ingState = { dir: absDir, repo: repoPath, proj: projName, picked: [], sel: -1, zh };
+  ingState = { dir: absDir, repo: repoPath, proj: projName, picked: [], sel: -1, zh, ja };
   const o = document.createElement('div');
   o.id = 'ing-overlay';
   o.style.cssText = 'position:fixed;inset:0;z-index:1000002;background:rgba(0,0,0,.6);display:flex;align-items:center;justify-content:center;';
+  const dlgTitle = zh ? '📥 新增文件 — LLM 摘要入庫' : (ja ? '📥 ドキュメント追加 — LLM要約・取り込み' : '📥 New document — LLM summary ingest');
+  const targetLabel = zh ? '目標目錄：' : (ja ? '保存先ディレクトリ: ' : 'Target: ');
+  const step1Title = zh ? '① 選擇檔案（文件／試算／郵件／圖片，可拖拉）' : (ja ? '① ファイル選択（文書/表計算/メール/画像、D&D対応）' : '① Pick files (docs/sheets/mail/images, drag & drop)');
+  const dropText = zh ? '🖱️ 把檔案拖到這裡放開，或點此選擇檔案' : (ja ? '🖱️ ここにファイルをドラッグ＆ドロップ、またはクリックして選択' : '🖱️ Drag files here, or click to browse');
+  const sumBtnText = zh ? '✨ 整批生成摘要' : (ja ? '✨ 一括要約を生成' : '✨ Summarize all');
+  const step2Title = zh ? '② LLM 摘要預覽' : (ja ? '② LLM要約プレビュー' : '② LLM summary preview');
+  const tabPrev = zh ? '預覽' : (ja ? 'プレビュー' : 'Preview');
+  const tabEdit = zh ? '編輯' : (ja ? '編集' : 'Edit');
+  const editHint = zh ? '存檔前可先修改摘要' : (ja ? '保存前に要約内容を調整できます' : 'review & edit before saving');
+  const emptyPrev = zh ? '（摘要會顯示在這裡）' : (ja ? '（要約結果がここに表示されます）' : '(summary appears here)');
+  const saveBtnText = zh ? '✅ 確認產出 md 並入庫' : (ja ? '✅ 要約mdを作成して取り込む' : '✅ Confirm: write md & index');
+
   o.innerHTML = `
   <div style="width:90vw;max-width:1700px;height:88vh;overflow:hidden;display:flex;flex-direction:column;background:#0d1117;border:1px solid #30363d;border-radius:12px;padding:16px;color:#e6edf3;">
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px;">
-      <span style="font-weight:600;font-size:19px;">${zh ? '📥 新增文件 — LLM 摘要入庫' : '📥 New document — LLM summary ingest'} <span style="font-size:14px;color:#8b949e;font-weight:400;">v3.9.26</span></span>
+      <span style="font-weight:600;font-size:19px;">${dlgTitle} <span style="font-size:14px;color:#8b949e;font-weight:400;">v3.9.26</span></span>
       <button onclick="closeIngestDialog()" style="background:transparent;border:none;color:#8b949e;cursor:pointer;font-size:16px;">✕</button>
     </div>
-    <div style="font-size:15px;color:#8b949e;margin-bottom:10px;word-break:break-all;">${zh ? '目標目錄：' : 'Target: '}${escapeHtml(absDir)}${projName ? ` &nbsp;·&nbsp; ${escapeHtml(projName)}` : ''}</div>
+    <div style="font-size:15px;color:#8b949e;margin-bottom:10px;word-break:break-all;">${targetLabel}${escapeHtml(absDir)}${projName ? ` &nbsp;·&nbsp; ${escapeHtml(projName)}` : ''}</div>
     <div style="display:flex;gap:12px;flex:1;min-height:0;">
       <div style="flex:0 1 330px;min-width:250px;display:flex;flex-direction:column;gap:8px;">
-        <div style="font-size:16px;font-weight:600;color:#c9d1d9;">${zh ? '① 選擇檔案（文件／試算／郵件／圖片，可拖拉）' : '① Pick files (docs/sheets/mail/images, drag & drop)'}</div>
+        <div style="font-size:16px;font-weight:600;color:#c9d1d9;">${step1Title}</div>
         <div id="ing-drop" style="border:1.5px dashed #30363d;border-radius:8px;padding:20px 12px;text-align:center;color:#8b949e;font-size:16px;cursor:pointer;transition:border-color .15s,background .15s;">
-          ${zh ? '🖱️ 把檔案拖到這裡放開，或點此選擇檔案' : '🖱️ Drag files here, or click to browse'}
+          ${dropText}
           <input type="file" id="ing-file-input" multiple accept=".pptx,.ppt,.docx,.doc,.pdf,.txt,.md,.markdown,.csv,.html,.htm,.eml,.jpg,.jpeg,.png,.webp,.bmp,.tiff,.tif" style="display:none;" />
         </div>
         <div id="ing-file-list" style="display:flex;flex-direction:column;gap:4px;flex:1;min-height:100px;overflow-y:auto;"></div>
-        <button id="ing-btn-sum" onclick="ingSummarizeAll(this)" style="background:#1f6feb;border:1px solid #388bfd;color:#fff;border-radius:6px;padding:8px 12px;cursor:pointer;font-weight:600;font-size:16px;white-space:nowrap;">${zh ? '✨ 整批生成摘要' : '✨ Summarize all'}</button>
+        <button id="ing-btn-sum" onclick="ingSummarizeAll(this)" style="background:#1f6feb;border:1px solid #388bfd;color:#fff;border-radius:6px;padding:8px 12px;cursor:pointer;font-weight:600;font-size:16px;white-space:nowrap;">${sumBtnText}</button>
       </div>
       <div style="flex:1;min-width:0;display:flex;flex-direction:column;gap:8px;">
-        <div style="font-size:16px;font-weight:600;color:#c9d1d9;">${zh ? '② LLM 摘要預覽' : '② LLM summary preview'}</div>
+        <div style="font-size:16px;font-weight:600;color:#c9d1d9;">${step2Title}</div>
         <div id="ing-sel-name" style="font-size:14px;color:#58a6ff;word-break:break-all;min-height:18px;"></div>
         <div style="display:flex;gap:6px;align-items:center;">
-          <button id="ing-tab-prev" onclick="ingShowTab('prev')" style="background:#1f6feb44;border:1px solid #1f6feb;color:#58a6ff;border-radius:6px;padding:4px 12px;cursor:pointer;font-size:16px;">👁 ${zh ? '預覽' : 'Preview'}</button>
-          <button id="ing-tab-edit" onclick="ingShowTab('edit')" style="background:transparent;border:1px solid #30363d;color:#c9d1d9;border-radius:6px;padding:4px 12px;cursor:pointer;font-size:16px;">✏️ ${zh ? '編輯' : 'Edit'}</button>
-          <span style="font-size:15px;color:#8b949e;">${zh ? '存檔前可先修改摘要' : 'review & edit before saving'}</span>
+          <button id="ing-tab-prev" onclick="ingShowTab('prev')" style="background:#1f6feb44;border:1px solid #1f6feb;color:#58a6ff;border-radius:6px;padding:4px 12px;cursor:pointer;font-size:16px;">👁 ${tabPrev}</button>
+          <button id="ing-tab-edit" onclick="ingShowTab('edit')" style="background:transparent;border:1px solid #30363d;color:#c9d1d9;border-radius:6px;padding:4px 12px;cursor:pointer;font-size:16px;">✏️ ${tabEdit}</button>
+          <span style="font-size:15px;color:#8b949e;">${editHint}</span>
         </div>
-        <div id="ing-preview" style="background:#010409;border:1px solid #21262d;border-radius:6px;padding:12px;font-size:13px;flex:1;min-height:220px;overflow-y:auto;color:#c9d1d9;word-break:break-word;">${zh ? '（摘要會顯示在這裡）' : '(summary appears here)'}</div>
+        <div id="ing-preview" style="background:#010409;border:1px solid #21262d;border-radius:6px;padding:12px;font-size:13px;flex:1;min-height:220px;overflow-y:auto;color:#c9d1d9;word-break:break-word;">${emptyPrev}</div>
         <textarea id="ing-edit" style="display:none;background:#010409;border:1px solid #1f6feb;border-radius:6px;padding:12px;font-size:13px;color:#e6edf3;flex:1;min-height:220px;overflow-y:auto;font-family:inherit;white-space:pre-wrap;"></textarea>
-        <button id="ing-btn-save" onclick="ingSave(this)" style="background:#238636;border:1px solid #2ea043;color:#fff;border-radius:6px;padding:8px 12px;cursor:pointer;font-weight:600;font-size:16px;">${zh ? '✅ 確認產出 md 並入庫' : '✅ Confirm: write md & index'}</button>
+        <button id="ing-btn-save" onclick="ingSave(this)" style="background:#238636;border:1px solid #2ea043;color:#fff;border-radius:6px;padding:8px 12px;cursor:pointer;font-weight:600;font-size:16px;">${saveBtnText}</button>
       </div>
     </div>
     <div id="ing-msg" style="font-size:16px;color:#8b949e;margin-top:8px;min-height:16px;"></div>
@@ -2787,7 +2813,7 @@ function ingRenderPicked() {
   if (!box || !ingState) return;
   box.innerHTML = '';
   if (!ingState.picked.length) {
-    box.innerHTML = `<div style="font-size:15px;color:#8b949e;">${ingState.zh ? '（尚未選擇檔案）' : '(no files yet)'}</div>`;
+    box.innerHTML = `<div style="font-size:15px;color:#8b949e;">${ingState.zh ? '（尚未選擇檔案）' : (ingState.ja ? '（ファイルが未選択です）' : '(no files yet)')}</div>`;
     ingState.sel = -1;
     paintIngSelName();
     paintIngSaveBtn();
@@ -2810,7 +2836,7 @@ function ingRenderPicked() {
     d.appendChild(tx);
     const x = document.createElement('button');
     x.textContent = '✕';
-    x.title = ingState.zh ? '移除' : 'Remove';
+    x.title = ingState.zh ? '移除' : (ingState.ja ? '削除' : 'Remove');
     x.style.cssText = 'background:transparent;border:none;color:#8b949e;cursor:pointer;font-size:16px;padding:0 2px;';
     x.onclick = (ev) => {
       ev.stopPropagation();
@@ -2837,8 +2863,8 @@ function paintIngSaveBtn() {
   if (!btn || !ingState) return;
   const n = ingState.picked.filter(e => e.status === 'done').length;
   btn.textContent = n
-    ? (ingState.zh ? `✅ 確認產出 ${n} 個 md 並入庫` : `✅ Confirm: write ${n} md & index`)
-    : (ingState.zh ? '✅ 確認產出 md 並入庫' : '✅ Confirm: write md & index');
+    ? (ingState.zh ? `✅ 確認產出 ${n} 個 md 並入庫` : (ingState.ja ? `✅ ${n} 件の要約mdを作成して取り込む` : `✅ Confirm: write ${n} md & index`))
+    : (ingState.zh ? '✅ 確認產出 md 並入庫' : (ingState.ja ? '✅ 要約mdを作成して取り込む' : '✅ Confirm: write md & index'));
 }
 // Click a row: stash current editor draft, show that file's summary.
 function ingSelectFile(idx) {
@@ -2966,13 +2992,13 @@ function ingSummarizeAll(btn) {
   const st = ingState;
   if (!st) return;
   const zh = st.zh;
-  if (!st.picked.length) { ingMsg(zh ? '請先選擇檔案' : 'Pick files first', true); return; }
+  if (!st.picked.length) { ingMsg(zh ? '請先選擇檔案' : (st.ja ? '先にファイルを選択してください' : 'Pick files first'), true); return; }
   setBusy(btn, true, '⏳…');
   ingStageAll(() => {
     const queue = st.picked.filter(e => e.stagedPath && e.status !== 'done');
     if (!queue.length) {
       setBusy(btn, false);
-      ingMsg(zh ? '全部已完成（如需重跑請移除重加）' : 'All done already', true);
+      ingMsg(zh ? '全部已完成（如需重跑請移除重加）' : (st.ja ? 'すべて完了しています' : 'All done already'), true);
       return;
     }
     if (st._stop) st._stop();
@@ -2984,7 +3010,9 @@ function ingSummarizeAll(btn) {
         setBusy(btn, false);
         const nd = st.picked.filter(e => e.status === 'done').length;
         const ne = st.picked.filter(e => e.status === 'error').length;
-        ingMsg((zh ? `✅ 整批完成：${nd} 成功` : `✅ Batch done: ${nd} ok`) + (ne ? (zh ? `，${ne} 失敗` : `, ${ne} failed`) : ''));
+        const successMsg = zh ? `✅ 整批完成：${nd} 成功` : (st.ja ? `✅ 一括処理完了：${nd} 件成功` : `✅ Batch done: ${nd} ok`);
+        const failMsg = ne ? (zh ? `，${ne} 失敗` : (st.ja ? `、${ne} 件失敗` : `, ${ne} failed`)) : '';
+        ingMsg(successMsg + failMsg);
         return;
       }
       const e = queue[i];
@@ -3040,7 +3068,7 @@ function ingSave(btn) {
   const cur = ingCurEntry();
   if (ed0 && cur && cur.status === 'done') cur.summary = ed0.value;
   const done = st.picked.filter(e => e.status === 'done' && (e.summary || '').trim());
-  if (!done.length) { ingMsg(zh ? '還沒有完成的摘要（先按整批生成摘要）' : 'No finished summaries yet', true); return; }
+  if (!done.length) { ingMsg(zh ? '還沒有完成的摘要（先按整批生成摘要）' : (st.ja ? '完了した要約がありません（先に一括要約を実行してください）' : 'No finished summaries yet'), true); return; }
   setBusy(btn, true, '⏳…');
   if (st._stop) st._stop();
   let i = 0, okCount = 0;
@@ -3050,7 +3078,7 @@ function ingSave(btn) {
     if (i >= done.length) {
       if (st._stop) st._stop();
       setBusy(btn, false);
-      showToast(zh ? `✅ 已產出 ${okCount}/${done.length} 個 md` : `✅ Wrote ${okCount}/${done.length} md`);
+      showToast(zh ? `✅ 已產出 ${okCount}/${done.length} 個 md` : (st.ja ? `✅ ${okCount}/${done.length} 件のmdを出力しました` : `✅ Wrote ${okCount}/${done.length} md`));
       ingMsg((zh ? `✅ 完成 ${okCount}/${done.length}：` : `✅ Done ${okCount}/${done.length}: `) + outs.join('、'));
       loadProjects();
       if (okCount === done.length) setTimeout(closeIngestDialog, 1200);
@@ -3357,7 +3385,7 @@ function updateExplorerI18n() {
   if (treeSearch) treeSearch.placeholder = zh ? '篩選文件樹…' : (ja ? 'ドキュメントツリーを検索…' : 'Filter documentation tree...');
 
   const summary = document.getElementById('lbl-proj-summary');
-  if (summary) summary.innerText = `${selectedProjects.size} ${zh ? '個啟用' : (ja ? '個のアクティブ' : 'Active')}`;
+  if (summary) summary.innerText = `${selectedProjects.size} ${zh ? '個啟用' : (ja ? '件有効' : 'Active')}`;
 
   set('th-proj', zh ? '專案' : (ja ? 'プロジェクト' : 'Project'));
   set('th-path', zh ? '目錄路徑' : (ja ? 'パス' : 'Directory Path'));
@@ -3365,9 +3393,9 @@ function updateExplorerI18n() {
   set('th-status', zh ? '狀態' : (ja ? 'ステータス' : 'Status'));
   set('th-actions', zh ? '操作' : (ja ? '操作' : 'Actions'));
 
-  set('lbl-modal-title', zh ? '倉庫管理' : (ja ? 'リポジトリ管理' : 'Repository Management'));
+  set('lbl-modal-title', zh ? '專案儲存庫管理' : (ja ? 'リポジトリ管理' : 'Repository Management'));
   set('lbl-add-dir', zh ? '掃描專案目錄：' : (ja ? 'プロジェクトをスキャン：' : 'Scan Project Directory:'));
-  set('lbl-repo-list', zh ? '已發現的倉庫：' : (ja ? '検出されたリポジトリ：' : 'Discovered Repositories:'));
+  set('lbl-repo-list', zh ? '已發現的專案儲存庫：' : (ja ? '検出されたリポジトリ：' : 'Discovered Repositories:'));
   set('btn-sync-all', zh ? '⚡ 全部同步' : (ja ? '⚡ すべて同期' : '⚡ Sync all'));
   set('btn-sync-all-tree', zh ? '⚡ 全部同步' : (ja ? '⚡ すべて同期' : '⚡ Sync all'));
   paintShowSourceBtn();
@@ -3379,7 +3407,7 @@ function _unused_updateExplorerI18n() {
   const set = (id, txt) => { const el = document.getElementById(id); if (el) el.textContent = txt; };
   const setAttr = (id, attr, txt) => { const el = document.getElementById(id); if (el) el.setAttribute(attr, txt); };
 
-  set('btn-repo-mgr', zh ? '⚙ 倉庫' : '⚙ Repos');
+  set('btn-repo-mgr', zh ? '⚙ 儲存庫' : '⚙ Repos');
   set('btn-sel-all', zh ? '全選' : 'Select All');
   set('btn-sel-none', zh ? '取消選取' : 'Deselect');
   set('btn-clear-filter', '✕');
@@ -3397,9 +3425,9 @@ function _unused_updateExplorerI18n() {
   set('th-status', zh ? '狀態' : 'Status');
   set('th-actions', zh ? '操作' : 'Actions');
 
-  set('lbl-modal-title', zh ? '倉庫管理' : 'Repository Management');
+  set('lbl-modal-title', zh ? '專案儲存庫管理' : 'Repository Management');
   set('lbl-add-dir', zh ? '掃描專案目錄：' : 'Scan Project Directory:');
-  set('lbl-repo-list', zh ? '已發現的倉庫：' : 'Discovered Repositories:');
+  set('lbl-repo-list', zh ? '已發現的專案儲存庫：' : 'Discovered Repositories:');
   set('btn-sync-all', zh ? '⚡ 全部同步' : '⚡ Sync all');
   set('btn-sync-all-tree', zh ? '⚡ 全部同步' : '⚡ Sync all');
   paintShowSourceBtn();
@@ -3682,9 +3710,9 @@ function updateControlsHelpI18n() {
     if (kAd) kAd.textContent = '向左平移 / 向右平移';
     if (kQe) kQe.textContent = '視角上升 / 視角下降';
     if (kShift) kShift.textContent = '加速移動 (2.5倍)';
-    if (kSpace) kSpace.textContent = '減速煞車';
+    if (kSpace) kSpace.textContent = '靜止 / 停止移動';
     if (kC) kC.textContent = '鏡頭置中並對齊目標節點';
-    if (kF) kF.textContent = '全景視野最適化';
+    if (kF) kF.textContent = '最適全景視角';
     if (kLod) kLod.textContent = '切換層級 (架構 / 標準 / 全部)';
     if (footer) footer.textContent = '按 Esc 或點擊關閉按鈕';
 
@@ -3696,7 +3724,7 @@ function updateControlsHelpI18n() {
     if (mPanD) mPanD.textContent = '平移視角';
     if (mDblT) mDblT.textContent = '雙擊背景';
     if (mDblD) mDblD.textContent = '重設全景中心視野';
-  } else {
+  } else if (currentLanguage === 'en') {
     if (lblHelp) lblHelp.textContent = 'Help';
     if (btnHelp) btnHelp.title = '3D Navigation Controls Help';
     if (modalTitle) modalTitle.textContent = '3D Navigation Controls';
@@ -3722,6 +3750,31 @@ function updateControlsHelpI18n() {
     if (mPanD) mPanD.textContent = 'Pan View';
     if (mDblT) mDblT.textContent = 'Double Click';
     if (mDblD) mDblD.textContent = 'Reset View to Center';
+  } else if (currentLanguage === 'ja') {
+    if (btnHelp) btnHelp.title = '3Dナビゲーション操作ヘルプ';
+    if (modalTitle) modalTitle.textContent = '3D操作・ナビゲーション';
+    if (secKb) secKb.textContent = 'キーボード操作';
+    if (secView) secView.textContent = '視点・表示階層制御';
+    if (secMouse) secMouse.textContent = 'マウス操作';
+
+    if (kWs) kWs.textContent = '前進 / 後退';
+    if (kAd) kAd.textContent = '左移動 / 右移動';
+    if (kQe) kQe.textContent = '視線上見上げ / 視線下見下ろし';
+    if (kShift) kShift.textContent = '移動加速 (2.5倍)';
+    if (kSpace) kSpace.textContent = '静止 / ブレーキ';
+    if (kC) kC.textContent = 'ターゲットノードにカメラを中央合わせ';
+    if (kF) kF.textContent = '全体を最適表示';
+    if (kLod) kLod.textContent = 'LODレベル切替 (構造 / 標準 / すべて)';
+    if (footer) footer.textContent = 'Esc または閉じるボタンで戻る';
+
+    if (mClickT) mClickT.textContent = '左クリック';
+    if (mClickD) mClickD.textContent = 'ノード選択 & Markdown同期';
+    if (mRightT) mRightT.textContent = '右ドラッグ';
+    if (mRightD) mRightD.textContent = '視点回転 (オービット)';
+    if (mPanT) mPanT.textContent = '中クリック / Shift + ドラッグ';
+    if (mPanD) mPanD.textContent = '視点平行移動';
+    if (mDblT) mDblT.textContent = '背景ダブルクリック';
+    if (mDblD) mDblD.textContent = '全体ビューへリセット';
   }
 }
 
@@ -4679,7 +4732,7 @@ function renderConceptsDrawerList(filterKw = '') {
     // bracket pipeline it never fires; its blue branch below stays only as
     // a fallback in case hand brackets ever produce one.)
     const SRC_LEGEND = [
-      { k: 'mined', icon: '⛏', fg: '#e3b341', label: zh ? '探礦' : 'Prospect' },
+      { k: 'mined', icon: '⛏', fg: '#e3b341', label: zh ? '詞頻探勘' : 'Prospect' },
       { k: 'crawl', icon: '🌿', fg: '#3fb950', label: 'Vine' }
     ];
     h += `<div style="display:flex; gap:10px; flex-wrap:wrap; font-size:11px; color:#8b949e; padding:0 2px 2px;">${SRC_LEGEND.map(s => `<span><span style="color:${s.fg};">${s.icon} ${s.label}</span></span>`).join('')}</div>`;
@@ -4694,7 +4747,7 @@ function renderConceptsDrawerList(filterKw = '') {
         ? { bd: '#2ea043', nm: '#3fb950', bg: '#0f2a17', fg: '#3fb950', icon: '🌿', label: 'Vine' }
         : (isAuto
           ? { bd: '#1f6feb', nm: '#58a6ff', bg: '#0d1a2e', fg: '#58a6ff', icon: '🕸', label: zh ? '多檔同框' : 'Cited' }
-          : { bd: '#9e6a03', nm: '#f0883e', bg: '#382800', fg: '#e3b341', icon: '⛏', label: zh ? '探礦' : 'Prospect' });
+          : { bd: '#9e6a03', nm: '#f0883e', bg: '#382800', fg: '#e3b341', icon: '⛏', label: zh ? '詞頻探勘' : 'Prospect' });
       const evd = (typeof scanEvidenceMap !== 'undefined') ? scanEvidenceMap[c.name] : null;
       // Crawl candidates have no edges yet — their number IS the staged
       // node count (kept link/tag pairs). Others show mining DF/TF or refs.
@@ -4716,8 +4769,8 @@ function renderConceptsDrawerList(filterKw = '') {
           <div style="font-size:11px; color:#8b949e; margin-top:4px;">${zh ? '來源' : 'Source'}: <span style="color:${col.fg};">${col.label}</span>${note}</div>
           ${firstEv ? `<div style="font-size:11px; color:#a5d6ff; margin-top:4px; word-break:break-word;" title="${escapeHtml(firstEv.rel || '')}">“${escapeHtml((firstEv.snippet || '').slice(0, 60))}” — ${escapeHtml((firstEv.rel || '').split('/').pop() || '')}</div>` : ''}
           <div style="display:flex; gap:2px; justify-content:flex-end; margin-top:8px;">
-            <button class="mini-btn" style="background:transparent; border:1px solid #1f6feb; color:#58a6ff;padding:2px 6px;font-size:11px;white-space:nowrap;" onclick="openCardRefresh('${escapeHtml(c.name)}')" title="${zh ? '更新此候選（探礦重算 / 順藤深挖）' : 'Refresh this candidate (Prospect / Vine)'}">↻ ${zh ? '更新' : 'Refresh'}</button>
-            <button class="mini-btn" style="background:#238636; border-color:#2ea043; color:#fff;padding:2px 6px;font-size:11px;white-space:nowrap;" onclick="promoteCandidate('${escapeHtml(c.name)}')">✓ ${zh ? '審批入典' : 'Promote'}</button>
+            <button class="mini-btn" style="background:transparent; border:1px solid #1f6feb; color:#58a6ff;padding:2px 6px;font-size:11px;white-space:nowrap;" onclick="openCardRefresh('${escapeHtml(c.name)}')" title="${zh ? '更新此候選（詞頻重算 / 關聯深度探索）' : 'Refresh this candidate (Prospect / Vine)'}">↻ ${zh ? '更新' : 'Refresh'}</button>
+            <button class="mini-btn" style="background:#238636; border-color:#2ea043; color:#fff;padding:2px 6px;font-size:11px;white-space:nowrap;" onclick="promoteCandidate('${escapeHtml(c.name)}')">✓ ${zh ? '正式發佈' : (ja ? '承認して適用' : 'Promote')}</button>
             <button class="mini-btn" style="background:#21262d; border-color:#30363d; color:#f85149;padding:2px 6px;font-size:11px;white-space:nowrap;" onclick="dismissCandidate('${escapeHtml(c.name)}')">✕ ${zh ? '移除' : 'Remove'}</button>
           </div>
         </div>
@@ -4769,7 +4822,7 @@ function renderConceptsDrawerList(filterKw = '') {
       setTimeout(() => fetchConceptsData(), 300);
       return;
     }
-    container.innerHTML = `<div style="color:#8b949e; font-size:12px; text-align:center; padding:30px 10px;">${zh ? '知識庫尚無正式概念，請點擊上方 + New 定立' : 'No concepts defined yet. Click + New to define one.'}</div>`;
+    container.innerHTML = `<div style="color:#8b949e; font-size:12px; text-align:center; padding:30px 10px;">${zh ? '知識庫尚無正式概念，請點擊上方 + New 建立' : 'No concepts defined yet. Click + New to define one.'}</div>`;
     return;
   }
 
@@ -4812,7 +4865,7 @@ function renderConceptsDrawerList(filterKw = '') {
             ${zh ? '別名' : 'Aliases'}: ${escapeHtml(c.aliases || (zh ? '無' : 'None'))}
           </div>
           <div style="display:flex; justify-content:flex-end; gap:2px; margin-top:6px;">
-            <button class="mini-btn" onclick="openCardRefresh('${escapeHtml(c.name)}', event)" title="${zh ? '更新此概念（探礦重算 / 順藤深挖）' : 'Refresh this concept (Prospect / Vine)'}" style="padding:2px 6px;font-size:11px;white-space:nowrap;">↻ ${zh ? '更新' : 'Refresh'}</button>
+            <button class="mini-btn" onclick="openCardRefresh('${escapeHtml(c.name)}', event)" title="${zh ? '更新此概念（詞頻重算 / 關聯深度探索）' : 'Refresh this concept (Prospect / Vine)'}" style="padding:2px 6px;font-size:11px;white-space:nowrap;">↻ ${zh ? '更新' : 'Refresh'}</button>
             <button class="mini-btn" onclick="openEditConceptModal('${escapeHtml(c.name)}', '${escapeHtml(c.category)}', '${escapeHtml(c.aliases || '')}', event)" style="padding:2px 6px;font-size:11px;white-space:nowrap;">✏️ ${zh ? '編輯' : (currentLanguage === 'ja' ? '編集' : 'Edit')}</button>
             <button class="mini-btn" onclick="openMergeConceptModal('${escapeHtml(c.name)}', event)" style="padding:2px 6px;font-size:11px;white-space:nowrap;">🔗 ${zh ? '合併' : (currentLanguage === 'ja' ? '統合' : 'Merge')}</button>
             <button class="mini-btn" style="color:#f85149; border-color:#da363388;padding:2px 6px;font-size:11px;white-space:nowrap;" onclick="deleteConcept('${escapeHtml(c.name)}', event)">🗑️ ${zh ? '刪除' : (currentLanguage === 'ja' ? '削除' : 'Delete')}</button>
@@ -5001,14 +5054,14 @@ function unlinkConcept(conceptName, filePath, event) {
   const zh = currentLanguage === 'zh';
   const repo = getActiveRepoPath();
 
-  const title = zh ? '⚠ 概念標籤脫鉤確認' : '⚠ Unlink Concept Confirmation';
+  const title = zh ? '⚠ 解除概念標籤關聯確認' : '⚠ Unlink Concept Confirmation';
   const msg = zh 
     ? `確定要解除「${filePath}」與標籤「${conceptName}」的關聯嗎？
-（僅會脫鉤此文檔，不會影響其他引用檔案）`
+（僅會解除此文件的關聯，不會影響其他引用檔案）`
     : `Unlink '${filePath}' from tag '${conceptName}'? (Other documents will remain untouched)`;
 
   const tip = zh ? '💡 此操作僅會解除此特定文件與概念標籤的關聯，不會影響其他文檔。' : (ja ? '💡 この操作は該当ファイルとタグの関連付けのみを解除し、他のドキュメントには影響しません。' : '💡 This action only unlinks this specific document from the tag.');
-  const confirmText = zh ? '確定脫鉤' : (ja ? '関連付け解除' : 'Unlink');
+  const confirmText = zh ? '確定解除關聯' : (ja ? 'タグ解除' : 'Unlink');
   const cancelText = zh ? '取消' : (ja ? 'キャンセル' : 'Cancel');
 
   showCyberConfirm(title, msg, () => {
@@ -5020,7 +5073,7 @@ function unlinkConcept(conceptName, filePath, event) {
       .then(res => res.json())
       .then(data => {
         if (data.ok) {
-          showToast(zh ? `✅ 已成功為「${filePath}」脫鉤「${conceptName}」！` : `✅ Unlinked '${conceptName}'!`);
+          showToast(zh ? `✅ 已成功為「${filePath}」解除「${conceptName}」標籤關聯！` : `✅ Unlinked '${conceptName}'!`);
           fetchConceptsData();
           loadMasterGraphAndFilter();
           setTimeout(() => {
@@ -5223,7 +5276,7 @@ function renderConceptTagPageInViewer(tagData) {
     fullMd += zh ? '\n| 序號 | 引用檔案路徑 | 提及段落摘要 | 操作 |\n| :--- | :--- | :--- | :--- |\n'
                  : '\n| # | File | Snippet | Action |\n| :--- | :--- | :--- | :--- |\n';
     tagData.files.forEach((f, idx) => {
-      fullMd += `| ${idx + 1} | ${refCrumbHtml(f.filePath)} | ${f.snippet ? f.snippet.replace(/\|/g, '/') : (zh ? '(章節內文)' : '(Section body)')} | <button class="mini-btn" style="color:#f85149; border-color:#da3633; padding:3px 12px; font-weight:600; white-space:nowrap; min-width:54px; display:inline-block;" onclick="unlinkConcept('${tagData.concept}', '${f.filePath}', event)">${zh ? '解除' : 'Unlink'}</button> |\n`;
+      fullMd += `| ${idx + 1} | ${refCrumbHtml(f.filePath)} | ${f.snippet ? f.snippet.replace(/\|/g, '/') : (zh ? '(章節內文)' : '(Section body)')} | <button class="mini-btn" style="color:#f85149; border-color:#da3633; padding:3px 12px; font-weight:600; white-space:nowrap; min-width:54px; display:inline-block;" onclick="unlinkConcept('${tagData.concept}', '${f.filePath}', event)">${zh ? '解除' : (ja ? '解除' : 'Unlink')}</button> |\n`;
     });
   }
 
@@ -5453,30 +5506,30 @@ function conceptScanAll(btn) {
       <div style="display:flex;flex-direction:column;gap:8px;">
         <label style="display:flex;gap:8px;align-items:flex-start;border:1px solid #21262d;border-radius:8px;padding:8px 10px;cursor:pointer;">
           <input type="radio" name="scan-mode" value="full" checked style="margin-top:3px;" />
-          <span><b style="font-size:14px;">${zh ? '① 探礦（全庫頻次挖）' : '① Prospect (corpus frequency)'}</b><br/>
-          <span style="font-size:12px;color:#8b949e;">${zh ? '先更新數字，再找最高頻新詞，LLM 挑過後按檔勾選收錄（花一次 LLM）。' : 'Refresh counts, then take the top new term; check files to approve (one LLM call).'}</span></span>
+          <span><b style="font-size:14px;">${zh ? '① 概念探勘（全庫詞頻探勘）' : (ja ? '① 概念発掘（頻出語句マイニング）' : '① Prospect (corpus frequency)')}</b><br/>
+          <span style="font-size:12px;color:#8b949e;">${zh ? '先更新詞頻統計，選取高頻新詞由 LLM 評審後依檔案收錄（消耗 1 次 LLM）。' : (ja ? '出現頻度を更新し、高頻度の新語句をLLMで精査して登録します（LLM呼出 1回）。' : 'Refresh counts, then take the top new term; check files to approve (one LLM call).')}</span></span>
         </label>
         <label style="display:flex;gap:8px;align-items:flex-start;border:1px solid #21262d;border-radius:8px;padding:8px 10px;cursor:pointer;">
           <input type="radio" name="scan-mode" value="crawl" style="margin-top:3px;" />
-          <span style="flex:1;min-width:0;"><b style="font-size:14px;">${zh ? '② Vine（種子＋DFS）' : '② Vine (seed + DFS)'}</b><br/>
-          <span style="font-size:12px;color:#8b949e;">${zh ? '先打一段要找的字→LLM 找語意落點→stack 摸（相關才入）→薦標題手改確認。暫存不落檔，轉正才套上。' : 'Type what you seek first — LLM finds semantic footholds, then stack-walks (relevant only) to an editable title. Staged, applied on promote.'}</span></span>
+          <span style="flex:1;min-width:0;"><b style="font-size:14px;">${zh ? '② 關聯探索（種子語意深度探索）' : (ja ? '② 関連探索（シード意味探索・Vine）' : '② Vine (seed + DFS)')}</b><br/>
+          <span style="font-size:12px;color:#8b949e;">${zh ? '輸入檢索主題 → LLM 定位語意關聯點 → 深度遍歷探索 → 產生建議標題並確認。確認前僅暫存不改動檔案，正式發佈後套用。' : (ja ? '検索テーマを入力 → LLMが関連箇所を特定 → 深層探索 → 推奨タイトルを生成・確認。承認するまでファイルは変更されません。' : 'Type what you seek first — LLM finds semantic footholds, then stack-walks (relevant only) to an editable title. Staged, applied on promote.')}</span></span>
         </label>
         <div id="scan-crawl-opts" style="display:none;flex-direction:column;gap:8px;border:1px dashed #30363d;border-radius:8px;padding:8px 10px;">
-          <label style="font-size:13px;color:#c9d1d9;">${zh ? '要找什麼（必填，不打不給摸）' : 'What do you seek (required)'}
-            <input id="scan-crawl-seed" placeholder="${zh ? '如：想找的設備或主題' : 'e.g. equipment or topic you seek'}" style="display:block;width:100%;box-sizing:border-box;margin-top:4px;background:#010409;border:1px solid #30363d;border-radius:6px;padding:6px 10px;color:#e6edf3;font-size:13px;" />
-            <div style="font-size:11px;color:#8b949e;margin-top:2px;">${zh ? 'LLM 按這段話找語意落點；摸瓜全程只收跟它相關的，無關不入 stack。' : 'The LLM finds semantic footholds for this text; only related nodes enter the stack.'}</div>
+          <label style="font-size:13px;color:#c9d1d9;">${zh ? '探索主題或關鍵詞（必填）' : (ja ? '探索テーマ・キーワード（必須）' : 'What do you seek (required)')}
+            <input id="scan-crawl-seed" placeholder="${zh ? '如：想找的設備或主題' : (ja ? '例：探したい機器や設計トピック' : 'e.g. equipment or topic you seek')}" style="display:block;width:100%;box-sizing:border-box;margin-top:4px;background:#010409;border:1px solid #30363d;border-radius:6px;padding:6px 10px;color:#e6edf3;font-size:13px;" />
+            <div style="font-size:11px;color:#8b949e;margin-top:2px;">${zh ? 'LLM 依此主題定位關聯文件段落，僅保留高關聯性內容。' : (ja ? '入力内容に基づき関連ドキュメントを探索し、関連性の高い段落のみを保持します。' : 'The LLM finds semantic footholds for this text; only related nodes enter the stack.')}</div>
           </label>
-          <label style="font-size:13px;color:#c9d1d9;">${zh ? '最多摸幾檔' : 'Max files to read'}
+          <label style="font-size:13px;color:#c9d1d9;">${zh ? '探索檔案上限' : (ja ? '最大探索ファイル数' : 'Max files to read')}
             <input id="scan-crawl-max" type="number" min="1" max="50" value="10" style="width:64px;margin-left:8px;background:#010409;border:1px solid #30363d;border-radius:6px;padding:4px 8px;color:#e6edf3;" />
-            <div style="font-size:11px;color:#8b949e;margin-top:2px;">${zh ? '大庫加碼（1–50）。批量判：每 5 檔一通 LLM，比逐檔快。' : 'Raise for big libraries (1-50). Batched: one LLM call per 5 files.'}</div>
+            <div style="font-size:11px;color:#8b949e;margin-top:2px;">${zh ? '大型儲存庫可調高（1–50）。每 5 個檔案批次呼叫一次 LLM。' : (ja ? '大規模リポジトリでは上限を増やせます（1–50）。5ファイルごとにバッチ呼出。' : 'Raise for big libraries (1-50). Batched: one LLM call per 5 files.')}</div>
           </label>
         </div>
         <div id="scan-full-opts" style="display:none;flex-direction:column;gap:8px;border:1px dashed #30363d;border-radius:8px;padding:8px 10px;">
-          <label style="font-size:13px;color:#c9d1d9;">${zh ? '最低出現次數' : 'Min occurrences'}
+          <label style="font-size:13px;color:#c9d1d9;">${zh ? '最低出現次數' : (ja ? '最小出現回数' : 'Min occurrences')}
             <input id="scan-min-tf" type="number" min="1" max="999" value="5" style="width:64px;margin-left:8px;background:#010409;border:1px solid #30363d;border-radius:6px;padding:4px 8px;color:#e6edf3;" />
-            <div style="font-size:11px;color:#8b949e;margin-top:2px;">${zh ? '全庫總共出現不到幾次就不考慮，擋偶然出現的詞。' : 'Ignore terms seen fewer times corpus-wide.'}</div>
+            <div style="font-size:11px;color:#8b949e;margin-top:2px;">${zh ? '排除全庫出現次數過低的詞彙，過濾偶發雜訊。' : (ja ? '出現頻度が低すぎる語句を除外し、ノイズを抑制します。' : 'Ignore terms seen fewer times corpus-wide.')}</div>
           </label>
-          <div style="font-size:11px;color:#8b949e;">${zh ? '檔案有改動會自動偵測並重挖（依 mtime 指紋）。' : 'File changes auto-detected via mtime fingerprint.'}</div>
+          <div style="font-size:11px;color:#8b949e;">${zh ? '檔案異動將自動偵測並重新探勘（依 mtime 指紋）。' : (ja ? 'ファイル更新は自動検知され、再発掘されます。' : 'File changes auto-detected via mtime fingerprint.')}</div>
         </div>
       </div>
     </div>
@@ -5484,12 +5537,12 @@ function conceptScanAll(btn) {
     <div id="scan-progress" style="display:none;align-items:center;gap:8px;font-size:14px;color:#58a6ff;"></div>
     <div id="scan-results" style="display:none;flex-direction:column;gap:6px;overflow-y:auto;max-height:300px;min-height:40px;border:1px solid #21262d;border-radius:8px;padding:8px;"></div>
     <div id="scan-crawl-titlebar" style="display:none;flex-direction:column;gap:6px;border:1px solid #1f6feb;border-radius:8px;padding:8px 10px;background:#0d1a2e;">
-      <div style="font-size:12px;color:#8b949e;">${zh ? '薦標題（可手改，確認後進候選池；轉正才寫檔）：' : 'Title (editable, goes to candidates; files written on promote):'}</div>
+      <div style="font-size:12px;color:#8b949e;">${zh ? '建議標題（可自訂，確認後收錄至候選池；正式發佈後寫入檔案）：' : (ja ? '推奨タイトル（編集可能・承認後に正式適用）: ' : 'Title (editable, goes to candidates; files written on promote):')}</div>
       <input id="scan-crawl-title" value="" style="background:#010409;border:1px solid #30363d;border-radius:6px;padding:6px 10px;color:#e6edf3;font-size:14px;font-weight:600;width:100%;box-sizing:border-box;" />
     </div>
     <div style="display:flex;gap:8px;align-items:center;">
-      <button onclick="document.getElementById('scan-opt-overlay').remove()" style="background:transparent;border:1px solid #30363d;color:#c9d1d9;border-radius:6px;padding:7px 14px;cursor:pointer;">${zh ? '取消' : 'Cancel'}</button>
-      <button id="scan-go-btn" onclick="conceptScanStart()" style="flex:1;background:#1f6feb;border:1px solid #388bfd;color:#fff;border-radius:6px;padding:7px 14px;cursor:pointer;font-weight:600;">${zh ? '✦ 開始掃描' : '✦ Start scan'}</button>
+      <button onclick="document.getElementById('scan-opt-overlay').remove()" style="background:transparent;border:1px solid #30363d;color:#c9d1d9;border-radius:6px;padding:7px 14px;cursor:pointer;">${zh ? '取消' : (ja ? 'キャンセル' : 'Cancel')}</button>
+      <button id="scan-go-btn" onclick="conceptScanStart()" style="flex:1;background:#1f6feb;border:1px solid #388bfd;color:#fff;border-radius:6px;padding:7px 14px;cursor:pointer;font-weight:600;">${zh ? '✦ 開始掃描' : (ja ? '✦ 探索を開始' : '✦ Start scan')}</button>
       <button id="scan-confirm-btn" onclick="conceptScanConfirm()" style="display:none;background:#238636;border:1px solid #2ea043;color:#fff;border-radius:6px;padding:7px 14px;cursor:pointer;font-weight:600;"></button>
     </div>
   </div>`;
@@ -5581,7 +5634,7 @@ function scanPaintConfirm() {
     scanDlg.mode = mode;
     scanDlg.busy = true;
     const goBtn = o.querySelector('#scan-go-btn');
-    if (goBtn) { goBtn.disabled = true; goBtn.textContent = zh ? '摸瓜中…' : 'Crawling…'; }
+    if (goBtn) { goBtn.disabled = true; goBtn.textContent = zh ? '關聯探索中…' : 'Crawling…'; }
     const prog = o.querySelector('#scan-progress');
     const resBox = o.querySelector('#scan-results');
     const t0 = Date.now();
@@ -5731,7 +5784,7 @@ function scanPaintConfirm() {
         const why = crawlUiSay(p.why) || '?';
         return zh ? `・${escapeHtml(short)}（${escapeHtml(why)}）` : `・${escapeHtml(short)} (${escapeHtml(why)})`;
       }).join('<br/>');
-      line(`<b style="color:#58a6ff;">${zh ? `✦ 為「${escapeHtml(seedText)}」摸瓜，起點 ${pickArr.length} 個（總綱選的${repoTail ? '@' + repoTail : ''}）：` : `✦ Crawling for "${escapeHtml(seedText)}" — ${pickArr.length} starts (catalog picks${repoTail ? '@' + repoTail : ''}):`}</b>${pickLines ? '<br/>' + pickLines : ''}`);
+      line(`<b style="color:#58a6ff;">${zh ? `✦ 探索「${escapeHtml(seedText)}」關聯節點，起始共 ${pickArr.length} 個（目錄選取${repoTail ? '@' + repoTail : ''}）：` : `✦ Crawling for "${escapeHtml(seedText)}" — ${pickArr.length} starts (catalog picks${repoTail ? '@' + repoTail : ''}):`}</b>${pickLines ? '<br/>' + pickLines : ''}`);
       // GC sweep runs silently — housekeeping, not user-facing news.
       snap();
       phase = zh ? '逐檔摸索中' : 'Crawling files';
@@ -5827,9 +5880,9 @@ function scanPaintConfirm() {
         // response): dry well vs all-decided vs judge-rejected.
         const minedN = d.mined || 0, judgedN = d.judged || 0;
         showToast(zh
-          ? (minedN <= 0 ? '這輪沒有新面孔（庫裡沒有頻次詞：未索引？換個庫？）'
-            : (judgedN > 0 ? `這輪沒有新面孔（LLM 看過 ${judgedN} 個，全判不收）`
-              : `這輪沒有新面孔（掃過 ${minedN} 個頻次詞，全是有主之詞：已收錄／黑名單／本輪見過）`))
+          ? (minedN <= 0 ? '本次未發現新候選詞（庫內無詞頻統計：尚未建立索引或請切換儲存庫）'
+            : (judgedN > 0 ? `本次未發現新候選詞（LLM 評審 ${judgedN} 個詞彙均未達收錄標準）`
+              : `本次未發現新候選詞（掃描 ${minedN} 個高頻詞，均已收錄、列入黑名單或已處理）`))
           : (minedN <= 0 ? 'No new faces (nothing mined — unindexed?)'
             : (judgedN > 0 ? `No new faces (LLM judged ${judgedN}, kept none)`
               : `No new faces (${minedN} mined, all decided)`)));
@@ -5869,14 +5922,14 @@ function vineConfirmGo() {
   const o = document.getElementById('scan-opt-overlay');
   if (!o || !scanDlg || scanDlg.busy) return;
   const t = (((o.querySelector('#scan-crawl-title') || {}).value) || '').trim();
-  if (!t) { showToast(zh ? '標題是空的，先打個標題再確認' : 'Title is empty — type one first'); return; }
+  if (!t) { showToast(zh ? '標題不能為空，請輸入標題後再確認' : (currentLanguage === 'ja' ? 'タイトルを入力してください' : 'Title is empty — type one first')); return; }
   const keptArr = scanDlg.vineKept || [];
   // 去留以有內文的節點列為準（md 勾只是總開關）；只送勾的 pairs。
   const pairs = [...document.querySelectorAll('#scan-results [data-vine-keep]:checked')]
     .map(cb => keptArr[parseInt(cb.getAttribute('data-vine-keep'), 10)])
     .filter(Boolean)
     .map(k => ({ term: k.term, file: k.file }));
-  if (!pairs.length) { showToast(zh ? '至少留一個，否則無需確認' : 'Keep at least one item'); return; }
+  if (!pairs.length) { showToast(zh ? '至少留一個，否則無需確認' : (currentLanguage === 'ja' ? '最低1つの項目を選択してください' : 'Keep at least one item')); return; }
   fetch('/api/crawl/confirm', {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ run_id: scanDlg.vineRun, title: t, keep: pairs })
@@ -6025,7 +6078,8 @@ function openCandidatePage(name, source, ev) {
 // Candidate draft page: official-tag-page look. Header + action bar +
 // management table (Keep | crumb | snippet | 解除 per row).
 function renderCandidatePageInViewer(p) {
-  const zh = currentLanguage === 'zh';
+  const lang = currentLanguage;
+  const zh = lang === 'zh', ja = lang === 'ja';
   const dName = document.getElementById('d-name');
   const dSub = document.getElementById('d-sub');
   const badge = document.getElementById('d-kind-badge');
@@ -6042,7 +6096,7 @@ function renderCandidatePageInViewer(p) {
       navRecord({ view: 'candidate', name: name, source: isVine ? 'vine' : 'prospect' });
     }
   } catch (e) {}
-  if (dName) dName.innerText = zh ? `🏷️ ${name}（候選審核）` : `🏷️ ${name} (Candidate)`;
+  if (dName) dName.innerText = zh ? `🏷️ ${name}（候選審核）` : (ja ? `🏷️ ${name}（候補プレビュー）` : `🏷️ ${name} (Candidate)`);
   if (dSub) dSub.innerText = `${repoTail} · ${p.groups === null ? '…' : groups.length} ${zh ? '處落點' : 'spots'} · ${zh ? '來源' : 'Source'} ${srcLabel}`;
   if (badge) {
     badge.innerText = 'CANDIDATE';
@@ -6051,21 +6105,21 @@ function renderCandidatePageInViewer(p) {
     badge.style.fontWeight = '700';
     badge.style.textShadow = '0 1px 2px rgba(0,0,0,0.7)';
   }
-  if (codeTitle) codeTitle.innerText = zh ? '🗂️ 候選底稿審核' : '🗂️ Candidate Draft Review';
+  if (codeTitle) codeTitle.innerText = zh ? '🗂️ 候選底稿審核' : (ja ? '🗂️ 候補ドラフトプレビュー' : '🗂️ Candidate Draft Review');
 
   const escName = escapeHtml(name);
   // (5) Draft-preview banner: the WHOLE page is a preview — nothing on
   // disk. Staged rows live in DB only until Promote.
-  let fullMd = `<div style="background:#0d1a2e;border:1px solid #1f6feb;border-radius:8px;padding:8px 12px;margin-bottom:10px;font-size:12px;color:#a5d6ff;">${zh ? '👁 本頁為轉正預覽 — 檔案尚未寫入任何標籤；按 ✓ 審批入典才會落檔' : '👁 Draft preview — no tags written to any file yet; they land on disk only after Promote'}</div>\n\n`;
-  fullMd += `${zh ? '分類' : 'Category'}: ${srcLabel} ｜ ${zh ? '狀態：候選（轉正才寫檔）' : 'Status: candidate (applied on promote)'}\n\n`;
+  let fullMd = `<div style="background:#0d1a2e;border:1px solid #1f6feb;border-radius:8px;padding:8px 12px;margin-bottom:10px;font-size:12px;color:#a5d6ff;">${zh ? '👁 本頁為發佈預覽 — 目前尚未寫入任何標籤；點擊「✓ 正式發佈」後才會寫入檔案' : (ja ? '👁 プレビュー表示中 — 現時点ではファイル未変更です。「✓ 承認して適用」でファイルへ書き込まれます' : '👁 Draft preview — no tags written to any file yet; they land on disk only after Promote')}</div>\n\n`;
+  fullMd += `${zh ? '分類' : (ja ? 'カテゴリ' : 'Category')}: ${srcLabel} ｜ ${zh ? '狀態：待審候選（正式發佈後寫入檔案）' : (ja ? 'ステータス：候補（承認後にファイルへ書き込み）' : 'Status: candidate (applied on promote)')}\n\n`;
   // No <hr> here: the banner above already separates, and a bare rule
   // collides with the button row below (white line on buttons).
   fullMd += `<div style="display:flex;gap:8px;flex-wrap:wrap;margin:12px 0 10px;">`
-    + `<button class="mini-btn" style="background:#238636;border-color:#2ea043;color:#fff;padding:4px 14px;font-weight:600;" onclick="promoteCandidate('${escName}')">✓ ${zh ? '審批入典' : 'Promote'}</button>`
+    + `<button class="mini-btn" style="background:#238636;border-color:#2ea043;color:#fff;padding:4px 14px;font-weight:600;" onclick="promoteCandidate('${escName}')">✓ ${zh ? '正式發佈' : (ja ? '承認して適用' : 'Promote')}</button>`
     + `<button class="mini-btn" style="background:transparent;border:1px solid #1f6feb;color:#58a6ff;padding:4px 14px;" onclick="openCardRefresh('${escName}')">↻ ${zh ? '更新' : 'Refresh'}</button>`
     + `<button class="mini-btn" style="background:#21262d;border:1px solid #30363d;color:#f85149;padding:4px 14px;" onclick="dismissCandidate('${escName}')">✕ ${zh ? '移除' : 'Remove'}</button>`
     + `</div>\n\n`;
-  fullMd += `### 🔗 ${zh ? '落點底稿（轉正才寫檔）' : 'Staged spots (applied on promote)'}\n`;
+  fullMd += `### 🔗 ${zh ? '引用預覽（正式發佈後寫入檔案）' : (ja ? 'タグ適用箇所のプレビュー' : 'Staged spots (applied on promote)')}\n`;
   if (p.loading) {
     fullMd += zh ? '\n*(讀取中…)*\n' : '\n*(Loading…)*\n';
   } else if (p.error) {
@@ -6081,7 +6135,7 @@ function renderCandidatePageInViewer(p) {
     // in a preview is a fresh confusion).
     fullMd += `<div style="position:relative;border:1px dashed #8b949e;border-radius:8px;padding:10px 12px;margin:10px 0 4px;background:rgba(139,148,158,.06);">`
       + `<span style="position:absolute;top:-9px;right:10px;background:#0d1117;border:1px solid #8b949e;border-radius:8px;font-size:10px;color:#8b949e;padding:0 8px;">${zh ? '預覽 PREVIEW' : 'PREVIEW'}</span>`
-      + `<div style="font-size:11px;color:#8b949e;margin-bottom:4px;">${zh ? '轉正後，每處落點的段標下會多出這一行：' : 'After Promote, this line lands under each spot heading:'}</div>`
+      + `<div style="font-size:11px;color:#8b949e;margin-bottom:4px;">${zh ? '正式發佈後，各段落標題下方將加入此標籤引用行：' : (ja ? '承認後、各セクションの見出し直下にこのタグ参照行が挿入されます：' : 'After Promote, this line lands under each spot heading:')}</div>`
       + `<div style="font-size:12px;color:#c9d1d9;"><code>&gt; 🏷️ ${zh ? '標籤' : 'tag'}： [${escName}](.docgraphical/tags/${escName}.md)</code></div>`
       + `</div>\n`;
     fullMd += zh ? '\n| 引用檔案路徑 | 提及段落摘要 | 操作 |\n| :--- | :--- | :--- |\n'
@@ -6103,9 +6157,9 @@ function renderCandidatePageInViewer(p) {
       } else {
         snip = zh ? '(章節內文)' : '(Section body)';
       }
-      fullMd += `| ${crumb} | ${snip} | <button class="mini-btn" style="color:#f85149; border-color:#da3633; padding:3px 12px; font-weight:600; white-space:nowrap; min-width:54px; display:inline-block;" onclick="detachCandidateRow(${gi}, event)">${zh ? '解除' : 'Unlink'}</button> |\n`;
+      fullMd += `| ${crumb} | ${snip} | <button class="mini-btn" style="color:#f85149; border-color:#da3633; padding:3px 12px; font-weight:600; white-space:nowrap; min-width:54px; display:inline-block;" onclick="detachCandidateRow(${gi}, event)">${zh ? '解除' : (ja ? '解除' : 'Unlink')}</button> |\n`;
     });
-    fullMd += `\n${zh ? '＊每處落點轉正含內文連結＋段落🏷️標籤行' : '* each spot applies inline link + section tag line on promote'}\n`;
+    fullMd += `\n${zh ? '＊正式發佈後將自動加入內文連結與段落 🏷️ 標籤行' : '* each spot applies inline link + section tag line on promote'}\n`;
   }
   viewCtx = { project: '', file: '', repo: p.repo || getActiveRepoPath(), heading: '', candidate: name };
   renderMarkdown(fullMd);
@@ -6195,8 +6249,8 @@ function openCardRefresh(term) {
       <span style="font-weight:600;font-size:15px;">${zh ? `更新「${escapeHtml(term)}」？` : `Refresh "${escapeHtml(term)}"?`}</span>
       <button onclick="document.getElementById('refresh-opt-overlay').remove()" style="background:transparent;border:none;color:#8b949e;cursor:pointer;font-size:15px;">✕</button>
     </div>
-    <button onclick="cardRefreshGo('prospect', '${escapeHtml(term)}')" title="${zh ? '重算此詞出現幾檔幾次＋補上缺少的落點，不花 LLM 錢' : 'Recount DF/TF + top up missing staged spots, no LLM cost'}" style="text-align:left;background:transparent;border:1px solid #9e6a03;color:#e3b341;border-radius:8px;padding:9px 12px;cursor:pointer;font-size:14px;">⛏ ${zh ? '探礦重算＋補落點' : 'Prospect recount + top-up'}</button>
-    <button onclick="cardRefreshGo('vine', '${escapeHtml(term)}')" title="${zh ? '以此為種子重摸一輪，新落點併入同一候選（花 LLM，不另開候選）' : 'Re-crawl seeded by this; new spots merge into THIS candidate (LLM cost, no new candidate)'}" style="text-align:left;background:transparent;border:1px solid #2ea043;color:#3fb950;border-radius:8px;padding:9px 12px;cursor:pointer;font-size:14px;">🌿 ${zh ? '順藤深挖' : 'Vine dig'}</button>
+    <button onclick="cardRefreshGo('prospect', '${escapeHtml(term)}')" title="${zh ? '重新統計詞頻並補齊缺少之引用位置（不呼叫 LLM）' : 'Recount DF/TF + top up missing staged spots, no LLM cost'}" style="text-align:left;background:transparent;border:1px solid #9e6a03;color:#e3b341;border-radius:8px;padding:9px 12px;cursor:pointer;font-size:14px;">⛏ ${zh ? '探礦重算＋補落點' : 'Prospect recount + top-up'}</button>
+    <button onclick="cardRefreshGo('vine', '${escapeHtml(term)}')" title="${zh ? '以此為起點重新進行深度關聯探索，新引用直接併入本候選（需呼叫 LLM）' : 'Re-crawl seeded by this; new spots merge into THIS candidate (LLM cost, no new candidate)'}" style="text-align:left;background:transparent;border:1px solid #2ea043;color:#3fb950;border-radius:8px;padding:9px 12px;cursor:pointer;font-size:14px;">🌿 ${zh ? '順藤深挖' : 'Vine dig'}</button>
     <button onclick="document.getElementById('refresh-opt-overlay').remove()" title="${zh ? '什麼都不做' : 'Do nothing'}" style="text-align:left;background:transparent;border:1px solid #30363d;color:#8b949e;border-radius:8px;padding:9px 12px;cursor:pointer;font-size:14px;">${zh ? '取消' : 'Cancel'}</button>
   </div>`;
   document.body.appendChild(o);
@@ -6220,7 +6274,7 @@ function cardRefreshGo(how, term) {
           const cntTxt = zh ? `「${term}」：出現${d.df || 0}檔·${d.tf || 0}次`
                             : `"${term}": ${d.df || 0} docs·${d.tf || 0} hits`;
           showToast(added > 0
-            ? (zh ? `${cntTxt}，補上 ${added} 處落點（未花 LLM）` : `${cntTxt}, +${added} spots (no LLM)`)
+            ? (zh ? `${cntTxt}，補齊 ${added} 處引用（未呼叫 LLM）` : `${cntTxt}, +${added} spots (no LLM)`)
             : (zh ? `${cntTxt}（已是最新，無新增，未花 LLM）` : `${cntTxt} (up to date, no LLM)`));
           if (typeof fetchConceptsData === 'function') fetchConceptsData();
           // If the candidate page for this term is open, re-render it so
@@ -6239,7 +6293,7 @@ function cardRefreshGo(how, term) {
   }
   // Vine: PURE refresh - re-crawl seeded by this title, fresh spots merge
   // into THIS candidate (never a new one). Costs LLM, takes minutes.
-  showToast(zh ? `🌿 深挖「${term}」中（花幾通 LLM，完成即報）`
+  showToast(zh ? `🌿 深度探索「${term}」關聯中（需呼叫 LLM，完成時通知）`
                : `🌿 Digging "${term}" (LLM calls, report on done)`);
   fetch('/api/crawl/refresh', {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -6250,9 +6304,9 @@ function cardRefreshGo(how, term) {
       if (d && d.ok) {
         const added = d.added || 0;
         showToast(added > 0
-          ? (zh ? `「${term}」：補上 ${added} 處落點（花 ${d.spent || 0} 通）`
+          ? (zh ? `「${term}」：已補上 ${added} 處引用（呼叫 LLM ${d.spent || 0} 次）`
                  : `"${term}": +${added} spots (${d.spent || 0} calls)`)
-          : (zh ? `「${term}」：無新增（花 ${d.spent || 0} 通）`
+          : (zh ? `「${term}」：無新增引用（呼叫 LLM ${d.spent || 0} 次）`
                  : `"${term}": nothing new (${d.spent || 0} calls)`));
         if (typeof fetchConceptsData === 'function') fetchConceptsData();
         try {
@@ -6305,7 +6359,7 @@ function updateConceptsI18n() {
   set('lbl-drawer-explorer-title', lang === 'zh' ? '文件瀏覽器' : (lang === 'ja' ? 'エクスプローラー' : 'EXPLORER'));
   set('lbl-drawer-concepts-title', lang === 'zh' ? '概念標籤管理' : (lang === 'ja' ? 'コンセプト管理' : 'CONCEPTS REGISTRY'));
   set('btn-add-concept', lang === 'zh' ? '+ 新增' : (lang === 'ja' ? '+ 追加' : '+ New'));
-  setAttr('btn-add-concept', 'title', lang === 'zh' ? '手動定立新正式概念' : (lang === 'ja' ? '新しい公式コンセプトを登録' : 'Define New Official Concept'));
+  setAttr('btn-add-concept', 'title', lang === 'zh' ? '手動建立新正式概念' : (lang === 'ja' ? '新しい公式コンセプトを登録' : 'Define New Official Concept'));
 
   // Search input placeholder
   const cptSearch = document.getElementById('concept-search');
@@ -6320,7 +6374,7 @@ function updateConceptsI18n() {
   const countBlack = document.getElementById('count-cpt-blacklist')?.innerText || '0';
 
   const txtOff = lang === 'zh' ? '正式概念' : (lang === 'ja' ? '公式コンセプト' : 'Official');
-  const txtCand = lang === 'zh' ? '待審候選' : (lang === 'ja' ? '審査待ち候補' : 'Candidates');
+  const txtCand = lang === 'zh' ? '待審候選' : (lang === 'ja' ? '候補一覧' : 'Candidates');
   const txtBlack = lang === 'zh' ? '黑名單' : (lang === 'ja' ? 'ブラックリスト' : 'Blacklist');
 
   if (btnOfficial) btnOfficial.innerHTML = `${txtOff} (<span id="count-cpt-official">${countOff}</span>)`;
@@ -6329,7 +6383,7 @@ function updateConceptsI18n() {
 
   // Discover button + clear-filter (both hardcoded in template HTML)
   set('btn-scan-concept', lang === 'zh' ? '🔍 發掘' : (lang === 'ja' ? '🔍 発掘' : '🔍 Discover'));
-  setAttr('btn-scan-concept', 'title', lang === 'zh' ? '全庫挖礦＋LLM評審，新候選入池' : (lang === 'ja' ? '全ライブラリ発掘＋LLM審査、新候補をプール' : 'Mine corpus + LLM review; new candidates staged'));
+  setAttr('btn-scan-concept', 'title', lang === 'zh' ? '全庫探勘與 LLM 評審，發掘新候選概念' : (lang === 'ja' ? 'ライブラリ全体から候補概念を抽出・登録' : 'Mine corpus + LLM review; new candidates staged'));
   setAttr('btn-clear-cpt-filter', 'title', lang === 'zh' ? '清除篩選' : (lang === 'ja' ? 'フィルタをクリア' : 'Clear filter'));
 
   // Re-render list with updated language
@@ -6457,17 +6511,17 @@ function updateSettingsModalI18n() {
 
   // Settings Top & Nav
   set('lbl-settings-main-title', lang === 'zh' ? '系統偏好與設定' : (lang === 'ja' ? 'システム設定と基本設定' : 'Preferences & Settings'));
-  set('stg-lbl-repo', lang === 'zh' ? '倉庫管理' : (lang === 'ja' ? 'リポジトリ管理' : 'Repositories'));
+  set('stg-lbl-repo', lang === 'zh' ? '專案儲存庫管理' : (lang === 'ja' ? 'リポジトリ管理' : 'Repositories'));
   set('stg-lbl-lang', lang === 'zh' ? '語系設定' : (lang === 'ja' ? '言語設定' : 'Language'));
   set('stg-lbl-llm', lang === 'zh' ? 'LLM 供應商' : (lang === 'ja' ? 'LLM プロバイダー' : 'LLM Providers'));
 
   // Repo Page
-  set('lbl-modal-title', lang === 'zh' ? '倉庫管理' : (lang === 'ja' ? 'リポジトリ管理' : 'Repository Management'));
+  set('lbl-modal-title', lang === 'zh' ? '專案儲存庫管理' : (lang === 'ja' ? 'リポジトリ管理' : 'Repository Management'));
   set('lbl-modal-sub', lang === 'zh' ? '掃描本機專案目錄，構建索引 (init)、增量同步 (sync)、全量重建 (index) 或反初始化 (uninit)。'
                      : (lang === 'ja' ? 'ローカルプロジェクトをスキャンし、インデックス構築(init)、増分同期(sync)、完全再構築(index)を行います。'
                      : 'Scan local project directories, build index (init), incremental sync (sync), full rebuild (index), or uninitialize (uninit).'));
   set('lbl-add-dir', lang === 'zh' ? '掃描專案目錄：' : (lang === 'ja' ? 'プロジェクトディレクトリをスキャン：' : 'Scan Project Directory:'));
-  set('lbl-repo-list', lang === 'zh' ? '已發現的倉庫：' : (lang === 'ja' ? '検出されたリポジトリ：' : 'Discovered Repositories:'));
+  set('lbl-repo-list', lang === 'zh' ? '已發現的專案儲存庫：' : (lang === 'ja' ? '検出されたリポジトリ：' : 'Discovered Repositories:'));
   set('btn-sync-all', lang === 'zh' ? '⚡ 全部同步' : (lang === 'ja' ? '⚡ すべて同期' : '⚡ Sync all'));
   set('btn-sync-all-tree', lang === 'zh' ? '⚡ 全部同步' : (lang === 'ja' ? '⚡ すべて同期' : '⚡ Sync all'));
 
@@ -6572,9 +6626,29 @@ function navPaint() {
   try {
     const pv = document.getElementById('btn-prev-node');
     const nx = document.getElementById('btn-next-node');
-    const canBack = navIdx > 0, canFwd = navIdx >= 0 && navIdx < navHist.length - 1;
+    const canBack = navIdx > 0, canFwd = navIdx >= 0 && navHist.length > 0 && navIdx < navHist.length - 1;
     if (pv) { pv.disabled = !canBack; pv.style.opacity = canBack ? '' : '0.4'; }
     if (nx) { nx.disabled = !canFwd; nx.style.opacity = canFwd ? '' : '0.4'; }
+  } catch (e) {}
+}
+// Viewer back/forward button labels + tooltips (called from applyAppLanguage).
+function updateViewerNavI18n() {
+  try {
+    const lang = (typeof currentLanguage !== 'undefined') ? currentLanguage : 'en';
+    const zh = lang === 'zh', ja = lang === 'ja';
+    const pv = document.getElementById('btn-prev-node');
+    const nx = document.getElementById('btn-next-node');
+    if (pv) {
+      pv.textContent = zh ? '‹ 上一頁' : (ja ? '‹ 前へ' : '‹ Prev');
+      pv.title = zh ? '回到上一個檢視（文件／段落／標籤／底稿）'
+                    : (ja ? '前の表示に戻る（ドキュメント／見出し／タグ／候補）'
+                          : 'Back to the previous view (document / section / tag / draft)');
+    }
+    if (nx) {
+      nx.textContent = zh ? '下一頁 ›' : (ja ? '次へ ›' : 'Next ›');
+      nx.title = zh ? '前進到下一個檢視'
+                    : (ja ? '次の表示へ進む' : 'Forward to the next view');
+    }
   } catch (e) {}
 }
 // Heading crumb (green › segment): open the SECTION, not the file top.
@@ -6694,7 +6768,7 @@ window.openConceptActionModal = function(mode, data = {}) {
 
   if (mode === 'add') {
     if (titleEl) titleEl.textContent = zh ? '✨ 定義正式概念' : (ja ? '✨ 公式コンセプトの定義' : '✨ Define Official Concept');
-    if (descEl) descEl.textContent = zh ? '定立知識庫官方核心概念詞彙，並可設定其分類與多重別名。' : (ja ? '知識ベースの公式コア概念を定義し、カテゴリと別名を設定します。' : 'Define an official knowledge concept with category and aliases.');
+    if (descEl) descEl.textContent = zh ? '定義知識庫核心概念詞彙，並可設定其分類與多重別名。' : (ja ? '知識ベースの公式コア概念を定義し、カテゴリと別名を設定します。' : 'Define an official knowledge concept with category and aliases.');
     if (submitBtn) submitBtn.textContent = zh ? '建立概念' : (ja ? '作成' : 'Create Concept');
 
     if (fieldCat) fieldCat.style.display = 'block';
@@ -6888,7 +6962,7 @@ window.deleteConcept = function(conceptName, event) {
       })
       .then(({ status, ok, data }) => {
         if (ok && data && data.ok) {
-          showToast(zh ? `🗑️ 已徹底刪除概念標籤「${conceptName}」！` : (ja ? `🗑️ コンセプト「${conceptName}」を削除しました！` : `🗑️ Deleted concept '${conceptName}'!`));
+          showToast(zh ? `🗑️ 已徹底刪除概念標籤「${conceptName}」！` : (ja ? `🗑️ 概念タグ「${conceptName}」を削除しました！` : `🗑️ Deleted concept '${conceptName}'!`));
           fetchConceptsData();
           loadMasterGraphAndFilter();
           setTimeout(() => {

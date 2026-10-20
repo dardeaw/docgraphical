@@ -501,7 +501,7 @@ function openBrowsePickerInner() {
     browseDirectoryNative();
     return;
   }
-  const zh = (typeof currentLanguage !== 'undefined' && currentLanguage === 'zh');
+  const lang = (typeof currentLanguage !== 'undefined') ? currentLanguage : 'en'; const zh = lang === 'zh', ja = lang === 'ja';
   closeBrowsePicker();
   const inp = document.getElementById('txt-scan-dir') || document.getElementById('custom-path-input');
   browseCur = (inp && inp.value.trim()) || '';
@@ -512,17 +512,17 @@ function openBrowsePickerInner() {
   o.innerHTML = `
   <div style="width:560px;max-width:92vw;max-height:80vh;display:flex;flex-direction:column;background:#0d1117;border:1px solid #30363d;border-radius:12px;padding:14px;color:#e6edf3;zoom:1.16;">
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
-      <span style="font-weight:600;font-size:14px;">${zh ? '📁 選擇目錄' : '📁 Choose directory'}</span>
+      <span style="font-weight:600;font-size:14px;">${zh ? '📁 選擇目錄' : (ja ? '📁 ディレクトリを選択' : '📁 Choose directory')}</span>
       <button onclick="closeBrowsePicker()" style="background:transparent;border:none;color:#8b949e;cursor:pointer;font-size:14px;">✕</button>
     </div>
     <div id="browse-crumb" style="font-size:11px;color:#8b949e;margin-bottom:4px;word-break:break-all;"></div>
     <div id="browse-sel" style="font-size:11px;color:#58a6ff;margin-bottom:8px;word-break:break-all;min-height:14px;"></div>
     <div id="browse-list" style="flex:1;overflow-y:auto;border:1px solid #21262d;border-radius:8px;min-height:200px;max-height:46vh;"></div>
     <div style="display:flex;gap:8px;justify-content:space-between;margin-top:10px;">
-      <button id="browse-newfolder" onclick="browseNewFolder()" title="Create a folder inside the current directory" style="background:transparent;border:1px solid #238636;color:#3fb950;border-radius:6px;padding:7px 14px;cursor:pointer;">${zh ? '➕ 新資料夾' : '➕ New folder'}</button>
+      <button id="browse-newfolder" onclick="browseNewFolder()" title="Create a folder inside the current directory" style="background:transparent;border:1px solid #238636;color:#3fb950;border-radius:6px;padding:7px 14px;cursor:pointer;">${zh ? '➕ 新資料夾' : (ja ? '➕ 新規フォルダ' : '➕ New folder')}</button>
       <div style="display:flex;gap:8px;">
-        <button onclick="closeBrowsePicker()" style="background:transparent;border:1px solid #30363d;color:#c9d1d9;border-radius:6px;padding:7px 14px;cursor:pointer;">${zh ? '取消' : 'Cancel'}</button>
-        <button onclick="confirmBrowsePick()" style="background:#1f6feb;border:1px solid #388bfd;color:#fff;border-radius:6px;padding:7px 14px;cursor:pointer;font-weight:600;">${zh ? '✅ 用此目錄' : '✅ Use this folder'}</button>
+        <button onclick="closeBrowsePicker()" style="background:transparent;border:1px solid #30363d;color:#c9d1d9;border-radius:6px;padding:7px 14px;cursor:pointer;">${zh ? '取消' : (ja ? 'キャンセル' : 'Cancel')}</button>
+        <button onclick="confirmBrowsePick()" style="background:#1f6feb;border:1px solid #388bfd;color:#fff;border-radius:6px;padding:7px 14px;cursor:pointer;font-weight:600;">${zh ? '✅ 用此目錄' : (ja ? '✅ このディレクトリを使用' : '✅ Use this folder')}</button>
       </div>
     </div>
   </div>`;
@@ -531,7 +531,7 @@ function openBrowsePickerInner() {
   browseGo(browseCur);
 }
 function browseGo(path) {
-  const zh = (typeof currentLanguage !== 'undefined' && currentLanguage === 'zh');
+  const lang = (typeof currentLanguage !== 'undefined') ? currentLanguage : 'en'; const zh = lang === 'zh', ja = lang === 'ja';
   const list = document.getElementById('browse-list');
   const crumb = document.getElementById('browse-crumb');
   // Stash any in-progress new-folder draft: the refresh below wipes #browse-list.
@@ -547,7 +547,7 @@ function browseGo(path) {
     .then(d => {
       if (!list) return;
       browseCur = d.current || '';
-      if (crumb) crumb.textContent = browseCur || (zh ? '選擇磁碟機' : 'Pick a drive');
+      if (crumb) crumb.textContent = browseCur || (zh ? '選擇磁碟機' : (ja ? 'ドライブを選択' : 'Pick a drive'));
       list.innerHTML = '';
       const paintSelLine = () => {
         const sel = document.getElementById('browse-sel');
@@ -580,7 +580,7 @@ function browseGo(path) {
         if (hasDocs) {
           const tag = document.createElement('span');
           tag.style.cssText = 'font-size:10px;color:#3fb950;border:1px solid #238636;border-radius:4px;padding:1px 6px;white-space:nowrap;';
-          tag.textContent = zh ? '含文件' : 'has docs';
+          tag.textContent = zh ? '含文件' : (ja ? '文書あり' : 'has docs');
           row.appendChild(tag);
         }
         row.onclick = () => selectRow(row, go);
@@ -591,11 +591,11 @@ function browseGo(path) {
       (d.drives || []).forEach(dv => mkRow(`💽 ${dv}`, dv, dv, false, false));
       if (d.home) mkRow(`🏠 ${d.home}`, d.home, d.home, false, false);
       if (d.current && d.parent && d.parent !== d.current) {
-        mkRow(zh ? '⬆ 上一層' : '⬆ Up one level', d.parent, d.parent, true, false);
+        mkRow(zh ? '⬆ 上一層' : (ja ? '⬆ 1つ上の階層へ' : '⬆ Up one level'), d.parent, d.parent, true, false);
       }
       (d.dirs || []).forEach(x => mkRow(x.name, x.path, x.path, false, x.has_docs));
       if (!(d.drives || []).length && !d.home && !(d.dirs || []).length && !d.parent) {
-        list.innerHTML = `<div style="padding:12px;color:#8b949e;font-size:12px;">${zh ? '（空目錄）' : '(empty)'}${d.error ? ' — ' + ((typeof escapeHtml === 'function') ? escapeHtml(d.error) : d.error) : ''}</div>`;
+        list.innerHTML = `<div style="padding:12px;color:#8b949e;font-size:12px;">${zh ? '（空目錄）' : (ja ? '（空のディレクトリ）' : '(empty)')}${d.error ? ' — ' + ((typeof escapeHtml === 'function') ? escapeHtml(d.error) : d.error) : ''}</div>`;
       }
       // Restore an in-progress new-folder draft wiped by this refresh (same dir only).
       if (browseDraftName !== null && browseCur && browseDraftParent === browseCur
@@ -616,7 +616,7 @@ function browseToast(m) {
 }
 // New folder inside the CURRENT directory (requires an entered dir, not a drive).
 function browseNewFolder() {
-  const zh = (typeof currentLanguage !== 'undefined' && currentLanguage === 'zh');
+  const lang = (typeof currentLanguage !== 'undefined') ? currentLanguage : 'en'; const zh = lang === 'zh', ja = lang === 'ja';
   if (!browseCur) {
     browseToast(zh ? '❌ 請先進入一個目錄，再建立新資料夾' : '❌ Enter a directory first');
     return;
@@ -626,7 +626,7 @@ function browseNewFolder() {
 // Inline new-folder input row. Re-entrant: browseGo() restores it after a
 // listing refresh, so a pending refresh can never silently eat the user's input.
 function openNewFolderRow(initial) {
-  const zh = (typeof currentLanguage !== 'undefined' && currentLanguage === 'zh');
+  const lang = (typeof currentLanguage !== 'undefined') ? currentLanguage : 'en'; const zh = lang === 'zh', ja = lang === 'ja';
   const list = document.getElementById('browse-list');
   if (!list) return;
   if (document.getElementById('browse-newfolder-row')) {
@@ -641,7 +641,7 @@ function openNewFolderRow(initial) {
     <input id="browse-newfolder-name" placeholder="${zh ? '資料夾名稱…' : 'Folder name…'}"
       style="flex:1;min-width:0;background:#010409;border:1px solid #30363d;border-radius:6px;padding:5px 8px;color:#e6edf3;font-size:13px;" />
     <button id="browse-newfolder-ok" style="background:#238636;border:1px solid #2ea043;color:#fff;border-radius:6px;padding:5px 12px;cursor:pointer;">${zh ? '建立' : 'Create'}</button>
-    <button onclick="browseDraftName=null;var r=document.getElementById('browse-newfolder-row'); if(r) r.remove();" style="background:transparent;border:1px solid #30363d;color:#c9d1d9;border-radius:6px;padding:5px 10px;cursor:pointer;">${zh ? '取消' : 'Cancel'}</button>`;
+    <button onclick="browseDraftName=null;var r=document.getElementById('browse-newfolder-row'); if(r) r.remove();" style="background:transparent;border:1px solid #30363d;color:#c9d1d9;border-radius:6px;padding:5px 10px;cursor:pointer;">${zh ? '取消' : (ja ? 'キャンセル' : 'Cancel')}</button>`;
   list.appendChild(row);
   row.scrollIntoView({ block: 'nearest' });
   const inp = row.querySelector('input');
@@ -681,10 +681,10 @@ function openNewFolderRow(initial) {
   inp.onkeydown = (e) => { if (e.key === 'Enter') doCreate(); };
 }
 function confirmBrowsePick() {
-  const zh = (typeof currentLanguage !== 'undefined' && currentLanguage === 'zh');
+  const lang = (typeof currentLanguage !== 'undefined') ? currentLanguage : 'en'; const zh = lang === 'zh', ja = lang === 'ja';
   const pick = browseSel || browseCur;
   if (!pick) {
-    browseToast(zh ? '❌ 請先點選一個目錄' : '❌ Click a directory first');
+    browseToast(zh ? '❌ 請先點選一個目錄' : (ja ? '❌ 先にディレクトリを選択してください' : '❌ Click a directory first'));
     return;
   }
   const inp = document.getElementById('txt-scan-dir') || document.getElementById('custom-path-input');
@@ -692,7 +692,7 @@ function confirmBrowsePick() {
   closeBrowsePicker();
 }
 </script>
-<script src="/static/docgraph.js?v=5.9.99"></script>
+<script src="/static/docgraph.js?v=6.0.0"></script>
 
 <!-- Sleek In-App Concepts Action Modal (No ugly browser prompts!) -->
 <div id="concept-action-modal" class="modal-overlay" style="display:none; position:fixed; top:0; left:0; width:100vw; height:100vh; background:rgba(0,0,0,0.75); z-index:9999; align-items:center; justify-content:center; backdrop-filter:blur(3px);">
@@ -709,7 +709,7 @@ function confirmBrowsePick() {
       
       <!-- Action Hint / Description -->
       <div id="cpt-modal-desc" style="font-size:12px; color:#8b949e; line-height:1.4;">
-        定立知識庫官方核心概念詞彙，並可設定其分類與多重別名。
+        定義知識庫核心概念詞彙，並可設定其分類與多重別名。
       </div>
 
       <!-- Category Select / Input -->
