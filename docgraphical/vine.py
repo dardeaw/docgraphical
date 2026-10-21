@@ -483,6 +483,14 @@ def FnVineGuide(messages, max_tokens=None):
         "model": tgt["model"],
         "messages": messages,
     }
+    # Reasoning off (measured): the default effort burns the ENTIRE
+    # completion budget on reasoning tokens before emitting a line
+    # (probe: out=300/reasoning=300/finish=length -> empty reply); low
+    # still rambles. Vine's judge is copy-and-pick work, zero thinking
+    # needed: none => reasoning=0, correct output, ~4x faster per call.
+    # Non-reasoning endpoints that reject the param get one retry with
+    # it stripped (same insurance pattern as max_completion_tokens).
+    body["reasoning_effort"] = "none"
     if max_tokens:
         # gpt-5 series: legacy max_tokens -> 400. Cap here bounds decode
         # time (prefill is fast; a rambling multi-K-token reply is not).
@@ -499,6 +507,19 @@ def FnVineGuide(messages, max_tokens=None):
     # skips the batch and moves on instead of dying with it.
     hr = FnPostJsonHardTimeout(tgt["base"] + "/chat/completions",
                                payload, headers, total_secs=150)
+    if not hr.get("ok") and "reasoning_effort" in body:
+        # Endpoint may not know the param (400/unknown-field). Strip and
+        # retry once so old providers keep working exactly as before.
+        try:
+            import json as _json
+            _b = _json.loads(payload.decode("utf-8"))
+            if isinstance(_b, dict) and "reasoning_effort" in _b:
+                del _b["reasoning_effort"]
+                payload = _json.dumps(_b).encode("utf-8")
+                hr = FnPostJsonHardTimeout(tgt["base"] + "/chat/completions",
+                                           payload, headers, total_secs=150)
+        except Exception:
+            pass
     if not hr.get("ok"):
         return {"ok": False, "error": hr.get("error") or "LLM call failed"}
     try:

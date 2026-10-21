@@ -263,6 +263,12 @@ def FnJudgeTerms(cands, official_names):
         # (prefill is fast, a rambling reply is not). Truncated JSON fails
         # closed (inserts nothing), so keep the cap generous.
         "max_completion_tokens": 2000,
+        # Reasoning off (measured on vine's identical judge workload):
+        # default effort burns the whole completion budget thinking
+        # (out=300/reasoning=300/finish=length -> empty); this curation
+        # task needs zero thinking. Strip-retry below covers endpoints
+        # that reject the param.
+        "reasoning_effort": "none",
     }).encode("utf-8")
     headers = {"Content-Type": "application/json"}
     if tgt.get("key"):
@@ -271,6 +277,17 @@ def FnJudgeTerms(cands, official_names):
     # fires on a degraded endpoint, so bound the whole call at 150s.
     hr = FnPostJsonHardTimeout(tgt["base"] + "/chat/completions",
                                payload, headers, total_secs=150)
+    if not hr.get("ok"):
+        # Endpoint may not know reasoning_effort: strip and retry once.
+        try:
+            _b = json.loads(payload.decode("utf-8"))
+            if isinstance(_b, dict) and "reasoning_effort" in _b:
+                del _b["reasoning_effort"]
+                hr = FnPostJsonHardTimeout(
+                    tgt["base"] + "/chat/completions",
+                    json.dumps(_b).encode("utf-8"), headers, total_secs=150)
+        except Exception:
+            pass
     if not hr.get("ok"):
         return {"ok": False, "error": hr.get("error") or "LLM call failed"}
     try:

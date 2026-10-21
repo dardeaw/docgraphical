@@ -4696,6 +4696,7 @@ function renderConceptsDrawerList(filterKw = '') {
   const container = document.getElementById('concepts-list-container');
   if (!container) return;
   const zh = currentLanguage === 'zh';
+  const ja = currentLanguage === 'ja';
   const kw = (filterKw || '').trim().toLowerCase();
 
   const countOfficialEl = document.getElementById('count-cpt-official');
@@ -5052,6 +5053,7 @@ function unlinkConcept(conceptName, filePath, event) {
     event.preventDefault();
   }
   const zh = currentLanguage === 'zh';
+  const ja = currentLanguage === 'ja';
   const repo = getActiveRepoPath();
 
   const title = zh ? '⚠ 解除概念標籤關聯確認' : '⚠ Unlink Concept Confirmation';
@@ -5491,6 +5493,7 @@ function crawlUiSay(s) {
 let scanDlg = null;
 function conceptScanAll(btn) {
   const zh = (typeof currentLanguage !== 'undefined' && currentLanguage === 'zh');
+  const ja = (typeof currentLanguage !== 'undefined' && currentLanguage === 'ja');
   if (document.getElementById('scan-opt-overlay')) return;
   scanDlg = { mode: 'full', maxNew: 3, minTf: 5, items: [], busy: false, dug: 0 };
   const o = document.createElement('div');
@@ -6858,6 +6861,7 @@ window.submitConceptActionModal = function() {
   if (!currentConceptActionState) return;
   const { mode, data } = currentConceptActionState;
   const zh = currentLanguage === 'zh';
+  const ja = currentLanguage === 'ja';
   const repo = getActiveRepoPath();
 
   if (mode === 'add' || mode === 'edit' || mode === 'promote') {
