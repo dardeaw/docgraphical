@@ -1086,6 +1086,7 @@ function buildProjectTree() {
       else selectedProjects.delete(projName);
       persistSelectedProjects();
       filterGraphBySelectedProjects(false);
+      if (typeof syncScanScopeIfOpen === 'function') syncScanScopeIfOpen();
     };
 
     const arrow = projNodeEl.querySelector('.tree-arrow');
@@ -1675,6 +1676,7 @@ function selectAllProjects(val) {
   document.querySelectorAll('#tree-container input[type="checkbox"]').forEach(cb => cb.checked = val);
   persistSelectedProjects();
   filterGraphBySelectedProjects(false);
+  if (typeof syncScanScopeIfOpen === 'function') syncScanScopeIfOpen();
 }
 
 // ─── 5. Center Doc Stage & Right Links Updates ────────────────────
@@ -3206,6 +3208,7 @@ function focusOnlyProject(projName) {
   selectedProjects.add(projName);
   persistSelectedProjects();
   loadProjects({ preserve: true });
+  if (typeof syncScanScopeIfOpen === 'function') syncScanScopeIfOpen();
   showToast(zh ? `🎯 只看：${projName}` : `🎯 Focus only: ${projName}`);
 }
 function focusGraphNodeById(id) {
@@ -5491,16 +5494,17 @@ function crawlUiSay(s) {
 // State machine in ONE overlay (fixed 480px, grows DOWNWARD, list scrolls
 // internally). dry_run proposes; NOTHING is written until Confirm.
 let scanDlg = null;
-// Read-only scope preview inside the scan dialog: every repo with its .md
-// files (indexed from graph nodes + pending from disk), the ACTIVE repo
-// marked as the scan target (the scan is pinned to it). No actions here —
-// the user just confirms what will be scanned before pressing Start.
+// Scan-scope panel inside the dialog: every repo with its .md files
+// (indexed from graph nodes + pending from disk). Repo rows are CHECKBOXES
+// bound to the shared selectedProjects set — the same state the outer
+// Explorer tree uses — so dialog and Explorer always agree, and the checked
+// repos are exactly what a Prospect scan covers (Vine stays single-repo:
+// the first checked repo).
 function renderScanScopeBox() {
   const box = document.getElementById('scan-scope-box');
   if (!box) return;
   const lang = (typeof currentLanguage !== 'undefined') ? currentLanguage : 'en';
   const zh = lang === 'zh', ja = lang === 'ja';
-  const activeRepo = (typeof getActiveRepoPath === 'function') ? getActiveRepoPath() : '';
   const projs = (typeof allProjectsList !== 'undefined' && allProjectsList) ? allProjectsList : [];
   if (!projs.length) {
     box.innerHTML = `<div style="font-size:11px;color:#8b949e;">${zh ? '（無專案）' : (ja ? '（プロジェクトなし）' : '(no projects)')}</div>`;
@@ -5522,19 +5526,17 @@ function renderScanScopeBox() {
   });
   let h = '';
   projs.forEach(p => {
-    const isActive = !!(p.path && p.path === activeRepo);
+    const isOn = (typeof selectedProjects !== 'undefined') && selectedProjects.has(p.name);
     const mdSet = mdByProj[p.name] || {};
     const extra = (p.pending_files && p.pending_files.length) ? p.pending_files : (p.unindexed_files || []);
     const pendingMd = extra.filter(r => (r || '').toLowerCase().endsWith('.md') && !mdSet[r]);
     const indexedMd = Object.keys(mdSet).sort();
     const total = indexedMd.length + pendingMd.length;
-    h += `<div style="border:1px solid ${isActive ? '#1f6feb' : '#21262d'};border-radius:8px;padding:8px;background:${isActive ? '#0d1a2e' : '#161b22'};">`;
-    h += `<div style="display:flex;align-items:center;gap:6px;font-size:12px;font-weight:600;color:${isActive ? '#58a6ff' : '#c9d1d9'};">`
-       + `${isActive ? '🎯 ' : '📁 '}${escapeHtml(p.name)}`
-       + `<span style="margin-left:auto;font-size:11px;color:#8b949e;font-weight:400;">${total} ${zh ? '個 md' : (ja ? '件のmd' : 'md')}</span></div>`;
-    if (isActive) {
-      h += `<div style="font-size:10px;color:#58a6ff;margin-top:2px;">${zh ? '本次掃描目標' : (ja ? '今回のスキャン対象' : 'Scan target')}</div>`;
-    }
+    h += `<div style="border:1px solid ${isOn ? '#1f6feb' : '#21262d'};border-radius:8px;padding:8px;background:${isOn ? '#0d1a2e' : '#161b22'};">`;
+    h += `<label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:12px;font-weight:600;color:${isOn ? '#58a6ff' : '#c9d1d9'};">`
+       + `<input type="checkbox" data-scope-proj="${escapeHtml(p.name)}" ${isOn ? 'checked' : ''} onchange="scanScopeToggle(this)" style="margin:0;flex-shrink:0;cursor:pointer;" />`
+       + `<span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escapeHtml(p.name)}</span>`
+       + `<span style="margin-left:auto;font-size:11px;color:#8b949e;font-weight:400;flex-shrink:0;">${total} ${zh ? '個 md' : (ja ? '件のmd' : 'md')}</span></label>`;
     if (!total) {
       h += `<div style="font-size:11px;color:#8b949e;margin-top:4px;">${zh ? '（無 .md 檔案）' : (ja ? '（.md ファイルなし）' : '(no .md files)')}</div>`;
     } else {
@@ -5550,6 +5552,35 @@ function renderScanScopeBox() {
     h += `</div>`;
   });
   box.innerHTML = h;
+}
+// Dialog repo checkbox -> shared selectedProjects (the outer Explorer's
+// state), then re-filter so the outer tree mirrors the change.
+function scanScopeToggle(cb) {
+  const name = cb.getAttribute('data-scope-proj');
+  if (!name) return;
+  if (cb.checked) selectedProjects.add(name);
+  else selectedProjects.delete(name);
+  persistSelectedProjects();
+  if (typeof filterGraphBySelectedProjects === 'function') filterGraphBySelectedProjects(false);
+  const summaryEl = document.getElementById('lbl-proj-summary');
+  if (summaryEl) summaryEl.innerText = `${selectedProjects.size} Active`;
+  renderScanScopeBox();
+}
+// Dialog 全選/全不選: same semantics as the Explorer's Select All / Deselect.
+function scanScopeSetAll(val) {
+  (allProjectsList || []).forEach(p => {
+    if (val) selectedProjects.add(p.name);
+    else selectedProjects.delete(p.name);
+  });
+  document.querySelectorAll('#tree-container input[type="checkbox"]').forEach(cb => cb.checked = val);
+  persistSelectedProjects();
+  const summaryEl = document.getElementById('lbl-proj-summary');
+  if (summaryEl) summaryEl.innerText = `${selectedProjects.size} Active`;
+  renderScanScopeBox();
+}
+// Outer Explorer mutated the selection while the dialog is open -> refresh it.
+function syncScanScopeIfOpen() {
+  if (document.getElementById('scan-scope-box')) renderScanScopeBox();
 }
 function conceptScanAll(btn) {
   const zh = (typeof currentLanguage !== 'undefined' && currentLanguage === 'zh');
@@ -5567,7 +5598,14 @@ function conceptScanAll(btn) {
     </div>
     <div style="display:flex;gap:12px;flex:1;min-height:0;align-items:stretch;">
       <div style="width:300px;flex-shrink:0;display:flex;flex-direction:column;gap:6px;border:1px solid #21262d;border-radius:8px;padding:10px;max-height:64vh;overflow-y:auto;">
-        <div style="font-size:12px;font-weight:600;color:#c9d1d9;">${zh ? '📂 掃描範圍（僅列 .md）' : (ja ? '📂 スキャン範囲（.md のみ）' : '📂 Scan scope (.md only)')}</div>
+        <div style="display:flex;align-items:center;gap:6px;">
+          <span style="font-size:12px;font-weight:600;color:#c9d1d9;">${zh ? '📂 掃描範圍' : (ja ? '📂 スキャン範囲' : '📂 Scan scope')}</span>
+          <span style="margin-left:auto;display:flex;gap:4px;">
+            <button onclick="scanScopeSetAll(true)" style="background:transparent;border:1px solid #30363d;color:#8b949e;border-radius:4px;padding:1px 6px;font-size:10px;cursor:pointer;">${zh ? '全選' : (ja ? '全選択' : 'All')}</button>
+            <button onclick="scanScopeSetAll(false)" style="background:transparent;border:1px solid #30363d;color:#8b949e;border-radius:4px;padding:1px 6px;font-size:10px;cursor:pointer;">${zh ? '全不選' : (ja ? '全解除' : 'None')}</button>
+          </span>
+        </div>
+        <div style="font-size:10px;color:#8b949e;">${zh ? '勾選 = 本次掃描範圍，與左側 Explorer 同步（僅列 .md）' : (ja ? 'チェック = 今回のスキャン範囲（左のExplorerと同期・.md のみ）' : 'Checked = scan scope, synced with the Explorer (.md only)')}</div>
         <div id="scan-scope-box" style="display:flex;flex-direction:column;gap:6px;"></div>
       </div>
       <div style="flex:1;min-width:0;display:flex;flex-direction:column;gap:10px;">
@@ -5926,11 +5964,12 @@ function scanPaintConfirm() {
   const seen = scanDlg.items.map(e => e.term);
   fetch('/api/concepts/scan', {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
-    // Pin the ACTIVE repo (like Vine does): without it the server fans out
-    // to every library while budget=1 is shared, and the top slot may go
-    // to some other repo's term — or nowhere useful.
+    // Scope = the CHECKED repos (shared selectedProjects, same as the
+    // Explorer tree + the dialog's scope panel). Empty selection falls
+    // back to the active repo; the server fans out over the comma list
+    // with the shared budget.
     body: JSON.stringify({ mode, max_new: maxNew, min_tf: minTf, dry_run: true, exclude: seen,
-      repo: (typeof getActiveRepoPath === 'function') ? getActiveRepoPath() : '' })
+      repo: (typeof getActiveReposParam === 'function') ? getActiveReposParam() : '' })
   })
     .then(r => r.json())
     .then(d => {
