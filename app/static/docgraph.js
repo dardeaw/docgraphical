@@ -5491,6 +5491,66 @@ function crawlUiSay(s) {
 // State machine in ONE overlay (fixed 480px, grows DOWNWARD, list scrolls
 // internally). dry_run proposes; NOTHING is written until Confirm.
 let scanDlg = null;
+// Read-only scope preview inside the scan dialog: every repo with its .md
+// files (indexed from graph nodes + pending from disk), the ACTIVE repo
+// marked as the scan target (the scan is pinned to it). No actions here —
+// the user just confirms what will be scanned before pressing Start.
+function renderScanScopeBox() {
+  const box = document.getElementById('scan-scope-box');
+  if (!box) return;
+  const lang = (typeof currentLanguage !== 'undefined') ? currentLanguage : 'en';
+  const zh = lang === 'zh', ja = lang === 'ja';
+  const activeRepo = (typeof getActiveRepoPath === 'function') ? getActiveRepoPath() : '';
+  const projs = (typeof allProjectsList !== 'undefined' && allProjectsList) ? allProjectsList : [];
+  if (!projs.length) {
+    box.innerHTML = `<div style="font-size:11px;color:#8b949e;">${zh ? '（無專案）' : (ja ? '（プロジェクトなし）' : '(no projects)')}</div>`;
+    return;
+  }
+  // Indexed md files per project, from the same graph data the explorer tree uses.
+  const sourceNodes = (typeof masterGraphData !== 'undefined' && masterGraphData && masterGraphData.nodes && masterGraphData.nodes.length > 0)
+    ? masterGraphData.nodes
+    : ((typeof rawData !== 'undefined' && rawData && rawData.nodes) || []);
+  const mdByProj = {};
+  sourceNodes.forEach(n => {
+    if (n.kind !== 'file') return;
+    const proj = getNodeProject(n);
+    const rel = (typeof getNodeRelativePathInProject === 'function')
+      ? getNodeRelativePathInProject(n, proj) : (n.file || '');
+    if (!rel || !rel.toLowerCase().endsWith('.md')) return;
+    if (!mdByProj[proj]) mdByProj[proj] = {};
+    mdByProj[proj][rel] = true;
+  });
+  let h = '';
+  projs.forEach(p => {
+    const isActive = !!(p.path && p.path === activeRepo);
+    const mdSet = mdByProj[p.name] || {};
+    const extra = (p.pending_files && p.pending_files.length) ? p.pending_files : (p.unindexed_files || []);
+    const pendingMd = extra.filter(r => (r || '').toLowerCase().endsWith('.md') && !mdSet[r]);
+    const indexedMd = Object.keys(mdSet).sort();
+    const total = indexedMd.length + pendingMd.length;
+    h += `<div style="border:1px solid ${isActive ? '#1f6feb' : '#21262d'};border-radius:8px;padding:8px;background:${isActive ? '#0d1a2e' : '#161b22'};">`;
+    h += `<div style="display:flex;align-items:center;gap:6px;font-size:12px;font-weight:600;color:${isActive ? '#58a6ff' : '#c9d1d9'};">`
+       + `${isActive ? '🎯 ' : '📁 '}${escapeHtml(p.name)}`
+       + `<span style="margin-left:auto;font-size:11px;color:#8b949e;font-weight:400;">${total} ${zh ? '個 md' : (ja ? '件のmd' : 'md')}</span></div>`;
+    if (isActive) {
+      h += `<div style="font-size:10px;color:#58a6ff;margin-top:2px;">${zh ? '本次掃描目標' : (ja ? '今回のスキャン対象' : 'Scan target')}</div>`;
+    }
+    if (!total) {
+      h += `<div style="font-size:11px;color:#8b949e;margin-top:4px;">${zh ? '（無 .md 檔案）' : (ja ? '（.md ファイルなし）' : '(no .md files)')}</div>`;
+    } else {
+      h += `<div style="margin-top:4px;display:flex;flex-direction:column;gap:2px;">`;
+      indexedMd.forEach(rel => {
+        h += `<div style="font-size:11px;color:#c9d1d9;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;" title="${escapeHtml(rel)}">📄 ${escapeHtml(rel)}</div>`;
+      });
+      pendingMd.forEach(rel => {
+        h += `<div style="font-size:11px;color:#e3b341;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;" title="${escapeHtml(rel)}">📄 ${escapeHtml(rel)} <span style="color:#8b949e;">${zh ? '（待索引）' : (ja ? '（未インデックス）' : '(pending)')}</span></div>`;
+      });
+      h += `</div>`;
+    }
+    h += `</div>`;
+  });
+  box.innerHTML = h;
+}
 function conceptScanAll(btn) {
   const zh = (typeof currentLanguage !== 'undefined' && currentLanguage === 'zh');
   const ja = (typeof currentLanguage !== 'undefined' && currentLanguage === 'ja');
@@ -5500,11 +5560,17 @@ function conceptScanAll(btn) {
   o.id = 'scan-opt-overlay';
   o.style.cssText = 'position:fixed;inset:0;z-index:1000005;background:rgba(0,0,0,.6);display:flex;align-items:center;justify-content:center;';
   o.innerHTML = `
-  <div style="width:480px;max-width:94vw;max-height:88vh;display:flex;flex-direction:column;background:#0d1117;border:1px solid #30363d;border-radius:12px;padding:16px;color:#e6edf3;gap:10px;">
+  <div style="width:920px;max-width:96vw;max-height:88vh;display:flex;flex-direction:column;background:#0d1117;border:1px solid #30363d;border-radius:12px;padding:16px;color:#e6edf3;gap:10px;">
     <div style="display:flex;align-items:center;justify-content:space-between;">
-      <span style="font-weight:600;font-size:15px;">${zh ? '🔍 發掘新概念' : '🔍 Discover concepts'}</span>
+      <span style="font-weight:600;font-size:15px;">${zh ? '🔍 發掘新概念' : (ja ? '🔍 新規コンセプト発掘' : '🔍 Discover concepts')}</span>
       <button onclick="document.getElementById('scan-opt-overlay').remove()" style="background:transparent;border:none;color:#8b949e;cursor:pointer;font-size:15px;">✕</button>
     </div>
+    <div style="display:flex;gap:12px;flex:1;min-height:0;align-items:stretch;">
+      <div style="width:300px;flex-shrink:0;display:flex;flex-direction:column;gap:6px;border:1px solid #21262d;border-radius:8px;padding:10px;max-height:64vh;overflow-y:auto;">
+        <div style="font-size:12px;font-weight:600;color:#c9d1d9;">${zh ? '📂 掃描範圍（僅列 .md）' : (ja ? '📂 スキャン範囲（.md のみ）' : '📂 Scan scope (.md only)')}</div>
+        <div id="scan-scope-box" style="display:flex;flex-direction:column;gap:6px;"></div>
+      </div>
+      <div style="flex:1;min-width:0;display:flex;flex-direction:column;gap:10px;">
     <div id="scan-settings">
       <div style="display:flex;flex-direction:column;gap:8px;">
         <label style="display:flex;gap:8px;align-items:flex-start;border:1px solid #21262d;border-radius:8px;padding:8px 10px;cursor:pointer;">
@@ -5548,8 +5614,11 @@ function conceptScanAll(btn) {
       <button id="scan-go-btn" onclick="conceptScanStart()" style="flex:1;background:#1f6feb;border:1px solid #388bfd;color:#fff;border-radius:6px;padding:7px 14px;cursor:pointer;font-weight:600;">${zh ? '✦ 開始掃描' : (ja ? '✦ 探索を開始' : '✦ Start scan')}</button>
       <button id="scan-confirm-btn" onclick="conceptScanConfirm()" style="display:none;background:#238636;border:1px solid #2ea043;color:#fff;border-radius:6px;padding:7px 14px;cursor:pointer;font-weight:600;"></button>
     </div>
+      </div>
+    </div>
   </div>`;
   document.body.appendChild(o);
+  renderScanScopeBox();
   // Locked: outside clicks do NOT dismiss (scan state + picks would be
   // lost silently). Close only via Cancel / X buttons.
   const radios = o.querySelectorAll('input[name="scan-mode"]');
