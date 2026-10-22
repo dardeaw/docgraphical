@@ -444,7 +444,53 @@ function focusOnNode(node) {
 
   // 1. Center the SELECTED node itself — never its ancestor. Explorer +
   // 3D + viewer all sync to the same node (selection decree).
-  const centerNode = liveNode;
+  //
+  // EXCEPTION — "child highlights upward" (concept learned from codegraph-galaxy):
+  // when the selected node is currently HIDDEN in 3D (LOD filter), its ball is
+  // not rendered. Centering on it would fly the camera to empty space (stale
+  // coords) or to nowhere. highlightScope('node') is lighting up the visible
+  // ancestor chain, so center the camera on the NEAREST VISIBLE ANCESTOR
+  // instead — the user sees exactly where the hidden child lives.
+  const isVisibleIn3D = (n) => {
+    if (!n || n.x === undefined) return false;
+    if (hiddenKinds.has(n.kind)) return false;
+    const gd = (Graph && Graph.graphData) ? (Graph.graphData().nodes || []) : null;
+    if (gd && gd.length > 0) return gd.some(x => x.id === n.id);
+    return true;
+  };
+  let centerNode = liveNode;
+  if (!isVisibleIn3D(liveNode)) {
+    // Walk parent_child up the chain (raw links) to the nearest visible ancestor
+    const gLinks = rawData.links || [];
+    let frontier = [node.id];
+    const seen = new Set([node.id]);
+    let found = null;
+    while (frontier.length > 0 && !found) {
+      const next = [];
+      for (const id of frontier) {
+        for (const l of gLinks) {
+          if (l.kind !== 'parent_child') continue;
+          const sId = typeof l.source === 'object' ? l.source.id : l.source;
+          const tId = typeof l.target === 'object' ? l.target.id : l.target;
+          if (tId !== id || seen.has(sId)) continue;
+          seen.add(sId);
+          const an = (rawData.nodes || []).find(n2 => n2.id === sId);
+          if (!an) continue;
+          if (isVisibleIn3D(an)) { found = an; break; }
+          next.push(sId);
+        }
+        if (found) break;
+      }
+      frontier = next;
+    }
+    if (found) {
+      centerNode = found;
+    } else {
+      // Hidden and no visible ancestor: light up only, never fly to empty space
+      return;
+    }
+  }
+
   if (centerNode.x === undefined) return;
 
   if (Graph) {
