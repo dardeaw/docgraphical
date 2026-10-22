@@ -446,11 +446,14 @@ function focusOnNode(node) {
   // 3D + viewer all sync to the same node (selection decree).
   //
   // EXCEPTION — "child highlights upward" (concept learned from codegraph-galaxy):
-  // when the selected node is currently HIDDEN in 3D (LOD filter), its ball is
-  // not rendered. Centering on it would fly the camera to empty space (stale
-  // coords) or to nowhere. highlightScope('node') is lighting up the visible
-  // ancestor chain, so center the camera on the NEAREST VISIBLE ANCESTOR
-  // instead — the user sees exactly where the hidden child lives.
+  // dispatchUnifiedSelection temporarily unhides a LOD-hidden selection so the
+  // node appears in 3D and the camera centers on it. Residual cases where the
+  // node still has no rendered ball (just-unhidden node not yet laid out, or a
+  // node from an unselected project): centering on it would fly the camera to
+  // empty space (stale coords) or to nowhere. highlightScope('node') is
+  // lighting up the visible ancestor chain, so center the camera on the
+  // NEAREST VISIBLE ANCESTOR instead — the user sees exactly where the child
+  // lives.
   const isVisibleIn3D = (n) => {
     if (!n || n.x === undefined) return false;
     if (hiddenKinds.has(n.kind)) return false;
@@ -650,6 +653,7 @@ function clearHighlight() {
     userLODHiddenSnapshot.forEach(k => hiddenKinds.add(k));
     userLODHiddenSnapshot = null;
     applyLODAndFilter();
+    updateLegendUI();
   }
 
   if (Graph) {
@@ -2126,11 +2130,14 @@ function changeLOD(mode) {
     // All
   }
 
+  // A deliberate LOD change supersedes any temporary unhide from a selection
+  userLODHiddenSnapshot = null;
+
   applyLODAndFilter();
   updateLegendUI();
 }
 
-function applyLODAndFilter() {
+function applyLODAndFilter(reframe = true) {
   const activeNodes = (rawData.nodes || []).filter(n => {
     if (n.kind === 'concept') {
       // 1. If a specific concept is spotlighted/selected, ONLY that exact concept tag is visible!
@@ -2166,9 +2173,11 @@ function applyLODAndFilter() {
   filteredData = { nodes: activeNodes, links: activeLinks };
   if (Graph) {
     Graph.graphData(filteredData);
-    setTimeout(() => {
-      autoFrameGraph();
-    }, 250);
+    if (reframe) {
+      setTimeout(() => {
+        autoFrameGraph();
+      }, 250);
+    }
   }
 
   const nBadge = document.getElementById('stats-nodes');
@@ -4449,6 +4458,18 @@ function dispatchUnifiedSelection(target, options = {}) {
     }
     // 1. Sync Explorer Selection (open parent folders/files, select target heading/file, smooth scroll)
     syncExplorerSelection(targetNode);
+
+    // 1b. "Child highlights upward" (concept learned from codegraph-galaxy):
+    // if the selected node's kind is hidden by the current LOD, temporarily
+    // unhide that kind so the node APPEARS in 3D and the highlight path is
+    // visible FROM the selected node up its ancestor chain (node → H1 → file).
+    // The snapshot is restored in clearHighlight() or on the next changeLOD().
+    if (targetNode.kind && hiddenKinds.has(targetNode.kind)) {
+      if (!userLODHiddenSnapshot) userLODHiddenSnapshot = new Set(hiddenKinds);
+      hiddenKinds.delete(targetNode.kind);
+      applyLODAndFilter(false); // no auto reframe — focusOnNode owns the camera
+      updateLegendUI();
+    }
 
     // 2. Sync 3D Galaxy (focus camera, highlight neighborhood cluster)
     highlightScope('node', targetNode);
