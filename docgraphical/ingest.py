@@ -233,16 +233,15 @@ def FnChatSummarize(text: str, source_names: List[str]) -> Dict[str, Any]:
     import json
     import urllib.request
     names = "、".join(source_names) or "文件"
-    prompt = (
-        "你是一位技術文件整理助手。請用繁體中文把以下文件內容整理成一份 "
-        "Markdown 摘要（開頭一個 # 主標題，## 章節，重點用條列，保留關鍵術語、"
-        "數字與專有名詞原文）。\n"
-        "來源檔案：%s\n\n===== 文件內容開始 =====\n%s\n===== 文件內容結束 ====="
-    ) % (names, text)
+    from .prompts import FnGetPrompt
+    cfg = FnGetPrompt("ingest_text")
+    template = cfg.get("template") or ""
+    prompt = template.format(source_names=names, text=text)
+    system_msg = cfg.get("system") or "你是繁體中文技術文件摘要助手，只輸出 Markdown。"
     payload = json.dumps({
         "model": tgt["model"],
         "messages": [
-            {"role": "system", "content": "你是繁體中文技術文件摘要助手，只輸出 Markdown。"},
+            {"role": "system", "content": system_msg},
             {"role": "user", "content": prompt},
         ],
         # NOTE: no temperature — some models (e.g. gpt-6-luna) only accept
@@ -373,13 +372,11 @@ def FnVisionSummarize(images: List[Dict[str, str]],
     import json
     import urllib.request
     names = "、".join(source_names) or "文件"
-    prompt = (
-        "你是一位技術文件整理助手。以下是同一份文件的頁面截圖（按順序），"
-        "請用繁體中文看圖整理成一份 Markdown 摘要（開頭一個 # 主標題，"
-        "## 章節，重點用條列，保留圖中關鍵術語、數字與專有名詞原文；"
-        "看不清楚的地方照實說，不要編造）。\n"
-        "來源檔案：%s"
-    ) % names
+    from .prompts import FnGetPrompt
+    cfg = FnGetPrompt("ingest_vision")
+    template = cfg.get("template") or ""
+    prompt = template.format(source_names=names)
+    system_msg = cfg.get("system") or "你是繁體中文技術文件摘要助手，只輸出 Markdown。"
     parts: List[Dict[str, Any]] = [{"type": "text", "text": prompt}]
     for im in images:
         parts.append({"type": "image_url",
@@ -387,7 +384,7 @@ def FnVisionSummarize(images: List[Dict[str, str]],
     payload = json.dumps({
         "model": tgt["model"],
         "messages": [
-            {"role": "system", "content": "你是繁體中文技術文件摘要助手，只輸出 Markdown。"},
+            {"role": "system", "content": system_msg},
             {"role": "user", "content": parts},
         ],
         # NOTE: no temperature (see FnChatSummarize) and no max_tokens —

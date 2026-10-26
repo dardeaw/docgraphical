@@ -260,19 +260,23 @@ def FnCrawlStart(repo, seed_text="", max_starts=MAX_STARTS, lang="zh"):
             con.close()
     except Exception:
         off, cnd = [], []
-    # Pick reasons follow the UI language (machine verbs stay zh for the
-    # parser); otherwise EN mode shows 直接命中目標 and the emperor rages.
     reason_rule = "理由用繁體中文八字內" if lang != "en" else "reason IN ENGLISH, 8 words max"
+    from .prompts import FnGetPrompt
+    cfg = FnGetPrompt("crawl_seed")
+    template = cfg.get("template") or ""
+    prompt = template.format(
+        seed=seed,
+        literal_points=lit_lines,
+        catalog_text=catalog_text,
+        official_concepts="、".join(off) or "無",
+        candidate_concepts="、".join(cnd) or "無",
+        reason_rule=reason_rule,
+        max_starts=max(1, min(5, max_starts or MAX_STARTS)),
+    )
+    system_msg = cfg.get("system") or "你是知識庫的帶路人。用繁體中文思考。"
     res = FnVineGuide([
-        {"role": "system", "content": "你是知識庫的帶路人。用繁體中文思考。"},
-        {"role": "user", "content":
-         "使用者想找：%s\n字面落點（免費解析，可留可棄）：\n%s\n"
-         "總綱內文：\n%s\n收過的：%s\n還在等的：%s\n\n"
-         "只看上面，選最值得先摸的起點（呼應使用者想找的；種子寫概念名或檔名都行）。"
-         "每行一條，格式 `走：XXX｜理由：Y`，理由%s，最多 %d 行，不要解釋其他話。"
-          % (seed, lit_lines, catalog_text, "、".join(off) or "無",
-             "、".join(cnd) or "無", reason_rule,
-             max(1, min(5, max_starts or MAX_STARTS)))},
+        {"role": "system", "content": system_msg},
+        {"role": "user", "content": prompt},
     ], max_tokens=400)
     if not res.get("ok"):
         return {"ok": False, "error": res.get("error") or "guide failed"}
@@ -399,29 +403,29 @@ def _process_file_nodes(run, run_id, db_path, repo, idents):
     # stews 1-3 min per call while the UI sits mute. Solo file keeps full
     # 4000; batched files drop to 2500 (headings + head carry the signal).
     per_file_cap = 4000 if len(blocks) <= 1 else 2500
-    # One prompt, many files. Each file section is self-contained so the
-    # model can answer 念/入 under the matching @檔 marker without mixing.
-    parts = ["使用者在找：%s\n下面 %d 個檔一起判。只念與該檔內文相關的概念、"
-             "只入與使用者想找的相關的下批；無關的念空入空。"
-             "任務一：每檔的相關概念，必須是該檔內文原字原句"
-             "（照抄，不准改字、不准縮寫、不是原句不念），"
-             "每行 `念：原句｜由：八字`，可多行。"
-             "任務二：下批入 stack（整輪合併，不重複），"
-             "每行 `入：XXX`（檔寫路徑、概念寫名），每檔最多 %d 行。"
-             "黑名單詞不要念。只要行，不要解釋。\n"
-             % (run.get("seed") or "", len(blocks), MAX_PUSH)]
+    file_strs = []
     for b in blocks:
-        parts.append("\n@檔：%s\n內文：\n%s\n\nAST——段：%s\n框：%s\n站內連結：%s\n圖上鄰居：\n%s\n"
-                     % (b["ident"], (b["text"] or "")[:per_file_cap],
-                        "、".join(b["heads"]) or "無", "、".join(b["brackets"]) or "無",
-                        "、".join(b["links"]) or "無", "\n".join(b["opt_lines"]) or "無"))
+        file_strs.append("\n@檔：%s\n內文：\n%s\n\nAST——段：%s\n框：%s\n站內連結：%s\n圖上鄰居：\n%s\n"
+                         % (b["ident"], (b["text"] or "")[:per_file_cap],
+                            "、".join(b["heads"]) or "無", "、".join(b["brackets"]) or "無",
+                            "、".join(b["links"]) or "無", "\n".join(b["opt_lines"]) or "無"))
+    from .prompts import FnGetPrompt
+    cfg = FnGetPrompt("crawl_file")
+    template = cfg.get("template") or ""
+    prompt = template.format(
+        seed=run.get("seed") or "",
+        count=len(blocks),
+        max_push=MAX_PUSH,
+        file_blocks="\n".join(file_strs),
+    )
+    system_msg = cfg.get("system") or "你是知識庫的摸瓜人。用繁體中文。段只路過，不給入 stack。無關就念空入空，不要硬湊。逐檔回答，每檔用 @檔： 起頭。"
     _t1 = time.time()
     res = FnVineGuide([
-        {"role": "system", "content": "你是知識庫的摸瓜人。用繁體中文。段只路過，不給入 stack。無關就念空入空，不要硬湊。逐檔回答，每檔用 @檔： 起頭。"},
-        {"role": "user", "content": "\n".join(parts)},
+        {"role": "system", "content": system_msg},
+        {"role": "user", "content": prompt},
     ], max_tokens=3000)
     _trace("next %s guide %.1fs ok=%s prompt_chars=%d" % (
-        run_id[:8], time.time() - _t1, res.get("ok"), len("\n".join(parts))))
+        run_id[:8], time.time() - _t1, res.get("ok"), len(prompt)))
     run["files_done"] += len(blocks)
     if not res.get("ok"):
         first = idents[0] if idents else ""
@@ -618,13 +622,17 @@ def FnCrawlFinish(run_id):
         return {"ok": True, "done": True, "title": "", "kept": [],
                 "note": "nothing staged this round", "spent": run["spent"]}
     lines = "\n".join("檔 %s 念 %s" % (f, m) for f, m in rows[:60])
+    from .prompts import FnGetPrompt
+    cfg = FnGetPrompt("crawl_finish")
+    template = cfg.get("template") or ""
+    prompt = template.format(
+        seed=run.get("seed") or "",
+        staged_items=lines,
+    )
+    system_msg = cfg.get("system") or "你是知識庫的終審。用繁體中文。"
     res = FnVineGuide([
-        {"role": "system", "content": "你是知識庫的終審。用繁體中文。"},
-        {"role": "user", "content":
-         "使用者在找：%s\n整輪摸到的暫存（檔＋念到的詞）：\n%s\n\n任務一：逐條判留去，"
-         "只留跟使用者想找的相關的，每行 `留：詞 @ 檔` 或 `去：詞 @ 檔`。"
-         "任務二：依全部語意薦一個最能回答它的概念詞作標題，"
-          "一行 `題：詞｜由：八字`。只要行，不要解釋。" % (run.get("seed") or "", lines)},
+        {"role": "system", "content": system_msg},
+        {"role": "user", "content": prompt},
     ], max_tokens=3000)
     if not res.get("ok"):
         return {"ok": False, "error": res.get("error") or "guide failed"}

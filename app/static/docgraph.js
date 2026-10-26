@@ -24,7 +24,20 @@ let activeNode = null;
 let selectedTreeNodeEl = null;
 let isTreeOpen = true;
 let isRotating = false;
-let currentLanguage = (function() { try { return localStorage.getItem('docgraph_language') || 'en'; } catch(e) { return 'en'; } })();
+let currentLanguage = (function() {
+  try {
+    const saved = localStorage.getItem('docgraph_language');
+    if (saved && ['zh', 'en', 'ja'].includes(saved)) return saved;
+    // Auto-detect from system/browser locale
+    const navLang = (navigator.languages && navigator.languages[0]) || navigator.language || navigator.userLanguage || '';
+    const lower = navLang.toLowerCase();
+    if (lower.startsWith('zh')) return 'zh';
+    if (lower.startsWith('ja')) return 'ja';
+    return 'en';
+  } catch(e) {
+    return 'zh'; // Fallback to zh for the localized deployment
+  }
+})();
 
 // Mode & Filter States
 let currentLOD = 'all'; // 'arch', 'standard', 'all', 'custom'
@@ -2290,13 +2303,26 @@ function buildLegends() {
   if (!nodesList) return;
   nodesList.innerHTML = '';
   
+  const lang = currentLanguage;
+  const zh = lang === 'zh';
+  const ja = lang === 'ja';
+
+  const KIND_LABELS = {
+    concept: zh ? '概念標籤' : (ja ? '概念タグ' : 'Concept'),
+    file: zh ? '文件' : (ja ? 'ドキュメント' : 'Document'),
+    heading_1: zh ? 'H1 大標題' : (ja ? 'H1 大見出し' : 'H1 Section'),
+    heading_2: zh ? 'H2 次標題' : (ja ? 'H2 中見出し' : 'H2 Section'),
+    heading_3: zh ? 'H3 子章節' : (ja ? 'H3 小見出し' : 'H3 Subsection'),
+    heading_4: zh ? 'H4 細部條目' : (ja ? 'H4 詳細見出し' : 'H4 Detail'),
+  };
+
   const kinds = [
-    { kind: 'concept', label: 'Concept' },
-    { kind: 'file', label: 'Document' },
-    { kind: 'heading_1', label: 'H1 Section' },
-    { kind: 'heading_2', label: 'H2 Section' },
-    { kind: 'heading_3', label: 'H3 Subsection' },
-    { kind: 'heading_4', label: 'H4 Detail' },
+    { kind: 'concept', label: KIND_LABELS.concept },
+    { kind: 'file', label: KIND_LABELS.file },
+    { kind: 'heading_1', label: KIND_LABELS.heading_1 },
+    { kind: 'heading_2', label: KIND_LABELS.heading_2 },
+    { kind: 'heading_3', label: KIND_LABELS.heading_3 },
+    { kind: 'heading_4', label: KIND_LABELS.heading_4 },
   ];
 
   kinds.forEach(item => {
@@ -2324,9 +2350,15 @@ function buildLegends() {
   const edgesList = document.getElementById('legend-edges-list');
   if (!edgesList) return;
   edgesList.innerHTML = '';
+
+  const EDGE_LABELS = {
+    parent_child: zh ? 'AST 階層包含' : (ja ? 'AST階層包含' : 'AST Contains'),
+    doc_link: zh ? '跨文件引用' : (ja ? '文書間リンク' : 'Cross-Doc Reference')
+  };
+
   const edgeKinds = [
-    { kind: 'parent_child', label: 'AST Contains' },
-    { kind: 'doc_link', label: 'Cross-Doc Reference' }
+    { kind: 'parent_child', label: EDGE_LABELS.parent_child },
+    { kind: 'doc_link', label: EDGE_LABELS.doc_link }
   ];
 
   edgeKinds.forEach(item => {
@@ -2643,14 +2675,15 @@ function renderRepoTable(projects) {
         <div class="action-btn-group">
           <button class="act-btn" onclick="syncRepo('${escapedPath}', this)">${strSyncLabel}</button>
           <button class="act-btn" onclick="rebuildRepo('${escapedPath}', this)">${T.rebuild}</button>
-          <button class="act-btn danger" onclick="uninitRepo('${escapedPath}', this)">${T.uninit}</button>
+          <button class="act-btn" style="color:#d29922; border-color:#9e6a03;" onclick="uninitRepo('${escapedPath}', this)">${T.uninit}</button>
+          <button class="act-btn danger" onclick="excludeRepo('${escapedPath}', '${(p.name||'').replace(/\\/g, '\\\\').replace(/'/g, "\\'")}')" title="${zh ? '從專案清單移除此專案（非實體刪除硬碟檔案）' : 'Remove repository from project list (does not delete disk files)'}">✕ ${T.exclude}</button>
         </div>
       `;
     } else {
       actionsHtml = `
         <div class="action-btn-group">
           <button class="act-btn green" onclick="initRepo('${escapedPath}', this)">${T.create}</button>
-          <button class="act-btn danger" onclick="excludeRepo('${escapedPath}')">${T.exclude}</button>
+          <button class="act-btn danger" onclick="excludeRepo('${escapedPath}', '${(p.name||'').replace(/\\/g, '\\\\').replace(/'/g, "\\'")}')" title="${zh ? '從專案清單移除此專案（非實體刪除硬碟檔案）' : 'Remove repository from project list (does not delete disk files)'}">✕ ${T.exclude}</button>
         </div>
       `;
     }
@@ -3929,9 +3962,11 @@ function updateControlsHelpI18n() {
     if (mRightT) mRightT.textContent = '右ドラッグ';
     if (mRightD) mRightD.textContent = '視点回転 (オービット)';
     if (mPanT) mPanT.textContent = '中クリック / Shift + ドラッグ';
-    if (mPanD) mPanD.textContent = '視点平行移動';
     if (mDblT) mDblT.textContent = '背景ダブルクリック';
     if (mDblD) mDblD.textContent = '全体ビューへリセット';
+  }
+  if (typeof updatePromptsI18n === 'function') {
+    updatePromptsI18n();
   }
 }
 
@@ -4622,8 +4657,10 @@ function switchActivityTab(tabName) {
   const resizer = document.getElementById('resizer-tree-doc');
   const tabExplorer = document.getElementById('act-tab-explorer');
   const tabConcepts = document.getElementById('act-tab-concepts');
+  const tabPrompts = document.getElementById('act-tab-prompts');
   const panelExplorer = document.getElementById('tree-panel');
   const panelConcepts = document.getElementById('concepts-panel');
+  const panelPrompts = document.getElementById('prompts-panel');
 
   if (!drawer) return;
 
@@ -4634,6 +4671,7 @@ function switchActivityTab(tabName) {
     if (resizer) resizer.style.display = 'none';
     if (tabExplorer) tabExplorer.classList.remove('active');
     if (tabConcepts) tabConcepts.classList.remove('active');
+    if (tabPrompts) tabPrompts.classList.remove('active');
     return;
   }
 
@@ -4647,14 +4685,28 @@ function switchActivityTab(tabName) {
   if (tabName === 'explorer') {
     if (tabExplorer) tabExplorer.classList.add('active');
     if (tabConcepts) tabConcepts.classList.remove('active');
+    if (tabPrompts) tabPrompts.classList.remove('active');
     if (panelExplorer) panelExplorer.style.display = 'flex';
     if (panelConcepts) panelConcepts.style.display = 'none';
+    if (panelPrompts) panelPrompts.style.display = 'none';
   } else if (tabName === 'concepts') {
     if (tabExplorer) tabExplorer.classList.remove('active');
     if (tabConcepts) tabConcepts.classList.add('active');
+    if (tabPrompts) tabPrompts.classList.remove('active');
     if (panelExplorer) panelExplorer.style.display = 'none';
     if (panelConcepts) panelConcepts.style.display = 'flex';
+    if (panelPrompts) panelPrompts.style.display = 'none';
     renderConceptsDrawerList();
+  } else if (tabName === 'prompts') {
+    if (tabExplorer) tabExplorer.classList.remove('active');
+    if (tabConcepts) tabConcepts.classList.remove('active');
+    if (tabPrompts) tabPrompts.classList.add('active');
+    if (panelExplorer) panelExplorer.style.display = 'none';
+    if (panelConcepts) panelConcepts.style.display = 'none';
+    if (panelPrompts) panelPrompts.style.display = 'flex';
+    if (typeof loadPromptsDrawerList === 'function') {
+      loadPromptsDrawerList();
+    }
   }
 }
 
@@ -6753,18 +6805,85 @@ function applyAppLanguage() {
     else if (currentLanguage === 'ja') b.textContent = '言語：日本語';
   }
 
+  updateGlobalUIElementsI18n();
   updateSwapButtonI18n();
   updateControlsHelpI18n();
   updateActivityBarI18n();
   updateExplorerI18n();
   updateConceptsI18n();
+  updatePromptsI18n();
   updateViewerTagToolbarI18n();
   updateViewerNavI18n();
   updateSettingsModalI18n();
+  if (typeof buildLegends === 'function') {
+    buildLegends();
+  }
 
   const msg = currentLanguage === 'zh' ? '語系切換：繁體中文'
             : (currentLanguage === 'ja' ? '言語を切り替えました：日本語' : 'Language switched to English');
   showToast(msg);
+}
+
+function updateGlobalUIElementsI18n() {
+  const lang = currentLanguage;
+  const zh = lang === 'zh';
+  const ja = lang === 'ja';
+  const set = (id, txt) => { const el = document.getElementById(id); if (el) el.textContent = txt; };
+  const setAttr = (id, attr, txt) => { const el = document.getElementById(id); if (el) el.setAttribute(attr, txt); };
+
+  // Top toolbar buttons
+  set('btn-rotate', zh ? '🔄 自動旋轉' : (ja ? '🔄 自動回転' : '🔄 Auto Rotate'));
+  setAttr('btn-rotate', 'title', zh ? '切換 3D 圖自動環繞旋轉' : (ja ? '3D自動回転のオン/オフ' : 'Toggle 3D Auto-Rotation'));
+  set('btn-reset-cam', zh ? '🎯 重設 3D' : (ja ? '🎯 3Dリセット' : '🎯 Reset 3D'));
+  setAttr('btn-reset-cam', 'title', zh ? '重設 3D 圖至預設中心視角' : (ja ? '3D視点を初期化' : 'Reset 3D View'));
+  setAttr('btn-llm-settings', 'title', zh ? 'LLM 模型與服務商設定' : (ja ? 'LLMプロバイダー設定' : 'LLM Provider Settings'));
+
+  // 3D & AST Panel Headers
+  const graphTitle = document.querySelector('.graph-pane-header span');
+  if (graphTitle) graphTitle.textContent = zh ? '3D 知識拓撲圖' : (ja ? '3Dナレッジグラフ' : '3D Knowledge Graph');
+
+  set('tab-btn-nodes', zh ? 'AST 語法層級' : (ja ? 'ASTレイヤー' : 'AST Layers'));
+  set('tab-btn-edges', zh ? '關聯網路' : (ja ? 'リレーション' : 'Relationships'));
+  set('btn-legend-all', zh ? '重設' : (ja ? 'リセット' : 'Reset'));
+  setAttr('btn-legend-all', 'title', zh ? '重設為預設過濾（文件 + H1）' : (ja ? '初期状態（文書 + H1）にリセット' : 'Reset to default (Documents + H1)'));
+
+  // Connected links pane
+  const linksHeaderTitle = document.querySelector('.links-pane-header span');
+  if (linksHeaderTitle) {
+    const relCount = document.getElementById('d-rel-count')?.textContent || '0';
+    linksHeaderTitle.innerHTML = `<span>🔗</span> ${zh ? '關聯節點與連結' : (ja ? '関連ノード・リンク' : 'Connected Links')} (<span id="d-rel-count" style="color:#00ffaa;">${relCount}</span>)`;
+  }
+  const linksHeaderNav = document.querySelector('.links-pane-header span:last-child');
+  if (linksHeaderNav) linksHeaderNav.textContent = zh ? '交互導航' : (ja ? '対話ナビ' : 'Interactive Nav');
+
+  // Markdown Reader Action Bar
+  set('d-code-title', zh ? '🗡️ 切片章節 Markdown' : (ja ? '🗡️ 抽出セクション Markdown' : '🗡️ Sliced Section Markdown'));
+  const btnCopySec = document.querySelector('.doc-action-bar button[onclick="copyCurrentSection()"]');
+  if (btnCopySec) {
+    btnCopySec.textContent = zh ? '📋 複製 Markdown' : (ja ? '📋 Markdownをコピー' : '📋 Copy Markdown');
+    btnCopySec.title = zh ? '複製當前章節 Markdown 純文字' : (ja ? '現在の見出しMarkdownをコピー' : 'Copy Markdown text');
+  }
+  const btnCopyMcp = document.querySelector('.doc-action-bar button[onclick="copyMcpPayload()"]');
+  if (btnCopyMcp) {
+    btnCopyMcp.textContent = zh ? '🤖 複製給 Agent' : (ja ? '🤖 AI用にコピー' : '🤖 Copy for Agent');
+    btnCopyMcp.title = zh ? '複製適合 AI Agent 理解的結構化文字' : (ja ? 'AIエージェント向け構造化テキストをコピー' : 'Copy structured payload for AI Agent');
+  }
+
+  // Tagger Modal
+  set('tagger-modal-title', zh ? '🏷️ 貼標籤 (Attach Concept Tag)' : (ja ? '🏷️ タグ付け (Attach Concept Tag)' : '🏷️ Attach Concept Tag'));
+  set('tagger-hint', zh ? '為當前文件或指定章節貼上正式概念標籤，建立精確知識圖譜關聯。'
+                        : (ja ? '現在のファイルまたは見出しに公式概念タグを付与し、ナレッジグラフに関連付けます。'
+                        : 'Attach official concept tag to current document or section to link knowledge graph.'));
+  set('lbl-tagger-target', zh ? '目標對象 (Target)' : (ja ? '対象 (Target)' : 'Target'));
+  set('lbl-tagger-concept', zh ? '選擇要貼上的概念標籤 (Select Concept)' : (ja ? '付与する概念タグを選択 (Select Concept)' : 'Select Concept'));
+  set('btn-tagger-cancel', zh ? '取消' : (ja ? 'キャンセル' : 'Cancel'));
+  set('btn-tagger-submit', zh ? '確定貼上' : (ja ? 'タグを付与' : 'Attach Tag'));
+
+  // Cyber prompt & confirm modals
+  set('btn-cyber-prompt-cancel', zh ? '取消' : (ja ? 'キャンセル' : 'Cancel'));
+  set('btn-cyber-prompt-ok', zh ? '確定' : (ja ? '確定' : 'OK'));
+  set('btn-cyber-confirm-cancel', zh ? '取消' : (ja ? 'キャンセル' : 'Cancel'));
+  set('btn-cyber-confirm-ok', zh ? '確定' : (ja ? '確定' : 'Confirm'));
 }
 
 function updateSettingsModalI18n() {
@@ -6814,11 +6933,14 @@ function updateActivityBarI18n() {
                     : (lang === 'ja' ? 'ファイルエクスプローラー (Explorer)' : 'File Explorer (Explorer)');
   const tipConcepts = lang === 'zh' ? '概念標籤管理 (Concepts Registry)'
                     : (lang === 'ja' ? 'コンセプト管理 (Concepts Registry)' : 'Concepts Registry (Concepts)');
+  const tipPrompts = lang === 'zh' ? '提示詞管理 (Prompts Manager)'
+                    : (lang === 'ja' ? 'プロンプト管理 (Prompts Manager)' : 'Prompts Manager (Prompts)');
   const tipSettings = lang === 'zh' ? '系統設定 (Settings)'
                     : (lang === 'ja' ? 'システム設定 (Settings)' : 'System Settings (Settings)');
 
   setAttr('act-tab-explorer', 'title', tipExplorer);
   setAttr('act-tab-concepts', 'title', tipConcepts);
+  setAttr('act-tab-prompts', 'title', tipPrompts);
   setAttr('act-tab-settings', 'title', tipSettings);
 }
 
@@ -7247,3 +7369,332 @@ window.deleteConcept = function(conceptName, event) {
   }, { confirmText, cancelText, tip });
 };
 
+
+
+// ─── Prompts Manager Module ──────────────────────────────────────────
+let activePromptsData = {};
+let defaultPromptsData = {};
+let promptFilterText = '';
+let currentPromptCategory = 'all'; // 'all' | 'concept' | 'crawl' | 'ingest'
+
+function getPromptCategory(key) {
+  if (key.startsWith('concept_')) return 'concept';
+  if (key.startsWith('crawl_')) return 'crawl';
+  if (key.startsWith('ingest_')) return 'ingest';
+  return 'other';
+}
+
+function switchPromptCategory(cat) {
+  currentPromptCategory = cat;
+  const tabs = ['all', 'concept', 'crawl', 'ingest'];
+  tabs.forEach(t => {
+    const btn = document.getElementById(`btn-pmt-cat-${t}`);
+    if (btn) {
+      if (t === cat) btn.classList.add('active');
+      else btn.classList.remove('active');
+    }
+  });
+  renderPromptsList();
+}
+
+function updatePromptsI18n() {
+  const lang = currentLanguage;
+  const setTxt = (id, txt) => { const el = document.getElementById(id); if (el) el.textContent = txt; };
+  const setAttr = (id, attr, txt) => { const el = document.getElementById(id); if (el) el.setAttribute(attr, txt); };
+
+  const title = lang === 'zh' ? '提示詞管理' : (lang === 'ja' ? 'プロンプト管理' : 'PROMPTS MANAGER');
+  const refresh = lang === 'zh' ? '↻ 重新整理' : (lang === 'ja' ? '↻ 更新' : '↻ Refresh');
+  const ph = lang === 'zh' ? '搜尋提示詞...' : (lang === 'ja' ? 'プロンプトを検索...' : 'Search prompts...');
+
+  setTxt('lbl-drawer-prompts-title', title);
+  setTxt('btn-refresh-prompts', refresh);
+  setAttr('prompt-search', 'placeholder', ph);
+
+  // Category tab button labels
+  const tabAll = document.getElementById('btn-pmt-cat-all');
+  const tabConcept = document.getElementById('btn-pmt-cat-concept');
+  const tabCrawl = document.getElementById('btn-pmt-cat-crawl');
+  const tabIngest = document.getElementById('btn-pmt-cat-ingest');
+
+  const countAll = document.getElementById('count-pmt-all')?.textContent || '0';
+  const countConcept = document.getElementById('count-pmt-concept')?.textContent || '0';
+  const countCrawl = document.getElementById('count-pmt-crawl')?.textContent || '0';
+  const countIngest = document.getElementById('count-pmt-ingest')?.textContent || '0';
+
+  if (tabAll) tabAll.innerHTML = `${lang === 'zh' ? '全部' : (lang === 'ja' ? 'すべて' : 'All')} (<span id="count-pmt-all">${countAll}</span>)`;
+  if (tabConcept) tabConcept.innerHTML = `${lang === 'zh' ? '概念發掘' : (lang === 'ja' ? '概念抽出' : 'Concepts')} (<span id="count-pmt-concept">${countConcept}</span>)`;
+  if (tabCrawl) tabCrawl.innerHTML = `${lang === 'zh' ? '順藤摸瓜' : (lang === 'ja' ? '知識探索' : 'Vine Crawl')} (<span id="count-pmt-crawl">${countCrawl}</span>)`;
+  if (tabIngest) tabIngest.innerHTML = `${lang === 'zh' ? '文件攝入' : (lang === 'ja' ? '文書取込' : 'Ingestion')} (<span id="count-pmt-ingest">${countIngest}</span>)`;
+
+  if (currentActivityTab === 'prompts') {
+    renderPromptsList();
+  }
+}
+
+function filterPrompts(query) {
+  promptFilterText = (query || '').trim().toLowerCase();
+  renderPromptsList();
+}
+
+function clearPromptFilter() {
+  const input = document.getElementById('prompt-search');
+  if (input) input.value = '';
+  promptFilterText = '';
+  renderPromptsList();
+}
+
+function refreshPromptsList() {
+  loadPromptsDrawerList(true);
+}
+
+function loadPromptsDrawerList(showFeedback = false) {
+  const container = document.getElementById('prompts-list-container');
+  if (!container) return;
+
+  if (showFeedback || !Object.keys(activePromptsData).length) {
+    container.innerHTML = `<div style="color:#8b949e; font-size:13px; padding:12px; text-align:center;">Loading prompts...</div>`;
+  }
+
+  fetch('/api/prompts')
+    .then(res => res.json())
+    .then(data => {
+      if (data && data.ok) {
+        activePromptsData = data.prompts || {};
+        defaultPromptsData = data.defaults || {};
+        renderPromptsList();
+        if (showFeedback) {
+          showToast(currentLanguage === 'zh' ? '提示詞清單已更新' : (currentLanguage === 'ja' ? 'プロンプト一覧を更新しました' : 'Prompts refreshed'));
+        }
+      } else {
+        container.innerHTML = `<div style="color:#f85149; font-size:13px; padding:12px;">Failed: ${data?.error || 'Unknown error'}</div>`;
+      }
+    })
+    .catch(err => {
+      container.innerHTML = `<div style="color:#f85149; font-size:13px; padding:12px;">Network error: ${err.message}</div>`;
+    });
+}
+
+function renderPromptsList() {
+  const container = document.getElementById('prompts-list-container');
+  if (!container) return;
+
+  const lang = currentLanguage;
+  const zh = lang === 'zh';
+  const ja = lang === 'ja';
+
+  const lblSystem = zh ? 'System 角色提示詞' : (ja ? 'システムプロンプト (System)' : 'System Role Prompt');
+  const lblUser = zh ? 'User 模板提示詞' : (ja ? 'ユーザープロンプト雛形 (User Template)' : 'User Template Prompt');
+  const btnSave = zh ? '儲存' : (ja ? '保存' : 'Save');
+  const btnReset = zh ? '回到預設' : (ja ? '既定値に戻す' : 'Reset to Default');
+  const noMatch = zh ? '無相符提示詞' : (ja ? '一致するプロンプトがありません' : 'No matching prompts');
+
+  const keys = Object.keys(activePromptsData);
+  if (!keys.length) {
+    container.innerHTML = `<div style="color:#8b949e; font-size:13px; padding:12px; text-align:center;">No prompts available</div>`;
+    return;
+  }
+
+  // Update counts for category tabs
+  let cAll = keys.length, cConcept = 0, cCrawl = 0, cIngest = 0;
+  keys.forEach(k => {
+    const cat = getPromptCategory(k);
+    if (cat === 'concept') cConcept++;
+    else if (cat === 'crawl') cCrawl++;
+    else if (cat === 'ingest') cIngest++;
+  });
+  const elCountAll = document.getElementById('count-pmt-all');
+  const elCountConcept = document.getElementById('count-pmt-concept');
+  const elCountCrawl = document.getElementById('count-pmt-crawl');
+  const elCountIngest = document.getElementById('count-pmt-ingest');
+  if (elCountAll) elCountAll.textContent = cAll;
+  if (elCountConcept) elCountConcept.textContent = cConcept;
+  if (elCountCrawl) elCountCrawl.textContent = cCrawl;
+  if (elCountIngest) elCountIngest.textContent = cIngest;
+
+  let html = '';
+  let matchCount = 0;
+
+  const PROMPT_TITLES_I18N = {
+    zh: {
+      concept_scan: '概念發掘審查',
+      crawl_seed: '順藤摸瓜：起點帶路',
+      crawl_file: '順藤摸瓜：逐檔摸瓜提取',
+      crawl_finish: '順藤摸瓜：整輪終審',
+      ingest_text: '文件攝入：純文字摘要',
+      ingest_vision: '文件攝入：圖片/多模態摘要'
+    },
+    en: {
+      concept_scan: 'Concept Scan Curation',
+      crawl_seed: 'Vine Crawl: Seed Footholds',
+      crawl_file: 'Vine Crawl: File Inspection',
+      crawl_finish: 'Vine Crawl: Final Review',
+      ingest_text: 'Ingestion: Text Document Summary',
+      ingest_vision: 'Ingestion: Multimodal / Image Summary'
+    },
+    ja: {
+      concept_scan: '概念キュレーション審査',
+      crawl_seed: '知識探索：起点案内',
+      crawl_file: '知識探索：ファイル別抽出',
+      crawl_finish: '知識探索：最終審査',
+      ingest_text: '文書取り込み：テキスト要約',
+      ingest_vision: '文書取り込み：画像・マルチモーダル要約'
+    }
+  };
+
+  keys.forEach(key => {
+    const cat = getPromptCategory(key);
+    // Category filtering
+    if (currentPromptCategory !== 'all' && cat !== currentPromptCategory) {
+      return;
+    }
+
+    const p = activePromptsData[key] || {};
+    const localizedTitle = PROMPT_TITLES_I18N[lang]?.[key] || PROMPT_TITLES_I18N['zh']?.[key] || p.name || key;
+    const name = localizedTitle;
+    const sys = p.system || '';
+    const tmpl = p.template || '';
+
+    // Filter by promptFilterText (matches key, name, or content)
+    if (promptFilterText) {
+      const matchKey = key.toLowerCase().includes(promptFilterText);
+      const matchName = name.toLowerCase().includes(promptFilterText);
+      const matchSys = sys.toLowerCase().includes(promptFilterText);
+      const matchTmpl = tmpl.toLowerCase().includes(promptFilterText);
+      if (!matchKey && !matchName && !matchSys && !matchTmpl) return;
+    }
+
+    matchCount++;
+    const safeKey = key.replace(/[^a-zA-Z0-9_-]/g, '_');
+
+    html += `
+      <div class="prompt-card" id="card-prompt-${safeKey}">
+        <div class="prompt-card-header">
+          <span class="prompt-card-title">${escapeHtml(name)}</span>
+          <span class="prompt-card-key">${escapeHtml(key)}</span>
+        </div>
+
+        <div class="prompt-field-label">${lblSystem}</div>
+        <textarea id="prompt-sys-${safeKey}" class="prompt-textarea" rows="3">${escapeHtml(sys)}</textarea>
+
+        <div class="prompt-field-label">${lblUser}</div>
+        <textarea id="prompt-tmpl-${safeKey}" class="prompt-textarea" rows="7">${escapeHtml(tmpl)}</textarea>
+
+        <div class="prompt-card-actions">
+          <button class="mini-btn" onclick="resetPromptToDefault('${key}', '${safeKey}')" title="${btnReset}">↺ ${btnReset}</button>
+          <button class="mini-btn" style="background:#238636; color:#fff; border-color:#2ea043;" onclick="savePromptKey('${key}', '${safeKey}')" title="${btnSave}">💾 ${btnSave}</button>
+        </div>
+      </div>
+    `;
+  });
+
+  if (matchCount === 0) {
+    container.innerHTML = `<div style="color:#8b949e; font-size:13px; padding:16px; text-align:center;">${noMatch}</div>`;
+  } else {
+    container.innerHTML = html;
+  }
+}
+
+function savePromptKey(key, safeKey) {
+  const sysEl = document.getElementById(`prompt-sys-${safeKey}`);
+  const tmplEl = document.getElementById(`prompt-tmpl-${safeKey}`);
+  if (!sysEl || !tmplEl) return;
+
+  const system = sysEl.value;
+  const template = tmplEl.value;
+  const name = activePromptsData[key]?.name || key;
+
+  fetch('/api/prompts/save', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ key, system, template, name })
+  })
+    .then(res => res.json())
+    .then(data => {
+      if (data && data.ok) {
+        if (!activePromptsData[key]) activePromptsData[key] = {};
+        activePromptsData[key].system = system;
+        activePromptsData[key].template = template;
+        showToast(currentLanguage === 'zh' ? `✅ 提示詞 [${name}] 已成功儲存！` : (currentLanguage === 'ja' ? `✅ プロンプト [${name}] を保存しました！` : `✅ Prompt [${name}] saved!`));
+      } else {
+        showToast('❌ Save failed: ' + (data?.error || 'Unknown error'));
+      }
+    })
+    .catch(err => showToast('❌ Save error: ' + err.message));
+}
+
+function resetPromptToDefault(key, safeKey) {
+  const lang = currentLanguage;
+  const zh = lang === 'zh';
+  const ja = lang === 'ja';
+
+  // Retrieve built-in default for current language if loaded
+  const langKey = (defaultPromptsData && defaultPromptsData[lang]) ? lang : 'zh';
+  const defItem = (defaultPromptsData && defaultPromptsData[langKey] && defaultPromptsData[langKey][key]) || null;
+  const defSys = defItem ? defItem.system : '';
+  const defTmpl = defItem ? defItem.template : '';
+  const promptName = (activePromptsData[key]?.name) || key;
+
+  const langNames = { zh: '繁體中文', en: 'English', ja: '日本語' };
+  const langLabel = langNames[lang] || lang;
+
+  const title = zh ? '↺ 還原預設提示詞確認' : (ja ? '↺ 既定プロンプトへの復元確認' : '↺ Reset Prompt to Default Confirmation');
+
+  const previewHtml = `
+    <div style="font-size:13.5px; line-height:1.6; margin-bottom:12px;">
+      ${zh
+        ? `確定要將提示詞 <strong>「${escapeHtml(promptName)}」</strong> 重設回 <strong>[${langLabel}]</strong> 官方預設範本嗎？`
+        : (ja
+          ? `プロンプト <strong>「${escapeHtml(promptName)}」</strong> を <strong>[${langLabel}]</strong> 公式既定テンプレートに戻しますか？`
+          : `Reset prompt <strong>"${escapeHtml(promptName)}"</strong> to official default template for <strong>[${langLabel}]</strong>?`)}
+    </div>
+    ${defItem ? `
+      <div style="background:#090d13; border:1px solid #30363d; border-radius:6px; padding:10px 12px; max-height:220px; overflow-y:auto; font-size:12px; font-family:monospace; color:#c9d1d9; text-align:left;">
+        <div style="color:#58a6ff; font-weight:600; margin-bottom:4px;">[System Role]:</div>
+        <div style="white-space:pre-wrap; margin-bottom:8px; color:#8b949e; background:#161b22; padding:6px; border-radius:4px;">${escapeHtml(defSys || '(無)')}</div>
+        <div style="color:#3fb950; font-weight:600; margin-bottom:4px;">[User Template]:</div>
+        <div style="white-space:pre-wrap; color:#e6edf3; background:#161b22; padding:6px; border-radius:4px;">${escapeHtml(defTmpl || '')}</div>
+      </div>
+    ` : ''}
+  `;
+
+  const tip = zh
+    ? `💡 點擊「確定還原」後，將直接替換編輯器內文並儲存至伺服器設定。`
+    : (ja
+      ? `💡 「復元を実行」をクリックすると、エディタ内容を置換し保存します。`
+      : `💡 Clicking "Reset Now" will replace current edits and save to settings.`);
+
+  showCyberConfirm(title, '', () => {
+    fetch('/api/prompts/reset', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ key, lang })
+    })
+      .then(res => res.json())
+      .then(data => {
+        if (data && data.ok && data.data) {
+          const sysEl = document.getElementById(`prompt-sys-${safeKey}`);
+          const tmplEl = document.getElementById(`prompt-tmpl-${safeKey}`);
+          if (sysEl) sysEl.value = data.data.system || '';
+          if (tmplEl) tmplEl.value = data.data.template || '';
+
+          if (!activePromptsData[key]) activePromptsData[key] = {};
+          activePromptsData[key].system = data.data.system || '';
+          activePromptsData[key].template = data.data.template || '';
+          activePromptsData[key].name = data.data.name || activePromptsData[key].name;
+
+          showToast(zh ? `↺ 已成功還原「${promptName}」為 [${langLabel}] 預設提示詞！` : (ja ? `↺ 「${promptName}」を [${langLabel}] 既定値に戻しました！` : `↺ Reset "${promptName}" to [${langLabel}] default!`));
+        } else {
+          showToast('❌ Reset failed: ' + (data?.error || 'Unknown error'));
+        }
+      })
+      .catch(err => showToast('❌ Reset error: ' + err.message));
+  }, {
+    html: previewHtml,
+    tip: tip,
+    titleColor: '#58a6ff',
+    confirmText: zh ? '確定還原' : (ja ? '復元を実行' : 'Reset Now'),
+    cancelText: zh ? '取消' : (ja ? 'キャンセル' : 'Cancel'),
+    btnBg: '#1f6feb',
+    btnBorder: '#388bfd'
+  });
+}

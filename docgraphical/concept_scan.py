@@ -241,22 +241,17 @@ def FnJudgeTerms(cands, official_names):
     for c in cands[:SCAN_TOP_JUDGE]:
         files = ",".join({f["rel"].split("/")[-1] for f in c["files"][:3]})
         lines.append("- %s (DF=%d, e.g. %s)" % (c["term"], c["df"], files))
-    prompt = (
-        "你是繁體中文知識庫概念策展人。以下是在多份文件中都出現的高頻候選詞 "
-        "(DF=出現文件數)。請挑出真正值得收成知識庫概念的領域術語，刪除通用廢話 "
-        "(如狀況、進行、報告這類放諸四海皆準的詞)。已收錄概念：%s。"
-        "值得收的範例：具體設備名（水冷分配櫃、拉釘機）、專利/規格代號、"
-        "供應商/客戶名、工藝步驟名。不值得收的範例：通用動詞/形容詞、"
-        "英文碎片段（ae、loo、update）、單純品牌字的一部分。"
-        "只回 JSON 陣列，不要其它文字："
-        "[{\"term\": \"...\", \"reason\": \"...8字內...\", \"merge_into\": \"已收錄名或空字串\"}]"
-        % ("、".join(official_names[:40]) or "（無）")
-        + "\n候選：\n" + "\n".join(lines)
-    )
+    from .prompts import FnGetPrompt
+    prompt_cfg = FnGetPrompt("concept_scan")
+    cand_lines = "\n".join(lines)
+    off_concepts = "、".join(official_names[:40]) or "（無）"
+    template = prompt_cfg.get("template") or ""
+    prompt = template.format(official_concepts=off_concepts, candidates=cand_lines)
+    system_msg = prompt_cfg.get("system") or "只輸出 JSON 陣列，不要解釋。"
     payload = json.dumps({
         "model": tgt["model"],
         "messages": [
-            {"role": "system", "content": "只輸出 JSON 陣列，不要解釋。"},
+            {"role": "system", "content": system_msg},
             {"role": "user", "content": prompt},
         ],
         # gpt-5 series 400s on legacy max_tokens; cap bounds decode time

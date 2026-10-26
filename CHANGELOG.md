@@ -9,6 +9,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.7.0] - 2026-10-26
+
+### Added
+- Prompts Manager drawer with customizable runtime prompt templates for concept scan, vine crawl (seed, file inspection, finish review), and ingestion (text, vision).
+- Categorized prompt tabs (All, Concept Scan, Vine Crawl, Ingestion) and live keyword search across prompt keys and prompt text.
+- Cyber confirmation modal with default prompt preview on reset (eliminates browser native alert/confirm popups).
+- Cross-platform OS and browser locale auto-detection on first visit with localStorage preference persistence.
+- Complete universal multi-language support (English, Traditional Chinese, Japanese) for all toolbar buttons, 3D controls, AST layers, relationship links, and action modals.
+
+### Fixed
+- Fixed directory browse dialog hang on disconnected Windows network drives (replaced slow drive type query with pure logical drive bitmask enumeration).
+- Fixed non-destructive repository exclusion from monitoring list.
+
 ## [1.6.9] - 2026-10-26
 
 ### Changed

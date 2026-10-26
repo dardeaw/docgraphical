@@ -66,6 +66,13 @@ In one line: **CPU decides which cuts to read; the LLM only reads those cuts int
 - **Viewer navigation**: browser-like back/forward across document, section, tag, and draft pages, restored through the same selection entry points (explorer + 3D + viewer stay synced)
 - REST API: `/api/concepts/scan*` (mine/review/confirm/blacklist), `/api/crawl/{start,next,finish,confirm,refresh}` (runs live in server memory), `/api/concepts/candidates/draft` (evidence groups)
 
+### Prompts Manager & Internationalization — v1.7.0
+- **Prompt template curation**: Full customizable prompts drawer panel for concept mining, vine crawling (seed/file/finish), and document ingestion (text/multimodal vision).
+- **Category tabs & search**: Filter prompt cards by operational category (All, Concept Scan, Vine Crawl, Ingestion) combined with live keyword search across keys and template bodies.
+- **Preview & safe reset**: Cyber confirmation modal with default prompt template preview before resetting to defaults (no browser native alert/confirm).
+- **OS-level locale auto-detection**: Automatically detects system and browser default language (Traditional Chinese, English, Japanese) across Windows, macOS, and Linux on first launch, with localStorage persistence.
+- **Universal component internationalization**: 100% complete multi-language support across all toolbar buttons, 3D controls, AST layers, relationship filters, and interactive dialogs.
+
 ---
 
 ## Target architecture

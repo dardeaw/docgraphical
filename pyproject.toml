@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "docgraphical"
-version = "1.6.9"
+version = "1.7.0"
 authors = [
   { name="Chunghsing Tech / CodeGraph Team", email="a1081@chenbro.com" },
 ]

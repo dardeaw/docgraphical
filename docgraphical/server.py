@@ -265,11 +265,14 @@ def create_app(initial_paths: Optional[List[str]] = None, search_roots: Optional
         if not cur:
             drives = []
             if os.name == "nt":
-                import string
-                for ch in string.ascii_uppercase:
-                    d = ch + ":\\"
-                    if os.path.isdir(d):
-                        drives.append(d)
+                import ctypes
+                try:
+                    bitmask = ctypes.windll.kernel32.GetLogicalDrives()
+                    for i in range(26):
+                        if (bitmask >> i) & 1:
+                            drives.append(chr(65 + i) + ":\\")
+                except Exception:
+                    drives = ["C:\\", "D:\\"]
             else:
                 drives.append("/")
             home = os.path.expanduser("~")
@@ -1666,6 +1669,38 @@ def create_app(initial_paths: Optional[List[str]] = None, search_roots: Optional
                        summary="model=%s" % (res.get("model") or "-"))
         except Exception:
             pass
+        return jsonify(res)
+
+    @app.route("/api/prompts", methods=["GET"])
+    def api_get_prompts():
+        """Retrieve all active prompt templates and defaults for all languages."""
+        from .prompts import FnLoadPrompts, DEFAULT_PROMPTS
+        return jsonify({"ok": True, "prompts": FnLoadPrompts(), "defaults": DEFAULT_PROMPTS})
+
+    @app.route("/api/prompts/save", methods=["POST"])
+    def api_save_prompt():
+        """Save/update a single prompt template."""
+        from .prompts import FnSavePrompt
+        data = request.get_json(silent=True) or {}
+        key = (data.get("key") or "").strip()
+        system = data.get("system", "")
+        template = data.get("template", "")
+        name = data.get("name", "")
+        if not key:
+            return jsonify({"ok": False, "error": "key required"}), 400
+        res = FnSavePrompt(key, system, template, name)
+        return jsonify(res)
+
+    @app.route("/api/prompts/reset", methods=["POST"])
+    def api_reset_prompt():
+        """Reset a prompt template to the default for a specific language."""
+        from .prompts import FnResetPromptToDefault
+        data = request.get_json(silent=True) or {}
+        key = (data.get("key") or "").strip()
+        lang = (data.get("lang") or "zh").strip().lower()
+        if not key:
+            return jsonify({"ok": False, "error": "key required"}), 400
+        res = FnResetPromptToDefault(key, lang)
         return jsonify(res)
 
     @app.route("/api/crawl/start", methods=["POST"])
