@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.6.9] - 2026-10-26
+
+### Changed
+- Aligned every version string (`package.json`, `pyproject.toml`, both `__init__.py`, frontend asset tag) from the stale 1.0.0 to the release line; backfilled CHANGELOG coverage (EN/zh-TW) for v1.3.0–v1.6.8.
+
 ## [1.6.8] - 2026-10-26
 
 ### Fixed
