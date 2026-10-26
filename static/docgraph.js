@@ -185,6 +185,39 @@ function findImmediateAncestor(node, gNodes) {
   return node;
 }
 
+// ─── Unified label-style pipeline (single source of truth) ───────────────
+// Both updateLabelsVisibility (refresh pass) and createFileLabelSprite (birth
+// pass for lazily-created sprites) resolve through these two helpers, so a
+// sprite is born with the correct style and every refresh converges to it.
+
+function resolveRevealedNodeId(gNodes) {
+  if (activeNode) {
+    if (!hiddenKinds.has(activeNode.kind) && gNodes.some(n => n.id === activeNode.id)) {
+      return activeNode.id;
+    }
+    // If activeNode's layer is not shown, reveal closest visible ancestor's label
+    const nearAnc = findImmediateAncestor(activeNode, gNodes);
+    if (nearAnc) return nearAnc.id;
+  }
+  return null;
+}
+
+function labelStyleFor(n, hasFilter, revealedNodeId) {
+  const isFile = (n.kind === 'file');
+  const kindColor = KIND_COLORS[n.kind] || '#58a6ff';
+  if (!hasFilter) {
+    return { opacity: isFile ? 0.95 : 0.0, color: kindColor, backgroundColor: 'rgba(10, 14, 20, 0.85)' };
+  }
+  if (n.id === revealedNodeId) {
+    return { opacity: 1.0, color: kindColor, backgroundColor: 'rgba(10, 14, 20, 0.92)' };
+  }
+  if (highlightNodes.has(n.id)) {
+    if (isFile) return { opacity: 0.92, color: kindColor, backgroundColor: 'rgba(10, 14, 20, 0.85)' };
+    return { opacity: 0.75, color: kindColor, backgroundColor: 'rgba(10, 14, 20, 0.75)' };
+  }
+  return { opacity: isFile ? 0.12 : 0.0, color: '#6e7681', backgroundColor: 'rgba(10, 14, 20, 0.15)' };
+}
+
 function createFileLabelSprite(n) {
   if (!n) return null;
 
@@ -192,14 +225,17 @@ function createFileLabelSprite(n) {
   const labelText = stripMdLinks(isFile ? (n.file || n.name || '').split(/[\\/]/).pop() : (n.name || ''));
   if (!labelText) return null;
 
-  const color = KIND_COLORS[n.kind] || '#58a6ff';
+  // Born correct: resolve style from current pipeline state (render loop may
+  // create this sprite after the last synchronous refresh pass).
+  const gNodes = (Graph && Graph.graphData) ? (Graph.graphData().nodes || []) : (rawData.nodes || []);
+  const birthStyle = labelStyleFor(n, highlightNodes.size > 0, resolveRevealedNodeId(gNodes));
 
   if (typeof SpriteText !== 'undefined') {
     try {
       const sprite = new SpriteText(labelText);
-      sprite.color = color;
+      sprite.color = birthStyle.color;
       sprite.textHeight = isFile ? 1.6 : 1.3;
-      sprite.backgroundColor = 'rgba(10, 14, 20, 0.85)';
+      sprite.backgroundColor = birthStyle.backgroundColor;
       sprite.borderWidth = 0;
       sprite.borderRadius = 2;
       sprite.padding = [0.7, 0.16];
@@ -207,7 +243,7 @@ function createFileLabelSprite(n) {
       if (sprite.material) {
         sprite.material.depthWrite = false;
         sprite.material.transparent = true;
-        sprite.material.opacity = isFile ? 0.95 : 0.0;
+        sprite.material.opacity = birthStyle.opacity;
       }
       n.__labelSprite = sprite;
       return sprite;
@@ -363,16 +399,7 @@ function updateLabelsVisibility() {
   const hasFilter = highlightNodes.size > 0;
 
   // Determine which node's label (SpriteText) should be revealed
-  let revealedNodeId = null;
-  if (activeNode) {
-    if (!hiddenKinds.has(activeNode.kind) && gNodes.some(n => n.id === activeNode.id)) {
-      revealedNodeId = activeNode.id;
-    } else {
-      // If activeNode's layer is not shown, reveal closest visible ancestor's label
-      const nearAnc = findImmediateAncestor(activeNode, gNodes);
-      if (nearAnc) revealedNodeId = nearAnc.id;
-    }
-  }
+  const revealedNodeId = resolveRevealedNodeId(gNodes);
 
   gNodes.forEach(n => {
     if (n.kind === 'concept' && n.__conceptSprite) {
@@ -391,39 +418,13 @@ function updateLabelsVisibility() {
       }
     }
     if (n.__labelSprite) {
-      const isFile = n.kind === 'file';
-      const isRevealed = (n.id === revealedNodeId);
-      const isHighlighted = highlightNodes.has(n.id);
-
+      // Revealed Shrine: strictly preserve original AST kind color
+      // (H1=blue, H2=green, H3=purple, File=orange, etc.)
+      const st = labelStyleFor(n, hasFilter, revealedNodeId);
       n.__labelSprite.visible = true; // Never completely remove
-
-      if (!hasFilter) {
-        if (n.__labelSprite.material) {
-          n.__labelSprite.material.opacity = isFile ? 0.95 : 0.0;
-        }
-        n.__labelSprite.color = KIND_COLORS[n.kind] || '#58a6ff';
-        n.__labelSprite.backgroundColor = 'rgba(10, 14, 20, 0.85)';
-      } else {
-        if (isRevealed) {
-          // Revealed Shrine: Strictly preserve original AST kind color (H1=blue, H2=green, H3=purple, File=orange, etc.)
-          if (n.__labelSprite.material) n.__labelSprite.material.opacity = 1.0;
-          n.__labelSprite.color = KIND_COLORS[n.kind] || '#58a6ff';
-          n.__labelSprite.backgroundColor = 'rgba(10, 14, 20, 0.92)';
-        } else if (isHighlighted && isFile) {
-          if (n.__labelSprite.material) n.__labelSprite.material.opacity = 0.92;
-          n.__labelSprite.color = KIND_COLORS[n.kind] || '#f0883e';
-          n.__labelSprite.backgroundColor = 'rgba(10, 14, 20, 0.85)';
-        } else if (isHighlighted) {
-          if (n.__labelSprite.material) n.__labelSprite.material.opacity = 0.75;
-          n.__labelSprite.color = KIND_COLORS[n.kind] || '#58a6ff';
-          n.__labelSprite.backgroundColor = 'rgba(10, 14, 20, 0.75)';
-        } else {
-          // Unselected background nodes: 低調透明跟edge一樣
-          if (n.__labelSprite.material) n.__labelSprite.material.opacity = isFile ? 0.12 : 0.0;
-          n.__labelSprite.color = '#6e7681';
-          n.__labelSprite.backgroundColor = 'rgba(10, 14, 20, 0.15)';
-        }
-      }
+      if (n.__labelSprite.material) n.__labelSprite.material.opacity = st.opacity;
+      n.__labelSprite.color = st.color;
+      n.__labelSprite.backgroundColor = st.backgroundColor;
     }
   });
 }
@@ -524,6 +525,12 @@ function focusOnNode(node) {
 
     Graph.cameraPosition(camPos, targetPos, 1000);
   }
+
+  // Unified display pipeline: focusOnNode is the single writer of activeNode
+  // (selection decree), so the label pass is refreshed here — never scattered
+  // at call sites. This keeps the revealed plate tracking the NEW selection
+  // instead of lagging one selection behind.
+  if (typeof updateLabelsVisibility === 'function') updateLabelsVisibility();
 }
 
 function highlightScope(scopeType, targetObj) {
