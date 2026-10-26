@@ -16,6 +16,10 @@ const PROJECTS_SEL_KEY = 'docgraphical-selected-projects';
 
 const highlightNodes = new Set();
 const highlightLinks = new Set();
+// Drill-down temporary reveal (selection-scoped, per-NODE ids): a node whose
+// kind is hidden by the LOD filter is still drawn iff listed here. Drill-down
+// display is TEMPORARY and NEVER touches hiddenKinds / legend.
+let tempRevealIds = new Set();
 let activeNode = null;
 let selectedTreeNodeEl = null;
 let isTreeOpen = true;
@@ -192,7 +196,9 @@ function findImmediateAncestor(node, gNodes) {
 
 function resolveRevealedNodeId(gNodes) {
   if (activeNode) {
-    if (!hiddenKinds.has(activeNode.kind) && gNodes.some(n => n.id === activeNode.id)) {
+    // Drill-down temporary reveal counts as shown (hiddenKinds untouched)
+    const kindShown = !hiddenKinds.has(activeNode.kind) || tempRevealIds.has(activeNode.id);
+    if (kindShown && gNodes.some(n => n.id === activeNode.id)) {
       return activeNode.id;
     }
     // If activeNode's layer is not shown, reveal closest visible ancestor's label
@@ -216,6 +222,81 @@ function labelStyleFor(n, hasFilter, revealedNodeId) {
     return { opacity: 0.75, color: kindColor, backgroundColor: 'rgba(10, 14, 20, 0.75)' };
   }
   return { opacity: isFile ? 0.12 : 0.0, color: '#6e7681', backgroundColor: 'rgba(10, 14, 20, 0.15)' };
+}
+
+// ─── Drill-down upward-chain resolution (temporary reveal) ───────────────
+// Returns the selected node's upward chain ids, leaf → root
+// (node → … → H1 → file), mirroring highlightScope('node') steps 1–2.
+// Only these ids are temporarily drawn; hiddenKinds / legend stay pristine.
+
+function parentIdOf(nodeId) {
+  for (const l of (rawData.links || [])) {
+    if (l.kind !== 'parent_child') continue;
+    const sId = typeof l.source === 'object' ? l.source.id : l.source;
+    const tId = typeof l.target === 'object' ? l.target.id : l.target;
+    if (tId === nodeId) return sId;
+  }
+  return null;
+}
+
+function chainIdsUpward(node) {
+  const ids = [];
+  if (!node || !node.id) return ids;
+  const seen = new Set([node.id]);
+  ids.push(node.id);
+  let frontier = [node.id];
+  while (frontier.length > 0) {
+    const next = [];
+    for (const id of frontier) {
+      const p = parentIdOf(id);
+      if (p && !seen.has(p)) {
+        seen.add(p);
+        ids.push(p);
+        next.push(p);
+      }
+    }
+    frontier = next;
+  }
+  // Owner-file backstop (mirrors highlightScope step 2) for missing edges
+  if (node.file) {
+    const cleanPath = (node.file || '').replace(/\\/g, '/');
+    const fileNode = (rawData.nodes || []).find(n => n.kind === 'file' && ((n.file || '').replace(/\\/g, '/') === cleanPath || n.id === `file::${cleanPath}`));
+    if (fileNode && !seen.has(fileNode.id)) {
+      seen.add(fileNode.id);
+      ids.push(fileNode.id);
+    }
+  }
+  return ids;
+}
+
+// Seed coordinates for chain nodes that have never been laid out, starting
+// each at its nearest positioned ancestor (+ jitter). The first click then
+// centers on the node immediately — no "click twice" and no camera flight
+// to empty space while the force layout settles.
+function seedChainPositions(leafToRootIds) {
+  const byId = new Map((rawData.nodes || []).map(n => [n.id, n]));
+  leafToRootIds.forEach(id => {
+    const n = byId.get(id);
+    if (!n || n.x !== undefined) return;
+    let anc = parentIdOf(id);
+    let base = null;
+    let guard = 0;
+    while (anc && guard++ < 20) {
+      const an = byId.get(anc);
+      if (an && an.x !== undefined) { base = an; break; }
+      anc = parentIdOf(anc);
+    }
+    if (!base && n.file) {
+      const cleanPath = (n.file || '').replace(/\\/g, '/');
+      const fn = (rawData.nodes || []).find(x => x.kind === 'file' && (((x.file || '').replace(/\\/g, '/') === cleanPath || x.id === `file::${cleanPath}`)) && x.x !== undefined);
+      if (fn) base = fn;
+    }
+    if (base) {
+      n.x = (Number(base.x) || 0) + (Math.random() - 0.5) * 6;
+      n.y = (Number(base.y) || 0) + (Math.random() - 0.5) * 6;
+      n.z = (Number(base.z) || 0) + (Math.random() - 0.5) * 6;
+    }
+  });
 }
 
 function createFileLabelSprite(n) {
@@ -447,17 +528,18 @@ function focusOnNode(node) {
   // 3D + viewer all sync to the same node (selection decree).
   //
   // EXCEPTION — "child highlights upward" (concept learned from codegraph-galaxy):
-  // dispatchUnifiedSelection temporarily unhides a LOD-hidden selection so the
-  // node appears in 3D and the camera centers on it. Residual cases where the
-  // node still has no rendered ball (just-unhidden node not yet laid out, or a
-  // node from an unselected project): centering on it would fly the camera to
-  // empty space (stale coords) or to nowhere. highlightScope('node') is
-  // lighting up the visible ancestor chain, so center the camera on the
-  // NEAREST VISIBLE ANCESTOR instead — the user sees exactly where the child
-  // lives.
+  // dispatchUnifiedSelection temporarily reveals this selection's upward chain
+  // (chain ids + seeded coordinates) so the node appears in 3D and the camera
+  // centers on it. Residual cases where the node still has no rendered ball
+  // (whole chain without positions yet, or a node from an unselected project):
+  // centering on it would fly the camera to empty space (stale coords) or to
+  // nowhere. highlightScope('node') is lighting up the visible ancestor chain,
+  // so center the camera on the NEAREST VISIBLE ANCESTOR instead — the user
+  // sees exactly where the child lives.
   const isVisibleIn3D = (n) => {
     if (!n || n.x === undefined) return false;
-    if (hiddenKinds.has(n.kind)) return false;
+    // Drill-down temporary reveal counts as visible (hiddenKinds untouched)
+    if (hiddenKinds.has(n.kind) && !tempRevealIds.has(n.id)) return false;
     const gd = (Graph && Graph.graphData) ? (Graph.graphData().nodes || []) : null;
     if (gd && gd.length > 0) return gd.some(x => x.id === n.id);
     return true;
@@ -654,14 +736,22 @@ function clearHighlight() {
     selectedTreeNodeEl = null;
   }
 
-  // Restore user LOD settings if temporarily unhidden
+  // Restore user LOD settings if temporarily unhidden (concept-spotlight path)
+  let needRefilter = false;
   if (userLODHiddenSnapshot) {
     hiddenKinds.clear();
     userLODHiddenSnapshot.forEach(k => hiddenKinds.add(k));
     userLODHiddenSnapshot = null;
-    applyLODAndFilter();
     updateLegendUI();
+    needRefilter = true;
   }
+
+  // Drop drill-down temporary reveal (selection-scoped; legend/LOD untouched)
+  if (tempRevealIds.size > 0) {
+    tempRevealIds.clear();
+    needRefilter = true;
+  }
+  if (needRefilter) applyLODAndFilter();
 
   if (Graph) {
     Graph.nodeColor(Graph.nodeColor())
@@ -2166,7 +2256,9 @@ function applyLODAndFilter(reframe = true) {
       }
       return false; // Keep unrelated concept tags hidden to prevent visual clutter
     }
-    if (hiddenKinds.has(n.kind)) return false;
+    // LOD-hidden kinds are skipped — unless temporarily revealed by drill-down
+    // (tempRevealIds is selection-scoped and never touches hiddenKinds/legend)
+    if (hiddenKinds.has(n.kind) && !tempRevealIds.has(n.id)) return false;
     return true;
   });
 
@@ -4467,15 +4559,28 @@ function dispatchUnifiedSelection(target, options = {}) {
     syncExplorerSelection(targetNode);
 
     // 1b. "Child highlights upward" (concept learned from codegraph-galaxy):
-    // if the selected node's kind is hidden by the current LOD, temporarily
-    // unhide that kind so the node APPEARS in 3D and the highlight path is
-    // visible FROM the selected node up its ancestor chain (node → H1 → file).
-    // The snapshot is restored in clearHighlight() or on the next changeLOD().
-    if (targetNode.kind && hiddenKinds.has(targetNode.kind)) {
-      if (!userLODHiddenSnapshot) userLODHiddenSnapshot = new Set(hiddenKinds);
-      hiddenKinds.delete(targetNode.kind);
+    // Drill-down display is TEMPORARY: recompute tempRevealIds as this
+    // selection's upward chain (node → … → H1 → file). hiddenKinds / legend
+    // are NEVER touched — a kind stays drawn only while the current
+    // selection's chain needs it (clicking back up re-hides the lower kinds).
+    const chainIds = chainIdsUpward(targetNode);
+    let revealChanged = chainIds.length !== tempRevealIds.size;
+    if (!revealChanged) {
+      for (const id of chainIds) { if (!tempRevealIds.has(id)) { revealChanged = true; break; } }
+    }
+    if (revealChanged) {
+      const next = new Set(chainIds);
+      // Tidy: park sprites of nodes leaving the visible set — off-scene state
+      // must never look lit if re-attached before the next refresh pass.
+      tempRevealIds.forEach(id => {
+        if (!next.has(id)) {
+          const n = (rawData.nodes || []).find(x => x.id === id);
+          if (n && n.__labelSprite && n.__labelSprite.material) n.__labelSprite.material.opacity = 0.0;
+        }
+      });
+      tempRevealIds = next;
+      seedChainPositions(chainIds);
       applyLODAndFilter(false); // no auto reframe — focusOnNode owns the camera
-      updateLegendUI();
     }
 
     // 2. Sync 3D Galaxy (focus camera, highlight neighborhood cluster)
