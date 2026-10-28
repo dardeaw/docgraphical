@@ -280,6 +280,7 @@ def fetch_graph_data(repo_path: str) -> Dict[str, Any]:
             "abs_path": os.path.normpath(os.path.join(repo_path, fpath)) if not os.path.isabs(fpath) else fpath,
             "tokens": tokens,
             "val": val,
+            "project": os.path.basename(os.path.normpath(repo_path)) or repo_path,
             "color": KIND_COLORS.get(kind, "#8b949e"),
             "content": content
         })

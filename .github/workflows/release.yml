@@ -1,0 +1,81 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  test:
+    name: Gate (lint + pytest)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install pytest flake8
+          pip install -e .
+
+      - name: Fatal lint
+        run: |
+          flake8 docgraph docgraphical --count --select=E9,F63,F7,F82 --show-source --statistics
+
+      - name: Tests
+        run: pytest -q
+
+  publish:
+    name: Build & publish GitHub Release
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Build sdist and wheel
+        run: |
+          python -m pip install --upgrade pip build
+          python -m build
+
+      - name: Extract release notes from CHANGELOG.md
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          python - <<'PY'
+          import os, re
+          tag = os.environ["RELEASE_TAG"]
+          ver = tag.lstrip("v")
+          text = open("CHANGELOG.md", encoding="utf-8").read()
+          pattern = re.compile(r"^## \[" + re.escape(ver) + r"\].*?$(.*?)(?=^## \[|\Z)", re.M | re.S)
+          match = pattern.search(text)
+          body = match.group(1).strip() if match else "See CHANGELOG.md for details."
+          repo = os.environ.get("GITHUB_REPOSITORY", "dardeaw/docgraphical")
+          footer = "\n\n---\n\n**Full changelog:** https://github.com/" + repo + "/blob/main/CHANGELOG.zh-TW.md\n"
+          with open("release_body.md", "w", encoding="utf-8") as f:
+              f.write(body + footer)
+          print("release notes bytes:", len(body))
+          PY
+
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: ${{ github.ref_name }}
+          body_path: release_body.md
+          files: dist/*
+          draft: false
+          prerelease: false

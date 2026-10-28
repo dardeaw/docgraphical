@@ -9,6 +9,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [3.0.0] - 2026-10-26
+
+### Added
+- **AI conversational knowledge retrieval**: floating chat panel answering through DocGraphical's own MCP tools (`docgraphical_search`, `docgraphical_toc`, `docgraphical_section`, `docgraphical_graph`) — every answer assembled from verbatim slices, no embeddings.
+- **Streaming tool loop**: `POST /api/chat` emits SSE events (`tool_call`, `tool_result`, `delta`, `citation`, `done`, `error`), bounded to five tool rounds per turn.
+- **Grounded citations**: `[[file#heading]]` anchors in answers become click targets that open the exact section in the viewer and locate it on the 3D map.
+- **Context-aware, read-only retrieval**: the open document travels with the conversation; tools can only read, never write to the library.
+- **Prompt manager**: drawer panel for all six LLM prompts (concept scan, vine seed/file/finish, ingest text/vision) with category tabs, live search, default-template preview, and safe reset; custom prompts persist in `~/.docgraphical/prompts.json`.
+- **OS locale auto-detection**: Traditional Chinese / English / Japanese detected from the system on first launch, persisted in localStorage.
+- **CI and tag-driven releases**: `.github/workflows/ci.yml` gates lint + `pytest` + frontend syntax checks; `.github/workflows/release.yml` builds the distribution and publishes the GitHub Release with notes extracted from this file.
+
+### Changed
+- All version strings (`package.json`, `pyproject.toml`, both `__init__.py`, frontend asset tag) unified on the 3.x line.
+- README (EN / zh-TW) now documents the AI conversation panel, the prompt manager, and the release pipeline; roadmap phases 2 and 3 marked done.
+
+### Fixed
+- Directory browse dialog hang on disconnected Windows network drives (logical drive bitmask enumeration instead of the slow drive-type query).
+- Non-destructive repository exclusion from the monitoring list.
+
 ## [1.7.0] - 2026-10-26
 
 ### Added

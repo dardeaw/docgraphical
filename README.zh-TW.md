@@ -2,7 +2,9 @@
 
 [繁體中文](README.zh-TW.md) | [English](README.md)
 
-個人與團隊**知識管理（Knowledge Management）平台**：把散落在 PDF / PPT / Word / Markdown 裡的知識，變成可累積、可引用、可對話的確定性知識庫。地基是確定性 Markdown AST 解析與精準切片引擎；上層是文件入庫管線、3D 知識地圖、MCP 工具與（規劃中）AI 對話面板。
+[![CI](https://github.com/dardeaw/docgraphical/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/dardeaw/docgraphical/actions/workflows/ci.yml)
+
+個人與團隊**知識管理（Knowledge Management）平台**：把散落在 PDF / PPT / Word / Markdown 裡的知識，變成可累積、可引用、可對話的確定性知識庫。地基是確定性 Markdown AST 解析與精準切片引擎；上層是文件入庫管線、3D 知識地圖、MCP 工具、以原文切片為根據的 AI 對話面板，以及掌管每一次 LLM 呼叫的提示詞管理。
 
 > 路線主檔：[`PLAN.zh-TW.md`](PLAN.zh-TW.md)（KM Master Plan，含四條教條、目標架構、Phase 0–5）。
 
@@ -66,12 +68,23 @@
 - **檢視器翻頁**：瀏覽器式上一頁／下一頁（文件、段落、標籤頁、底稿頁全記），還原走同一選取入口（左樹＋3D＋檢視器連動）
 - REST API：`/api/concepts/scan*`（挖／審／收／黑名單）、`/api/crawl/{start,next,finish,confirm,refresh}`（runs 駐 server 記憶體）、`/api/concepts/candidates/draft`（證據分組）
 
-### 提示詞管理與全站國際化——v1.7.0
+### 提示詞管理與全站國際化——v3.0.0
 - **提示詞客製化中心**：提供獨立提示詞抽屜面板，完整支援概念發掘、順藤摸瓜（起點帶路／逐檔提取／整輪終審）與文件攝入（純文字／多模態視覺）提示詞之即時修改與保存。
 - **分類標籤頁與即時搜尋**：提供頂部情境分類頁籤（全部、概念發掘、順藤摸瓜、文件攝入），並與內文／Key 即時關鍵字搜尋框深度聯動。
 - **範本預覽與安全還原**：還原預設提示詞時跳出賽博風格確認框，完整預覽預設範本內容，徹底杜絕瀏覽器原生彈窗。
 - **跨作業系統之系統語系自動偵測**：首次開啟自動讀取 Windows、macOS 與 Linux 系統或瀏覽器預設語系（繁體中文、English、日本語），並自動支援 localStorage 偏好記憶。
 - **全站元件完整多語系化**：頂部工具列、3D 操控說明、AST 語法層級、關聯過濾器、操作確認對話框全面實現百分之百多語系動態切換。
+
+### AI 對話知識檢索——v3.0.0
+- **問知識庫，不是問向量庫**：浮動對話面板透過 DocGraphical 自家的 MCP 工具作答——`docgraphical_search` 全庫探索、`docgraphical_toc`＋`docgraphical_section` 精準切片、`docgraphical_graph` 結構脈絡。答案一律由原文切片組裝，沒有向量嵌入、沒有模糊語義檢索。
+- **有界的工具迴圈、串流輸出**：每輪最多五個工具回合，以 SSE（`POST /api/chat`）串流到瀏覽器，事件分型為 `tool_call`、`tool_result`、`delta`、`citation`、`done`、`error`。
+- **可跳轉的出處錨點**：每項結論都帶 `[[檔名#章節]]`，前端轉為可點擊錨點，一鍵在檢視器開啟該章節並在 3D 地圖定位。
+- **帶脈絡、只讀不寫**：目前開啟的文件會作為對話脈絡；工具迴圈只能讀（搜尋／目錄／切片／圖譜），永不寫入知識庫，人審閘完整保留。
+- **全站共用 LLM 供應商**：對話沿用與攝入、探礦相同的使用中供應商（OpenAI 相容，金鑰存於伺服器端）；未設定時在對話中明確報錯，不會靜默失敗。
+
+### 持續整合與自動發佈——v3.0.0
+- **CI 閘門**：`.github/workflows/ci.yml` 對 `docgraph`、`docgraphical` 兩個套件做靜態檢查、前端 bundle 語法檢查，並在 Linux／Windows／macOS 上以 Python 3.9–3.12 跑 `pytest`。
+- **推 tag 即發佈**：`.github/workflows/release.yml` 在每個 `v*` tag 建置 sdist／wheel、從 `CHANGELOG.md` 抽出該版段落作為 release 說明，並附上產物自動發佈 GitHub Release——不再手動上傳。
 
 ---
 
@@ -79,9 +92,9 @@
 
 ```text
 DocGraphical Web（知識管理介面）
-[3D 知識地圖] [TOC 閱讀] [候選命中清單] [AI 對話面板] ← 規劃中
+[3D 知識地圖] [TOC 閱讀] [候選命中清單] [AI 對話面板] ← 已上線（v3.0.0）
               ↑ 教條四：人審閘（跟這段對話）
-對話後端＝工具迴圈（規劃中 M1：toc／section／search 三受控工具）
+對話後端＝工具迴圈（已上線：search／toc／section／graph，只讀）
 MCP 知識層（既有：toc／section／search／graph／index）
 確定性地基（既有：parser／scanner／db）
 原始文件（不可變 raw 層：md／pdf／ppt／word）
@@ -95,8 +108,8 @@ MCP 知識層（既有：toc／section／search／graph／index）
 |---|---|---|
 | Phase 0 前置決策 | LLM 端點（O1）、硬連結語意（O4）、知識庫位置（O5） | 待拍板 |
 | Phase 1 多格式 Ingest（M5） | CPU 抽取→LLM 摘要→入庫→重掃；Web 對話框已落地 | 進行中 |
-| Phase 2 對話後端（M1） | `/api/chat` SSE＋工具迴圈＋人審閘 | 未開始 |
-| Phase 3 Chat UI（M2＋M3） | 跟這段對話、候選清單、串流面板、出處跳轉 | 未開始 |
+| Phase 2 對話後端（M1） | `/api/chat` SSE＋工具迴圈＋人審閘 | 已完成（v3.0.0） |
+| Phase 3 Chat UI（M2＋M3） | 跟這段對話、候選清單、串流面板、出處跳轉 | 已完成（v3.0.0） |
 | Phase 4 切片聚合問答 | 跨文件 search→聚合→一次讀答（教條三） | 未開始 |
 | Phase 5 wiki 快取層（M4，二期） | 答案存回＋指紋失效＋lint-lite | 二期 |
 
@@ -273,6 +286,7 @@ console.log(slice);
 
 ## 開發狀態
 
+- **v3.0.0**——AI 對話知識檢索上線（MCP 工具迴圈、SSE 串流、`[[檔名#章節]]` 出處一鍵跳檢視器＋3D 定位）、提示詞管理（分類頁籤／預覽／安全還原）、系統語系自動偵測、CI＋推 tag 自動發佈。
 - **v1.5.0**——概念層上線（探礦＋順藤、暫存池、人轉正）、爬行加固（取排水栓修復、token 配額、硬時限、重排）、底稿審核 UX（預覽橫幅、白話進度、翻頁歷史）。
 - Web 工作站（port 5002 主庫／5003 乾淨實例）＋ Electron 桌面副本（`app/`，byte 級同步）。
 - 未決事項（O1–O5）與驗收標準見 [`PLAN.zh-TW.md`](PLAN.zh-TW.md) 第七、九節。

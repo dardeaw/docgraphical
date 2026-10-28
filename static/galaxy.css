@@ -3153,3 +3153,246 @@ select.modal-input:focus,
   filter: drop-shadow(0 0 2px rgba(240, 136, 62, 0.45));
 }
 
+/* ==========================================================================
+   Floating AI Knowledge Chat Widget (Bottom-Right Cyber Floating Card)
+   ========================================================================== */
+#floating-chat-trigger {
+  position: fixed !important;
+  bottom: 24px !important;
+  right: 24px !important;
+  width: 52px !important;
+  height: 52px !important;
+  border-radius: 50% !important;
+  background: linear-gradient(135deg, #1f6feb 0%, #1158c7 100%) !important;
+  color: #fff !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  box-shadow: 0 6px 22px rgba(31, 111, 235, 0.5), 0 0 0 2px rgba(56, 139, 253, 0.6) !important;
+  cursor: pointer !important;
+  z-index: 99999 !important;
+  transition: transform 0.2s cubic-bezier(0.16, 1, 0.3, 1), box-shadow 0.2s ease, background 0.2s ease !important;
+}
+
+#floating-chat-trigger:hover {
+  transform: translateY(-2px) scale(1.08) !important;
+  box-shadow: 0 8px 28px rgba(31, 111, 235, 0.75), 0 0 0 3px #58a6ff !important;
+  background: linear-gradient(135deg, #388bfd 0%, #1f6feb 100%) !important;
+}
+
+#floating-chat-trigger:active {
+  transform: scale(0.95) !important;
+}
+
+.floating-chat-card {
+  position: fixed !important;
+  bottom: 88px;
+  right: 24px;
+  width: 570px;
+  min-width: 380px !important;
+  max-width: calc(100vw - 36px) !important;
+  height: 780px;
+  min-height: 350px !important;
+  max-height: calc(100vh - 100px) !important;
+  resize: both !important;
+  background: rgba(13, 17, 23, 0.98) !important;
+  backdrop-filter: blur(20px) !important;
+  -webkit-backdrop-filter: blur(20px) !important;
+  border: 1px solid #388bfd66 !important;
+  border-radius: 12px !important;
+  box-shadow: 0 20px 50px rgba(0, 0, 0, 0.8), 0 0 0 1px rgba(56, 139, 253, 0.35) !important;
+  display: flex !important;
+  flex-direction: column !important;
+  z-index: 99998 !important;
+  overflow: hidden !important;
+  transition: opacity 0.22s ease, visibility 0.22s !important;
+}
+
+.floating-chat-card.hidden {
+  opacity: 0 !important;
+  pointer-events: none !important;
+  visibility: hidden !important;
+  transform: translateY(16px) scale(0.96) !important;
+}
+
+.floating-chat-header {
+  padding: 14px 18px !important;
+  background: #161b22 !important;
+  border-bottom: 1px solid #30363d !important;
+  display: flex !important;
+  justify-content: space-between !important;
+  align-items: center !important;
+}
+
+#lbl-floating-chat-title {
+  font-size: 17px !important;
+}
+
+#floating-chat-card #chat-active-doc-bar {
+  font-size: 14px !important;
+  padding: 8px 14px !important;
+}
+
+#floating-chat-card #btn-chat-set-context {
+  font-size: 13px !important;
+  padding: 4px 10px !important;
+}
+
+#floating-chat-card .chat-welcome-box {
+  font-size: 15px !important;
+  line-height: 1.6 !important;
+  padding: 16px !important;
+}
+
+#floating-chat-card #lbl-chat-welcome-title {
+  font-size: 17px !important;
+}
+
+#floating-chat-card .chat-bubble {
+  font-size: 15px !important;
+  line-height: 1.6 !important;
+  padding: 12px 16px !important;
+}
+
+#floating-chat-card .chat-mcp-tool-card {
+  font-size: 14px !important;
+  padding: 8px 14px !important;
+}
+
+#floating-chat-card .chat-mcp-tool-card .tool-result-box {
+  font-size: 13px !important;
+}
+
+#floating-chat-card .chat-citation-link {
+  font-size: 14px !important;
+  padding: 3px 8px !important;
+}
+
+#floating-chat-card #chat-input-panel {
+  padding: 14px 16px !important;
+}
+
+#floating-chat-card #chat-input-box {
+  font-size: 15px !important;
+  line-height: 1.5 !important;
+  min-height: 52px !important;
+}
+
+#floating-chat-card #btn-chat-send {
+  font-size: 15px !important;
+  height: 52px !important;
+  padding: 0 18px !important;
+}
+
+#floating-chat-card #chat-status-indicator {
+  font-size: 13px !important;
+}
+
+
+/* ==========================================================================
+   LLM Provider Settings Page Typography Upscale (+2px)
+   ========================================================================== */
+#stg-page-llm {
+  font-size: 14px !important;
+}
+
+#stg-page-llm #lbl-prov-title {
+  font-size: 17px !important;
+}
+
+#stg-page-llm #lbl-prov-note {
+  font-size: 14px !important;
+}
+
+#stg-page-llm #lbl-prov-cur {
+  font-size: 14px !important;
+}
+
+#stg-page-llm #prov-current-model {
+  font-size: 14px !important;
+  height: 36px !important;
+}
+
+#stg-page-llm #lbl-prov-configured-title {
+  font-size: 14px !important;
+}
+
+#stg-page-llm #prov-configured-count {
+  font-size: 13px !important;
+}
+
+#stg-page-llm #lbl-prov-add {
+  font-size: 15px !important;
+}
+
+#stg-page-llm label,
+#stg-page-llm label span,
+#stg-page-llm #lbl-prov-f-label,
+#stg-page-llm #lbl-prov-f-base,
+#stg-page-llm #lbl-prov-f-key,
+#stg-page-llm #lbl-prov-f-models {
+  font-size: 13px !important;
+}
+
+#stg-page-llm select,
+#stg-page-llm input,
+#stg-page-llm .modal-input {
+  font-size: 14px !important;
+}
+
+#stg-page-llm #chat-prov-label {
+  font-size: 14px !important;
+  height: 38px !important;
+}
+
+#stg-page-llm #chat-prov-base,
+#stg-page-llm #chat-prov-key {
+  font-size: 14px !important;
+  height: 36px !important;
+}
+
+#stg-page-llm #prov-fixed-url {
+  font-size: 13px !important;
+}
+
+#stg-page-llm #prov-fixed-url code {
+  font-size: 13px !important;
+}
+
+#stg-page-llm #btn-prov-fetch {
+  font-size: 13px !important;
+  padding: 4px 12px !important;
+}
+
+#stg-page-llm #prov-model-list {
+  font-size: 13px !important;
+}
+
+#stg-page-llm #prov-model-list label {
+  font-size: 13px !important;
+}
+
+#stg-page-llm #prov-model-filter {
+  font-size: 14px !important;
+  height: 36px !important;
+}
+
+#stg-page-llm #chat-prov-msg {
+  font-size: 14px !important;
+}
+
+#stg-page-llm .mini-btn {
+  font-size: 14px !important;
+}
+
+#stg-page-llm .btn-primary {
+  font-size: 14px !important;
+  padding: 8px 20px !important;
+}
+
+#stg-page-llm #chat-prov-list .prov-row-item {
+  font-size: 13px !important;
+}
+
+
+

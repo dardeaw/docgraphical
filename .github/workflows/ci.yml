@@ -31,11 +31,36 @@ jobs:
           pip install flake8 pytest
           pip install -e .
 
-      - name: Lint with Flake8
+      - name: Lint (both packages, fatal errors only)
         run: |
-          flake8 docgraph tests --count --select=E9,F63,F7,F82 --show-source --statistics
-          flake8 docgraph tests --count --max-complexity=15 --max-line-length=127 --statistics
+          flake8 docgraph docgraphical --count --select=E9,F63,F7,F82 --show-source --statistics
+
+      - name: Byte-compile all modules
+        run: |
+          python -m compileall -q docgraph docgraphical
 
       - name: Run Unit Tests
         run: |
-          pytest
+          pytest -q
+
+  frontend:
+    name: Frontend syntax (Node 20)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Syntax-check browser bundle
+        run: |
+          node --check static/docgraph.js
+
+      - name: Verify Electron copy is byte-identical
+        run: |
+          cmp static/docgraph.js app/static/docgraph.js
+          cmp static/docgraph.css app/static/docgraph.css
+          cmp templates/index.html app/index.html

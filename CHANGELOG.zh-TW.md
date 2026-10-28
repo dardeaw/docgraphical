@@ -8,6 +8,25 @@
 
 ---
 
+## [3.0.0] - 2026-10-26
+
+### 新增
+- **AI 對話知識檢索**：浮動對話面板透過 DocGraphical 自家的 MCP 工具作答（`docgraphical_search`、`docgraphical_toc`、`docgraphical_section`、`docgraphical_graph`），答案一律由原文切片組裝，沒有向量嵌入。
+- **串流工具迴圈**：`POST /api/chat` 以 SSE 推送事件（`tool_call`、`tool_result`、`delta`、`citation`、`done`、`error`），每輪上限五個工具回合。
+- **可跳轉出處**：答案中的 `[[檔名#章節]]` 轉為可點擊錨點，一鍵在檢視器開啟該章節並在 3D 地圖定位。
+- **帶脈絡、只讀檢索**：目前開啟的文件隨對話帶入；工具只能讀，永不寫入知識庫。
+- **提示詞管理**：六組 LLM 提示詞抽屜（概念發掘、順藤起點／逐檔／終審、攝入文字／視覺），含分類頁籤、即時搜尋、預設範本預覽與安全還原；自訂內容存於 `~/.docgraphical/prompts.json`。
+- **系統語系自動偵測**：首次開啟自動判定繁中／英文／日文，並以 localStorage 記憶。
+- **CI 與推 tag 自動發佈**：`.github/workflows/ci.yml` 把關靜態檢查＋`pytest`＋前端語法；`.github/workflows/release.yml` 建置套件並以本檔段落作為 release 說明自動發佈。
+
+### 變更
+- 版號全面統一至 3.x 線（`package.json`、`pyproject.toml`、兩個 `__init__.py`、前端 asset tag）。
+- README（英／繁中）補上 AI 對話面板、提示詞管理與發佈管線；路線圖 Phase 2、3 標為已完成。
+
+### 修正
+- 修復目錄瀏覽器在 Windows 離線網路磁碟機掛起卡死（改以邏輯磁碟位元遮罩列舉）。
+- 修復專案儲存庫非破壞性「排除」功能（僅自監控清單移除）。
+
 ## [1.7.0] - 2026-10-26
 
 ### 新增

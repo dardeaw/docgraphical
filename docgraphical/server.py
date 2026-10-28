@@ -1879,4 +1879,27 @@ def create_app(initial_paths: Optional[List[str]] = None, search_roots: Optional
             return jsonify({"ok": False, "error": "repo and name required"}), 400
         return jsonify(FnDetachStaged(repo, name, data.get("drop")))
 
+    @app.route("/api/chat", methods=["POST"])
+    def api_chat():
+        """Knowledge Chatbot endpoint with MCP tool calling loop and SSE streaming.
+        Body: {messages: [...], active_doc: str, repo: str}
+        """
+        from .chat import stream_chat_turn
+        from flask import stream_with_context
+        data = request.get_json(silent=True) or {}
+        messages = data.get("messages") or []
+        active_doc = data.get("active_doc")
+        roots = get_search_roots(search_roots)
+        
+        return Response(
+            stream_with_context(stream_chat_turn(messages, search_roots=roots, active_doc=active_doc)),
+            mimetype="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache",
+                "X-Accel-Buffering": "no",
+                "Connection": "keep-alive"
+            }
+        )
+
     return app
+

@@ -265,11 +265,12 @@ def FnTestProvider(str_id: str, str_lang: str = "") -> Dict[str, Any]:
         return {"ok": False, "error": f"{type(oErr).__name__}: {oErr}"}
 
 
-def FnListRemoteModels(str_base: str, str_key: str = "") -> Dict[str, Any]:
+def FnListRemoteModels(str_base: str, str_key: str = "", str_lang: str = "") -> Dict[str, Any]:
     """Fetch model ids from an OpenAI or Anthropic compatible GET <base>/models endpoint."""
     strBase = (str_base or "").rstrip("/")
+    bZh = str(str_lang or "").strip().lower().replace("_", "-").startswith("zh")
     if not strBase:
-        return {"ok": False, "error": "Base URL 不可為空" if (str_lang or "").startswith("zh") else "Base URL cannot be empty"}
+        return {"ok": False, "error": "Base URL 不可為空" if bZh else "Base URL cannot be empty"}
     
     # Auto detect protocol & headers
     dicHeaders = {"User-Agent": "DocGraphical/1.0"}

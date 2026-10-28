@@ -288,26 +288,28 @@ function chainIdsUpward(node) {
 // to empty space while the force layout settles.
 function seedChainPositions(leafToRootIds) {
   const byId = new Map((rawData.nodes || []).map(n => [n.id, n]));
-  leafToRootIds.forEach(id => {
+  // Seed from root to leaf so parents acquire coordinates before children look them up
+  const rootToLeaf = [...leafToRootIds].reverse();
+  rootToLeaf.forEach(id => {
     const n = byId.get(id);
-    if (!n || n.x !== undefined) return;
+    if (!n || (n.x !== undefined && n.y !== undefined && n.z !== undefined)) return;
     let anc = parentIdOf(id);
     let base = null;
     let guard = 0;
     while (anc && guard++ < 20) {
       const an = byId.get(anc);
-      if (an && an.x !== undefined) { base = an; break; }
+      if (an && an.x !== undefined && an.y !== undefined && an.z !== undefined) { base = an; break; }
       anc = parentIdOf(anc);
     }
     if (!base && n.file) {
       const cleanPath = (n.file || '').replace(/\\/g, '/');
-      const fn = (rawData.nodes || []).find(x => x.kind === 'file' && (((x.file || '').replace(/\\/g, '/') === cleanPath || x.id === `file::${cleanPath}`)) && x.x !== undefined);
+      const fn = (rawData.nodes || []).find(x => x.kind === 'file' && (((x.file || '').replace(/\\/g, '/') === cleanPath || x.id === `file::${cleanPath}` || x.id.endsWith(`::file::${cleanPath}`))) && x.x !== undefined && x.y !== undefined && x.z !== undefined);
       if (fn) base = fn;
     }
     if (base) {
-      n.x = (Number(base.x) || 0) + (Math.random() - 0.5) * 6;
-      n.y = (Number(base.y) || 0) + (Math.random() - 0.5) * 6;
-      n.z = (Number(base.z) || 0) + (Math.random() - 0.5) * 6;
+      n.x = (Number(base.x) || 0) + (Math.random() - 0.5) * 8;
+      n.y = (Number(base.y) || 0) + (Math.random() - 0.5) * 8;
+      n.z = (Number(base.z) || 0) + (Math.random() - 0.5) * 8;
     }
   });
 }
@@ -404,7 +406,7 @@ function init3DGraph() {
       }
       const typeLabel = n.kind === 'file' ? 'Document' : `H${n.level || 1} Section`;
       // Shared plate: identical look to the tag-table crumb cell.
-      return `<div class="scene-tooltip">${nodePlateHtml({ title: n.name, kind: n.kind, level: n.level, file: n.file, line: n.line, clickable: false })}</div>`;
+      return `<div class="scene-tooltip">${nodePlateHtml({ title: n.name, kind: n.kind, level: n.level, file: n.file, line: n.line, project: n.project, clickable: false })}</div>`;
     })
     .nodeColor(n => {
       if (highlightNodes.size > 0) {
@@ -526,39 +528,48 @@ function updateLabelsVisibility() {
 function focusOnNode(node) {
   if (!node) return;
 
+  // Resolve live node with priority: Graph.graphData -> rawData.nodes -> input node
   let liveNode = node;
-  if (liveNode.x === undefined || liveNode.y === undefined || liveNode.z === undefined) {
-    if (Graph && Graph.graphData) {
-      const gNodes = Graph.graphData().nodes || [];
-      liveNode = gNodes.find(n => n.id === node.id) || (rawData.nodes || []).find(n => n.id === node.id) || node;
-    }
+  const rawMatch = (rawData.nodes || []).find(n => n.id === node.id);
+  const graphNodes = (Graph && Graph.graphData) ? (Graph.graphData().nodes || []) : [];
+  const gMatch = graphNodes.find(n => n.id === node.id);
+
+  if (gMatch && gMatch.x !== undefined && gMatch.y !== undefined && gMatch.z !== undefined) {
+    liveNode = gMatch;
+  } else if (rawMatch && rawMatch.x !== undefined && rawMatch.y !== undefined && rawMatch.z !== undefined) {
+    liveNode = rawMatch;
+  } else if (node.x !== undefined && node.y !== undefined && node.z !== undefined) {
+    liveNode = node;
+  } else if (gMatch) {
+    liveNode = gMatch;
+  } else if (rawMatch) {
+    liveNode = rawMatch;
   }
 
   if (!liveNode) return;
   activeNode = liveNode;
 
-  // 1. Center the SELECTED node itself — never its ancestor. Explorer +
-  // 3D + viewer all sync to the same node (selection decree).
-  //
-  // EXCEPTION — "child highlights upward" (concept learned from codegraph-galaxy):
-  // dispatchUnifiedSelection temporarily reveals this selection's upward chain
-  // (chain ids + seeded coordinates) so the node appears in 3D and the camera
-  // centers on it. Residual cases where the node still has no rendered ball
-  // (whole chain without positions yet, or a node from an unselected project):
-  // centering on it would fly the camera to empty space (stale coords) or to
-  // nowhere. highlightScope('node') is lighting up the visible ancestor chain,
-  // so center the camera on the NEAREST VISIBLE ANCESTOR instead — the user
-  // sees exactly where the child lives.
+  // Check if node is visible or revealed in 3D
   const isVisibleIn3D = (n) => {
     if (!n || n.x === undefined) return false;
-    // Drill-down temporary reveal counts as visible (hiddenKinds untouched)
     if (hiddenKinds.has(n.kind) && !tempRevealIds.has(n.id)) return false;
-    const gd = (Graph && Graph.graphData) ? (Graph.graphData().nodes || []) : null;
-    if (gd && gd.length > 0) return gd.some(x => x.id === n.id);
     return true;
   };
+
   let centerNode = liveNode;
   if (!isVisibleIn3D(liveNode)) {
+    // If liveNode coordinates are missing, attempt to seed them from ancestor or file
+    if (liveNode.x === undefined) {
+      seedChainPositions([liveNode.id]);
+      if (rawMatch && rawMatch.x !== undefined) {
+        liveNode.x = rawMatch.x; liveNode.y = rawMatch.y; liveNode.z = rawMatch.z;
+        if (node !== rawMatch) { node.x = rawMatch.x; node.y = rawMatch.y; node.z = rawMatch.z; }
+      }
+    }
+  }
+
+  // If node is now visible or revealed, target node itself! Only fallback to ancestor if completely unpositioned
+  if (!isVisibleIn3D(centerNode)) {
     // Walk parent_child up the chain (raw links) to the nearest visible ancestor
     const gLinks = rawData.links || [];
     let frontier = [node.id];
@@ -585,7 +596,6 @@ function focusOnNode(node) {
     if (found) {
       centerNode = found;
     } else {
-      // Hidden and no visible ancestor: light up only, never fly to empty space
       return;
     }
   }
@@ -1977,10 +1987,19 @@ function renderConnectedRelationsPanel(node) {
     } else if (lk === 'doc_link') { arrw = '→'; blbl = 'doc'; }
     else if (lk === 'wiki_link') { arrw = '→'; blbl = 'wiki'; }
     else if (lk === 'contains') { arrw = '↓'; blbl = 'has'; }
-    h += `<div style="border:1px solid #21262d;border-radius:8px;padding:6px 8px;margin-bottom:6px;cursor:pointer;" onclick="jumpToNodeById('${enc}')" title="${esc(other)}">`
+    const cleanFile = String(file || (nd && nd.file) || '').replace(/^p\d+::/, '').replace(/^file::/, '');
+    const proj = (nd && nd.project) || '';
+    const cleanTitle = stripMdLinks(title || (nd && nd.name) || cleanFile.split(/[\\/]/).pop() || '');
+    let hoverTooltip = proj ? `[${proj}] ` : '';
+    if (cleanFile && cleanFile !== cleanTitle) {
+      hoverTooltip += `${cleanTitle} (${cleanFile})`;
+    } else {
+      hoverTooltip += (cleanFile || cleanTitle);
+    }
+    h += `<div style="border:1px solid #21262d;border-radius:8px;padding:6px 8px;margin-bottom:6px;cursor:pointer;" onclick="jumpToNodeById('${enc}')" title="${esc(hoverTooltip)}">`
       + `<div style="display:flex;align-items:flex-start;gap:6px;">`
       + `<span title="${esc(lk)}" style="flex-shrink:0;font-size:11px;color:#c9d1d9;border:1px solid #30363d;border-radius:10px;padding:1px 7px;margin-top:1px;white-space:nowrap;">${arrw} ${esc(blbl)}</span>`
-      + `<div style="flex:1;min-width:0;font-size:12px;">${nodePlateHtml({ title, kind, file, line, clickable: false })}</div>`
+      + `<div style="flex:1;min-width:0;font-size:12px;">${nodePlateHtml({ title, kind, file, line, project: proj, clickable: false })}</div>`
       + `</div></div>`;
     shown++;
   }
@@ -4618,9 +4637,24 @@ function dispatchUnifiedSelection(target, options = {}) {
       applyLODAndFilter(false); // no auto reframe — focusOnNode owns the camera
     }
 
+    // Synchronize coordinates back to targetNode object if populated in rawData
+    const rawTarget = (rawData.nodes || []).find(x => x.id === targetNode.id);
+    if (rawTarget && rawTarget.x !== undefined) {
+      targetNode.x = rawTarget.x;
+      targetNode.y = rawTarget.y;
+      targetNode.z = rawTarget.z;
+    }
+
     // 2. Sync 3D Galaxy (focus camera, highlight neighborhood cluster)
     highlightScope('node', targetNode);
     focusOnNode(targetNode);
+
+    // If node was freshly revealed, re-aim smoothly after force simulation initial tick
+    if (revealChanged) {
+      setTimeout(() => {
+        focusOnNode(targetNode);
+      }, 70);
+    }
 
     // 3. Central Markdown Viewer (fetches sliced section if heading, full doc if file)
     selectActiveNode(targetNode, true);
@@ -4833,7 +4867,9 @@ function unblacklistTerm(name, restore) {
 // heading::, no L13): doc (orange, opens file) › heading (green, opens at
 // line). Colours match KIND_COLORS (file / H2).
 function parseRefId(src) {
-  const s = String(src || '');
+  let s = String(src || '');
+  // Strip multi-repo namespace prefixes like p6:: or p0::
+  s = s.replace(/^p\d+::/, '');
   let m = s.match(/^heading::(.+?)::L(\d+)::([\s\S]*)$/);
   if (m) return { kind: 'heading', file: m[1], line: parseInt(m[2], 10) || 1, title: (m[3] || '').trim() };
   m = s.match(/^file::([\s\S]*)$/);
@@ -4870,25 +4906,30 @@ function nodePlateHtml(o) {
   if (level == null) { const m = String(kind).match(/(\d+)$/); level = m ? parseInt(m[1], 10) : 1; }
   const kindLabel = kind === 'concept' ? 'Concept Tag'
     : (kind === 'file' ? 'Document' : ('H' + level + ' Section'));
-  const docName = clean(String(o.file || '').split(/[\\/]/).pop() || String(o.file || ''));
+  const rawFile = clean(String(o.file || '').replace(/^p\d+::/, '').replace(/^file::/, ''));
+  const docName = rawFile ? (rawFile.split(/[\\/]/).pop() || rawFile) : '';
+  const proj = o.project || '';
+  const fullDispPath = proj ? `[${proj}] ${rawFile}` : rawFile;
   const title = clean(strip(o.title));
   const line = o.line || 1;
   const js = String(o.file || '').replace(/\\/g, '\\\\').replace(/'/g, "\\'");
   let titleHtml, subInner;
   if (kind === 'file') {
-    titleHtml = `<span style="color:${color};font-weight:600;${o.clickable ? 'cursor:pointer;' : ''}"${o.clickable ? ` onclick="openFileInEditor('${js}', 1)"` : ''} title="${esc(noQ(o.file || ''))}">${esc(docName)}</span>`;
+    titleHtml = `<span style="color:${color};font-weight:600;${o.clickable ? 'cursor:pointer;' : ''}"${o.clickable ? ` onclick="openFileInEditor('${js}', 1)"` : ''} title="${esc(noQ(fullDispPath))}">${esc(docName || title)}</span>`;
     const fileHtml = o.clickable
-      ? `<span style="cursor:pointer;" onclick="openFileInEditor('${js}', 1)" title="${esc(noQ(o.file || ''))}">${esc(docName)}</span>`
-      : `<span>${esc(docName)}</span>`;
-    subInner = `${esc(kindLabel)} · ${fileHtml} · Line ${line}`;
+      ? `<span style="cursor:pointer;" onclick="openFileInEditor('${js}', 1)" title="${esc(noQ(fullDispPath))}">${esc(rawFile || docName)}</span>`
+      : `<span title="${esc(noQ(fullDispPath))}">${esc(rawFile || docName)}</span>`;
+    const projPrefix = proj ? `<span style="color:#58a6ff;font-weight:600;margin-right:2px;">[${esc(proj)}]</span> ` : '';
+    subInner = `${projPrefix}${fileHtml}`;
   } else {
     const enc = encodeURIComponent(o.title || '').replace(/'/g, '%27');
     const open = o.clickable ? `openHeadingInEditor('${js}', ${line}, '${enc}')` : '';
-    titleHtml = `<span style="color:${color};font-weight:600;${o.clickable ? 'cursor:pointer;' : ''}"${o.clickable ? ` onclick="${open}"` : ''} title="${esc(noQ(title))}">${esc(title)}</span>`;
+    titleHtml = `<span style="color:${color};font-weight:600;${o.clickable ? 'cursor:pointer;' : ''}"${o.clickable ? ` onclick="${open}"` : ''} title="${esc(noQ(fullDispPath ? title + ' (' + fullDispPath + ')' : title))}">${esc(title)}</span>`;
     const fileHtml = o.clickable
-      ? `<span style="cursor:pointer;" onclick="openFileInEditor('${js}', 1)" title="${esc(noQ(o.file || ''))}">${esc(docName)}</span>`
-      : `<span>${esc(docName)}</span>`;
-    subInner = `${esc(kindLabel)} · ${fileHtml} · Line ${line}`;
+      ? `<span style="cursor:pointer;" onclick="openFileInEditor('${js}', 1)" title="${esc(noQ(fullDispPath))}">${esc(rawFile || docName)}</span>`
+      : `<span title="${esc(noQ(fullDispPath))}">${esc(rawFile || docName)}</span>`;
+    const projPrefix = proj ? `<span style="color:#58a6ff;font-weight:600;margin-right:2px;">[${esc(proj)}]</span> ` : '';
+    subInner = `${projPrefix}${fileHtml}`;
   }
   return `${titleHtml}<div style="font-size:11px;color:#8b949e;">${subInner}</div>`;
 }
@@ -4897,15 +4938,19 @@ function refCrumbHtml(src) {
   // title line in kind colour + `Kind · file · Line n` sub line.
   const p = parseRefId(src);
   let nodeKind = (p.kind === 'heading') ? 'heading_2' : 'file';
+  let proj = '';
   try {
     const g = (typeof rawData !== 'undefined' && rawData && rawData.nodes) ? rawData.nodes : [];
     const nd = g.find(n => n && (n.id === src || (typeof n.id === 'string' && n.id.endsWith('::' + src))));
-    if (nd && nd.kind) nodeKind = nd.kind;
+    if (nd) {
+      if (nd.kind) nodeKind = nd.kind;
+      if (nd.project) proj = nd.project;
+    }
   } catch (e) {}
   if (p.kind === 'heading' && p.title) {
-    return nodePlateHtml({ title: p.title, kind: nodeKind, file: p.file, line: p.line, clickable: true });
+    return nodePlateHtml({ title: p.title, kind: nodeKind, file: p.file, line: p.line, project: proj, clickable: true });
   }
-  return nodePlateHtml({ title: (p.file.split(/[\\/]/).pop() || p.file), kind: 'file', file: p.file, line: 1, clickable: true });
+  return nodePlateHtml({ title: (p.file.split(/[\\/]/).pop() || p.file), kind: 'file', file: p.file, line: 1, project: proj, clickable: true });
 }
 
 function renderLinkedFilesHtml(conceptName, files, zh) {
@@ -6815,6 +6860,7 @@ function applyAppLanguage() {
   updateViewerTagToolbarI18n();
   updateViewerNavI18n();
   updateSettingsModalI18n();
+  updateChatWidgetI18n();
   if (typeof buildLegends === 'function') {
     buildLegends();
   }
@@ -7698,3 +7744,553 @@ function resetPromptToDefault(key, safeKey) {
     btnBorder: '#388bfd'
   });
 }
+
+
+// ─── AI Knowledge Chat Engine (MCP-Orchestrated) ─────────────────────
+let chatMessagesHistory = [];
+let isChatStreaming = false;
+let chatActiveDoc = null;
+let isFloatingChatOpen = false;
+
+function getActiveDocPath() {
+  if (viewCtx && viewCtx.file) return viewCtx.file.replace(/\\/g, '/');
+  if (activeNode) return (activeNode.file || activeNode.abs_path || activeNode.name || '').replace(/\\/g, '/');
+  return '';
+}
+
+function initFloatingChatInteractions() {
+  const card = document.getElementById('floating-chat-card');
+  if (!card || card.dataset.interactiveInit === 'true') return;
+  card.dataset.interactiveInit = 'true';
+
+  // Ensure card has resizable CSS
+  card.style.resize = 'both';
+  card.style.minWidth = '380px';
+  card.style.minHeight = '300px';
+
+  const header = card.querySelector('.floating-chat-header');
+  if (!header) return;
+  header.style.cursor = 'move';
+  header.style.userSelect = 'none';
+
+  let isDragging = false;
+  let startX = 0, startY = 0;
+  let initLeft = 0, initTop = 0;
+
+  header.addEventListener('mousedown', (e) => {
+    // Ignore clicks on buttons inside header
+    if (e.target.closest('button')) return;
+    isDragging = true;
+    startX = e.clientX;
+    startY = e.clientY;
+
+    const rect = card.getBoundingClientRect();
+    initLeft = rect.left;
+    initTop = rect.top;
+
+    // Convert from bottom/right layout to fixed top/left layout on first drag
+    card.style.bottom = 'auto';
+    card.style.right = 'auto';
+    card.style.left = `${initLeft}px`;
+    card.style.top = `${initTop}px`;
+
+    const onMouseMove = (ev) => {
+      if (!isDragging) return;
+      const dx = ev.clientX - startX;
+      const dy = ev.clientY - startY;
+      let newLeft = Math.max(10, Math.min(window.innerWidth - card.offsetWidth - 10, initLeft + dx));
+      let newTop = Math.max(10, Math.min(window.innerHeight - card.offsetHeight - 10, initTop + dy));
+      card.style.left = `${newLeft}px`;
+      card.style.top = `${newTop}px`;
+    };
+
+    const onMouseUp = () => {
+      isDragging = false;
+      document.removeEventListener('mousemove', onMouseMove);
+      document.removeEventListener('mouseup', onMouseUp);
+    };
+
+    document.addEventListener('mousemove', onMouseMove);
+    document.addEventListener('mouseup', onMouseUp);
+  });
+}
+
+
+function updateChatWidgetI18n() {
+  const lang = (typeof currentLanguage !== 'undefined') ? currentLanguage : 'zh';
+  const zh = lang === 'zh';
+  const ja = lang === 'ja';
+  const set = (id, txt) => { const el = document.getElementById(id); if (el) el.textContent = txt; };
+  const setAttr = (id, attr, txt) => { const el = document.getElementById(id); if (el) el.setAttribute(attr, txt); };
+
+  // Trigger floating button
+  setAttr('floating-chat-trigger', 'title', zh ? 'AI 知識檢索問答 (MCP Chat)' : (ja ? 'AIナレッジ検索・対話 (MCP Chat)' : 'AI Knowledge Copilot (MCP Chat)'));
+
+  // Header & Buttons
+  set('lbl-floating-chat-title', zh ? 'MCP 知識問答助理' : (ja ? 'MCP ナレッジコパイロット' : 'MCP Knowledge Copilot'));
+  set('btn-clear-chat-widget', zh ? '🗑️ 清空' : (ja ? '🗑️ クリア' : '🗑️ Clear'));
+  setAttr('btn-clear-chat-widget', 'title', zh ? '清空對話歷史' : (ja ? '会話履歴をクリア' : 'Clear chat history'));
+
+  // Context bar
+  const ctxLabel = document.querySelector('#chat-active-doc-bar > span:first-child');
+  if (ctxLabel) ctxLabel.textContent = zh ? '📌 上下文：' : (ja ? '📌 コンテキスト：' : '📌 Context:');
+  set('btn-chat-set-context', zh ? '抓取當前' : (ja ? '現在を取得' : 'Capture Doc'));
+  setAttr('btn-chat-set-context', 'title', zh ? '綁定目前正在閱讀的文件' : (ja ? '現在閲覧中の文書をバインド' : 'Bind current viewing document'));
+  updateChatContextDoc();
+
+  // Welcome box
+  set('lbl-chat-welcome-title', zh ? 'DocGraphical MCP 智慧檢索' : (ja ? 'DocGraphical MCP 知能検索' : 'DocGraphical MCP Intelligent Search'));
+  set('lbl-chat-welcome-desc', zh ? '向知識庫提問，中階由 MCP 工具精準檢索 TOC、章節與關聯圖，節省 97% Context Tokens 並附帶精準引用錨點。'
+                               : (ja ? 'ナレッジベースに質問します。MCPツールによりTOCや見出しを精密抽出してトークンを削減します。'
+                               : 'Ask questions to your knowledge base. MCP tools surgically slice TOC, sections, and topology.'));
+
+  // Input area
+  setAttr('chat-input-box', 'placeholder', zh ? '輸入問題... (Enter 送出，Shift+Enter 換行)' : (ja ? '質問を入力... (Enter 送信、Shift+Enter 改行)' : 'Type a query... (Enter to send, Shift+Enter for newline)'));
+  set('btn-chat-send', zh ? '送出' : (ja ? '送信' : 'Send'));
+  setAttr('btn-chat-send', 'title', zh ? '送出提問' : (ja ? '質問を送信' : 'Send query'));
+
+  const statusEl = document.getElementById('chat-status-indicator');
+  if (statusEl && !isChatStreaming) {
+    statusEl.textContent = zh ? '就緒' : (ja ? '待機中' : 'Ready');
+  }
+  const helperHint = document.querySelector('#chat-input-panel span:last-child');
+  if (helperHint) {
+    helperHint.textContent = zh ? 'Shift+Enter 換行' : (ja ? 'Shift+Enter で改行' : 'Shift+Enter for newline');
+  }
+}
+
+function toggleFloatingChat(forceState) {
+  const card = document.getElementById('floating-chat-card');
+  if (!card) return;
+  if (typeof forceState === 'boolean') {
+    isFloatingChatOpen = forceState;
+  } else {
+    isFloatingChatOpen = !isFloatingChatOpen;
+  }
+
+  if (isFloatingChatOpen) {
+    initFloatingChatInteractions();
+    card.classList.remove('hidden');
+    updateChatContextDoc();
+    const input = document.getElementById('chat-input-box');
+    if (input) setTimeout(() => input.focus(), 100);
+  } else {
+    card.classList.add('hidden');
+  }
+}
+
+function updateChatContextDoc() {
+  const badgeEl = document.getElementById('chat-active-doc-name');
+  if (!badgeEl) return;
+  const zh = currentLanguage === 'zh';
+  const ja = currentLanguage === 'ja';
+  const curDoc = getActiveDocPath();
+  if (chatActiveDoc) {
+    badgeEl.textContent = chatActiveDoc;
+    badgeEl.style.color = '#58a6ff';
+  } else if (curDoc) {
+    badgeEl.textContent = curDoc;
+    badgeEl.style.color = '#7ee787';
+  } else {
+    badgeEl.textContent = zh ? '全庫搜尋 (Global)' : (ja ? '全体検索 (Global)' : 'Global Repository');
+    badgeEl.style.color = '#8b949e';
+  }
+}
+
+function setChatContextActiveDoc() {
+  const zh = currentLanguage === 'zh';
+  const ja = currentLanguage === 'ja';
+  const curDoc = getActiveDocPath();
+  if (curDoc) {
+    chatActiveDoc = curDoc;
+    updateChatContextDoc();
+    showToast(zh ? `已綁定對話上下文：${curDoc}` : (ja ? `コンテキストを設定しました：${curDoc}` : `Set chat context: ${curDoc}`));
+  } else {
+    chatActiveDoc = null;
+    updateChatContextDoc();
+    showToast(zh ? '目前未開啟文件，使用全庫搜尋' : (ja ? 'ドキュメント未選択のため全体検索を使用' : 'No document opened, using global search'));
+  }
+}
+
+function clearChatHistory() {
+  chatMessagesHistory = [];
+  const container = document.getElementById('chat-messages-container');
+  if (container) {
+    const zh = currentLanguage === 'zh';
+    const ja = currentLanguage === 'ja';
+    container.innerHTML = `
+      <div class="chat-welcome-box" style="padding:14px; background:#161b22; border:1px solid #30363d; border-radius:8px; font-size:12px; color:#8b949e; line-height:1.6;">
+        <div style="font-weight:600; color:#e6edf3; margin-bottom:6px; display:flex; align-items:center; gap:6px;">
+          <span style="color:#58a6ff; font-size:14px;">⚡</span>
+          <span>${zh ? 'DocGraphical MCP 智慧檢索' : (ja ? 'DocGraphical MCP 知能検索' : 'DocGraphical MCP Intelligent Search')}</span>
+        </div>
+        <div>
+          ${zh ? '向知識庫提問，中階由 MCP 工具精準檢索 TOC、章節與關聯圖，節省 97% Context Tokens 並附帶精準引用錨點。' : (ja ? 'ナレッジベースに質問します。MCPツールによりTOCや見出しを精密抽出してトークンを削減します。' : 'Ask questions to your knowledge base. MCP tools surgically slice TOC, sections, and topology.')}
+        </div>
+      </div>
+    `;
+  }
+  const statusEl = document.getElementById('chat-status-indicator');
+  if (statusEl) statusEl.textContent = 'Ready';
+}
+
+function handleChatInputKey(event) {
+  if (event.key === 'Enter' && !event.shiftKey) {
+    event.preventDefault();
+    sendChatMessage();
+  }
+}
+
+
+function buildCitationPillHtml(cleanFile, cleanHeading) {
+  const shortFile = cleanFile.split(/[\\/]/).pop() || cleanFile;
+  const isMd = /\.md$/i.test(cleanFile);
+  const fileColor = isMd ? (KIND_COLORS.file || '#f0883e') : '#58a6ff';
+  const fileBg = isMd ? 'rgba(240, 136, 62, 0.15)' : 'rgba(31, 111, 235, 0.15)';
+  const fileBorder = isMd ? 'rgba(240, 136, 62, 0.4)' : 'rgba(56, 139, 253, 0.4)';
+
+  let headingColor = KIND_COLORS.heading_2 || '#3fb950';
+  let headingBg = 'rgba(63, 185, 80, 0.15)';
+  let headingBorder = 'rgba(63, 185, 80, 0.4)';
+
+  if (cleanHeading) {
+    const gNodes = (masterGraphData.nodes && masterGraphData.nodes.length) ? masterGraphData.nodes : (rawData.nodes || []);
+    const targetBase = cleanFile.toLowerCase();
+    const hText = cleanHeading.toLowerCase();
+    const foundH = gNodes.find(n => {
+      if (!n.kind || !n.kind.startsWith('heading')) return false;
+      const nf = (n.file || n.abs_path || '').replace(/\\/g, '/').toLowerCase();
+      const fMatch = !targetBase || nf.endsWith(targetBase);
+      const nMatch = (n.name || '').trim().toLowerCase() === hText || (n.name || '').trim().toLowerCase().includes(hText);
+      return fMatch && nMatch;
+    });
+
+    if (foundH) {
+      headingColor = KIND_COLORS[foundH.kind] || '#3fb950';
+    } else if (cleanHeading.startsWith('# ')) {
+      headingColor = KIND_COLORS.heading_1 || '#58a6ff';
+    } else if (cleanHeading.startsWith('### ')) {
+      headingColor = KIND_COLORS.heading_3 || '#bc8cff';
+    } else if (cleanHeading.startsWith('#### ')) {
+      headingColor = KIND_COLORS.heading_4 || '#ff7bba';
+    }
+    headingBg = `${headingColor}22`;
+    headingBorder = `${headingColor}55`;
+  }
+
+  const fJs = cleanFile.replace(/'/g, "\\'");
+  const hJs = cleanHeading.replace(/'/g, "\\'");
+  const fullPathTip = cleanHeading ? `${cleanFile} > ${cleanHeading}` : cleanFile;
+
+  return `<span class="chat-citation-pill" style="display:inline-flex; align-items:center; margin:2px 3px; background:#161b22; border:1px solid ${cleanHeading ? headingBorder : fileBorder}; border-radius:6px; overflow:hidden; font-size:11px; font-weight:600;">`
+    + `<span onclick="handleChatCitationClick('${fJs}', '', true)" title="跳轉至來源檔案: ${cleanFile}" style="padding:2px 7px; color:${fileColor}; cursor:pointer; background:${fileBg}; border-right:${cleanHeading ? `1px solid ${fileBorder}` : 'none'}; display:inline-flex; align-items:center; gap:4px;">📄 ${escapeHtml(shortFile)}</span>`
+    + (cleanHeading ? `<span onclick="handleChatCitationClick('${fJs}', '${hJs}', false)" title="跳轉定位至章節: ${fullPathTip}" style="padding:2px 7px; color:${headingColor}; cursor:pointer; background:${headingBg}; display:inline-flex; align-items:center; gap:2px;">› ${escapeHtml(cleanHeading)}</span>` : '')
+    + `</span>`;
+}
+
+function formatChatMarkdown(text) {
+  if (!text) return '';
+  let safe = text
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
+
+  // Render clickable citations: [[file#heading]] or [[file]] or [file:heading]
+  safe = safe.replace(/\[\[(.*?)(?:#(.*?))?\]\]/g, (match, file, heading) => {
+    const cleanFile = (file || '').trim();
+    let cleanHeading = (heading || '').trim().replace(/^#+\s*/, '').trim();
+    return buildCitationPillHtml(cleanFile, cleanHeading);
+  });
+
+  // Also support [filename.md:heading] or [filename.md#heading] pattern
+  safe = safe.replace(/\[([^\s\]]+\.(?:md|txt|docx|pdf))[:#]([^\]]+)\]/g, (match, file, heading) => {
+    const cleanFile = (file || '').trim();
+    let cleanHeading = (heading || '').trim().replace(/^#+\s*/, '').trim();
+    return buildCitationPillHtml(cleanFile, cleanHeading);
+  });
+
+  // Simple Markdown inline formatting (bold, backticks)
+  safe = safe.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
+  safe = safe.replace(/`([^`]+)`/g, '<code style="background:#21262d; padding:2px 4px; border-radius:3px; font-size:11px; color:#f0883e;">$1</code>');
+  safe = safe.replace(/\n/g, '<br/>');
+  return safe;
+}
+
+function handleChatCitationClick(file, heading, bTargetFileOnly = false) {
+  if (!file) return;
+  const cleanF = String(file || '').trim().replace(/^[pP]\d+::/, '').replace(/^file::/, '');
+  let cleanH = String(heading || '').trim().replace(/^#+\s*/, '').trim();
+  if (bTargetFileOnly) cleanH = '';
+
+  const zh = (typeof currentLanguage !== 'undefined' && currentLanguage === 'zh');
+  const ja = (typeof currentLanguage !== 'undefined' && currentLanguage === 'ja');
+
+  // Route 100% through the authoritative dispatchUnifiedSelection pipeline:
+  // this triggers: 1. Explorer tree sync, 2. temporary 3D reveal with root-to-leaf seeding,
+  // 3. highlightScope('node'), 4. focusOnNode with camera alignment, 5. Central markdown section slicing.
+  dispatchUnifiedSelection({ file: cleanF, heading: cleanH });
+}
+
+function appendChatMessageBubble(role, content) {
+  const container = document.getElementById('chat-messages-container');
+  if (!container) return null;
+  const bubble = document.createElement('div');
+  bubble.className = `chat-bubble chat-bubble-${role}`;
+  bubble.style.display = 'flex';
+  bubble.style.flexDirection = 'column';
+  bubble.style.gap = '4px';
+  bubble.style.maxWidth = '92%';
+  bubble.style.alignSelf = role === 'user' ? 'flex-end' : 'flex-start';
+  bubble.style.background = role === 'user' ? '#1f6feb' : '#161b22';
+  bubble.style.color = '#e6edf3';
+  bubble.style.padding = '8px 12px';
+  bubble.style.borderRadius = '8px';
+  bubble.style.fontSize = '12px';
+  bubble.style.lineHeight = '1.5';
+  bubble.style.border = role === 'user' ? '1px solid #388bfd' : '1px solid #30363d';
+  bubble.style.wordBreak = 'break-word';
+
+  if (role === 'assistant') {
+    bubble.innerHTML = `<div class="chat-content" style="color:#e6edf3;">${formatChatMarkdown(content)}</div>`;
+  } else {
+    bubble.textContent = content;
+  }
+
+  container.appendChild(bubble);
+  container.scrollTop = container.scrollHeight;
+  return bubble;
+}
+
+// Compact Breadcrumb Trace Container for MCP Tool Invocations
+function appendMcpToolCallCard(name, args) {
+  const container = document.getElementById('chat-messages-container');
+  if (!container) return null;
+
+  // Try to find the latest active breadcrumb container, or create one
+  let traceContainer = container.querySelector('.chat-mcp-trace-container:last-child');
+  if (!traceContainer || traceContainer.dataset.completed === 'true') {
+    traceContainer = document.createElement('div');
+    traceContainer.className = 'chat-mcp-trace-container';
+    traceContainer.style.alignSelf = 'flex-start';
+    traceContainer.style.maxWidth = '95%';
+    traceContainer.style.background = '#0d111788';
+    traceContainer.style.border = '1px solid #30363d';
+    traceContainer.style.borderRadius = '6px';
+    traceContainer.style.padding = '5px 10px';
+    traceContainer.style.margin = '4px 0';
+    traceContainer.style.fontSize = '11px';
+    traceContainer.style.color = '#8b949e';
+    traceContainer.style.display = 'flex';
+    traceContainer.style.flexDirection = 'column';
+    traceContainer.style.gap = '3px';
+
+    const titleRow = document.createElement('div');
+    titleRow.style.display = 'flex';
+    titleRow.style.alignItems = 'center';
+    titleRow.style.gap = '5px';
+    titleRow.style.color = '#58a6ff';
+    titleRow.style.fontWeight = '600';
+    titleRow.style.fontSize = '11px';
+    titleRow.innerHTML = `<span>⚡</span><span>檢索抓取路徑 (Trace)</span>`;
+
+    const breadcrumbs = document.createElement('div');
+    breadcrumbs.className = 'trace-breadcrumbs';
+    breadcrumbs.style.display = 'flex';
+    breadcrumbs.style.flexWrap = 'wrap';
+    breadcrumbs.style.alignItems = 'center';
+    breadcrumbs.style.gap = '4px';
+
+    traceContainer.appendChild(titleRow);
+    traceContainer.appendChild(breadcrumbs);
+    container.appendChild(traceContainer);
+  }
+
+  const breadcrumbs = traceContainer.querySelector('.trace-breadcrumbs');
+
+  // Format concise step
+  const fileRaw = args.filePath || args.repoPath || '';
+  const fileShort = fileRaw.split(/[\\/]/).pop() || fileRaw;
+  const heading = args.heading || '';
+  const query = args.query || '';
+
+  let stepLabel = '';
+  let fullTip = `${name} | ${JSON.stringify(args)}`;
+
+  if (name.includes('toc')) {
+    stepLabel = `📑 ${fileShort} › TOC`;
+  } else if (name.includes('section')) {
+    stepLabel = `📄 ${fileShort} › ${heading || '章節'}`;
+  } else if (name.includes('search')) {
+    stepLabel = `🔍 搜尋「${query}」`;
+  } else if (name.includes('graph')) {
+    stepLabel = `🌐 3D 拓撲關聯`;
+  } else {
+    stepLabel = `⚙️ ${name}`;
+  }
+
+  const stepItem = document.createElement('span');
+  stepItem.className = 'trace-step-item';
+  stepItem.title = fullTip;
+  stepItem.style.display = 'inline-flex';
+  stepItem.style.alignItems = 'center';
+  stepItem.style.gap = '3px';
+  stepItem.style.padding = '2px 7px';
+  stepItem.style.background = '#161b22';
+  stepItem.style.border = '1px solid #388bfd55';
+  stepItem.style.borderRadius = '4px';
+  stepItem.style.color = '#c9d1d9';
+  stepItem.style.fontSize = '11px';
+  stepItem.style.cursor = 'default';
+
+  if (breadcrumbs.children.length > 0) {
+    const sep = document.createElement('span');
+    sep.style.color = '#58a6ff';
+    sep.style.margin = '0 1px';
+    sep.textContent = '➔';
+    breadcrumbs.appendChild(sep);
+  }
+
+  stepItem.innerHTML = `<span>${stepLabel}</span><span class="step-status" style="color:#e3b341; font-size:10px; margin-left:3px;">⏳</span>`;
+  breadcrumbs.appendChild(stepItem);
+
+  container.scrollTop = container.scrollHeight;
+
+  // Return stepItem so result update can mark it checked
+  const cardProxy = {
+    querySelector: (sel) => {
+      if (sel === '.tool-result-box') {
+        return {
+          set textContent(val) {
+            const statusIcon = stepItem.querySelector('.step-status');
+            if (statusIcon) {
+              statusIcon.textContent = '✓';
+              statusIcon.style.color = '#3fb950';
+            }
+          },
+          style: {}
+        };
+      }
+      return null;
+    }
+  };
+  return cardProxy;
+}
+
+async function sendChatMessage() {
+  if (isChatStreaming) return;
+  const inputEl = document.getElementById('chat-input-box');
+  const sendBtn = document.getElementById('btn-chat-send');
+  const statusEl = document.getElementById('chat-status-indicator');
+  const container = document.getElementById('chat-messages-container');
+  if (!inputEl) return;
+
+  const text = (inputEl.value || '').trim();
+  if (!text) return;
+
+  const zh = currentLanguage === 'zh';
+  const ja = currentLanguage === 'ja';
+
+  // Append user message
+  appendChatMessageBubble('user', text);
+  chatMessagesHistory.push({ role: 'user', content: text });
+  inputEl.value = '';
+
+  isChatStreaming = true;
+  if (sendBtn) {
+    sendBtn.disabled = true;
+    sendBtn.textContent = '...';
+  }
+  if (statusEl) statusEl.textContent = zh ? 'MCP 檢索中...' : (ja ? 'MCP 検索中...' : 'Executing MCP tools...');
+
+  // Prepare Assistant stream container
+  let assistantBubble = null;
+  let assistantContentEl = null;
+  let fullAssistantText = '';
+
+  try {
+    const payload = {
+      messages: chatMessagesHistory,
+      active_doc: chatActiveDoc || getActiveDocPath() || null
+    };
+
+    const resp = await fetch('/api/chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+
+    if (!resp.ok) {
+      throw new Error(`HTTP ${resp.status}`);
+    }
+
+    const reader = resp.body.getReader();
+    const decoder = new TextDecoder('utf-8');
+    let buffer = '';
+    let currentToolCard = null;
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split('\n');
+      buffer = lines.pop(); // Keep incomplete line
+
+      for (const line of lines) {
+        const trimmed = line.trim();
+        if (!trimmed || !trimmed.startsWith('data:')) continue;
+        const dataStr = trimmed.slice(5).trim();
+        if (!dataStr) continue;
+
+        try {
+          const ev = JSON.parse(dataStr);
+          if (ev.type === 'tool_call') {
+            currentToolCard = appendMcpToolCallCard(ev.name, ev.arguments);
+            if (statusEl) statusEl.textContent = `[MCP] ${ev.name}...`;
+          } else if (ev.type === 'tool_result') {
+            if (currentToolCard) {
+              const resBox = currentToolCard.querySelector('.tool-result-box');
+              if (resBox) {
+                resBox.style.display = 'block';
+                resBox.textContent = `✓ ${ev.result_summary || 'Done'}`;
+              }
+            }
+          } else if (ev.type === 'delta') {
+            if (!assistantBubble) {
+              assistantBubble = appendChatMessageBubble('assistant', '');
+              assistantContentEl = assistantBubble.querySelector('.chat-content');
+            }
+            fullAssistantText += ev.content;
+            if (assistantContentEl) {
+              assistantContentEl.innerHTML = formatChatMarkdown(fullAssistantText);
+            }
+            if (container) container.scrollTop = container.scrollHeight;
+          } else if (ev.type === 'error') {
+            showToast('❌ ' + (ev.error || 'Chat error'));
+            if (!assistantBubble) {
+              assistantBubble = appendChatMessageBubble('assistant', `⚠️ 錯誤: ${ev.error}`);
+            }
+          }
+        } catch (e) {
+          console.error('SSE JSON parse error:', e, dataStr);
+        }
+      }
+    }
+
+    if (fullAssistantText) {
+      chatMessagesHistory.push({ role: 'assistant', content: fullAssistantText });
+    }
+  } catch (err) {
+    console.error('Chat error:', err);
+    showToast('❌ Chat network error: ' + err.message);
+    appendChatMessageBubble('assistant', `⚠️ 無法完成連線: ${err.message}`);
+  } finally {
+    isChatStreaming = false;
+    if (sendBtn) {
+      sendBtn.disabled = false;
+      sendBtn.textContent = zh ? '送出' : (ja ? '送信' : 'Send');
+    }
+    if (statusEl) statusEl.textContent = 'Ready';
+  }
+}
+

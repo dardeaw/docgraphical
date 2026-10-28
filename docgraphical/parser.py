@@ -16,12 +16,43 @@ class HeadingNode:
     raw_line: str
 
 
+def resolve_doc_path(file_path: str) -> str:
+    """Resolve a file path that might be absolute, relative, or just a filename across search roots."""
+    if not file_path:
+        return ""
+    if os.path.exists(file_path):
+        return os.path.abspath(file_path)
+    
+    # Try resolving across configured search roots
+    from .config import get_search_roots
+    clean_p = file_path.replace("\\", "/").strip().lstrip("/")
+    base_name = os.path.basename(clean_p)
+    
+    for r in get_search_roots():
+        # Direct join
+        cand = os.path.normpath(os.path.join(r, clean_p))
+        if os.path.exists(cand):
+            return cand
+        # Deep walk search
+        for dirpath, _, filenames in os.walk(r):
+            if any(part.startswith(".") or part in ("node_modules", "dist", "build", "__pycache__") for part in dirpath.split(os.sep)):
+                continue
+            for fn in filenames:
+                if fn.lower() == base_name.lower():
+                    return os.path.join(dirpath, fn)
+                full = os.path.join(dirpath, fn).replace("\\", "/")
+                if full.lower().endswith(clean_p.lower()):
+                    return os.path.join(dirpath, fn)
+    return file_path
+
+
 def parse_headings(file_path: str) -> List[HeadingNode]:
     """Parse all headings (# ... ######) from a Markdown file, ignoring code blocks."""
-    if not os.path.exists(file_path):
+    real_path = resolve_doc_path(file_path)
+    if not os.path.exists(real_path):
         raise FileNotFoundError(f"File not found: {file_path}")
 
-    with open(file_path, "r", encoding="utf-8", errors="replace") as f:
+    with open(real_path, "r", encoding="utf-8", errors="replace") as f:
         lines = f.readlines()
 
     headings: List[HeadingNode] = []
@@ -93,10 +124,11 @@ def extract_section(
     include_subsections: bool = True
 ) -> str:
     """Surgically extract a specific section by heading title."""
-    if not os.path.exists(file_path):
+    real_path = resolve_doc_path(file_path)
+    if not os.path.exists(real_path):
         return f"Error: File not found: {file_path}"
 
-    with open(file_path, "r", encoding="utf-8", errors="replace") as f:
+    with open(real_path, "r", encoding="utf-8", errors="replace") as f:
         lines = f.readlines()
 
     target_clean = target_heading.strip().lower().lstrip("#").strip()
@@ -163,31 +195,48 @@ def extract_section(
 
 
 def search_doc(
-    path: str,
-    query: str,
+    path: str = "",
+    query: str = "",
     max_results: int = 30
 ) -> str:
     """Search Markdown file or directory for relevant sections or lines."""
-    if not os.path.exists(path):
-        return f"Error: Path not found: {path}"
-
+    from .config import get_search_roots
     md_files: List[str] = []
-    if os.path.isfile(path):
-        md_files.append(path)
-    else:
-        for root, _, files in os.walk(path):
-            # Ignore hidden or vendor directories
-            if any(part.startswith(".") or part in ("node_modules", "dist", "build", "__pycache__") for part in root.split(os.sep)):
+    
+    clean_p = (path or "").strip()
+    if not clean_p or clean_p in (".", "/", "\\", "all", "global"):
+        # Search across all configured search roots
+        for r in get_search_roots():
+            if not os.path.exists(r):
                 continue
-            for file in files:
-                if file.lower().endswith((".md", ".markdown", ".mdown")):
-                    md_files.append(os.path.join(root, file))
+            for root, _, files in os.walk(r):
+                if any(part.startswith(".") or part in ("node_modules", "dist", "build", "__pycache__") for part in root.split(os.sep)):
+                    continue
+                for file in files:
+                    if file.lower().endswith((".md", ".markdown", ".mdown")):
+                        md_files.append(os.path.join(root, file))
+        real_path = get_search_roots()[0] if get_search_roots() else ""
+    else:
+        real_path = resolve_doc_path(clean_p)
+        if not os.path.exists(real_path):
+            return f"Error: Path not found: {path}"
+        if os.path.isfile(real_path):
+            md_files.append(real_path)
+        else:
+            for root, _, files in os.walk(real_path):
+                if any(part.startswith(".") or part in ("node_modules", "dist", "build", "__pycache__") for part in root.split(os.sep)):
+                    continue
+                for file in files:
+                    if file.lower().endswith((".md", ".markdown", ".mdown")):
+                        md_files.append(os.path.join(root, file))
 
     if not md_files:
         return f"No Markdown files found in {path}"
 
     results: List[str] = []
     query_clean = query.strip().lower()
+    # Split query into keywords (support multi-keyword intersection or match)
+    keywords = [kw for kw in re.split(r"[\s,;+]+", query_clean) if kw]
 
     for mf in md_files:
         try:
@@ -195,11 +244,23 @@ def search_doc(
                 lines = f.readlines()
 
             for idx, line in enumerate(lines, 1):
-                if query_clean in line.lower():
-                    rel_path = os.path.relpath(mf, path) if os.path.isdir(path) else os.path.basename(mf)
+                line_lower = line.lower()
+                # Check exact phrase OR all/any keywords
+                matched = False
+                if query_clean in line_lower:
+                    matched = True
+                elif keywords and all(kw in line_lower for kw in keywords):
+                    matched = True
+                elif len(keywords) > 1 and any(kw in line_lower for kw in keywords):
+                    # Partial match if primary keyword matches
+                    if keywords[0] in line_lower:
+                        matched = True
+
+                if matched:
+                    rel_path = os.path.relpath(mf, real_path) if os.path.isdir(real_path) else os.path.basename(mf)
                     snippet = line.strip()
-                    if len(snippet) > 120:
-                        snippet = snippet[:117] + "..."
+                    if len(snippet) > 140:
+                        snippet = snippet[:137] + "..."
                     results.append(f"- **{rel_path}** [L{idx}]: `{snippet}`")
                     if len(results) >= max_results:
                         break

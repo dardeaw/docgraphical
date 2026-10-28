@@ -2,7 +2,9 @@
 
 [English](README.md) | [繁體中文](README.zh-TW.md)
 
-A personal and team **Knowledge Management (KM) platform**: turn knowledge scattered across PDF / PPT / Word / Markdown into an accumulable, citable, conversable deterministic knowledge base. The foundation is a deterministic Markdown AST parser with a surgical slicing engine; on top sit the document ingest pipeline, a 3D knowledge map, MCP tools, and a (planned) AI chat panel.
+[![CI](https://github.com/dardeaw/docgraphical/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/dardeaw/docgraphical/actions/workflows/ci.yml)
+
+A personal and team **Knowledge Management (KM) platform**: turn knowledge scattered across PDF / PPT / Word / Markdown into an accumulable, citable, conversable deterministic knowledge base. The foundation is a deterministic Markdown AST parser with a surgical slicing engine; on top sit the document ingest pipeline, a 3D knowledge map, MCP tools, an AI conversation panel grounded in verbatim slices, and a prompt manager for every LLM call.
 
 > Master plan: [`PLAN.zh-TW.md`](PLAN.zh-TW.md) (KM Master Plan — four dogmas, target architecture, Phase 0–5, in Traditional Chinese).
 
@@ -66,12 +68,23 @@ In one line: **CPU decides which cuts to read; the LLM only reads those cuts int
 - **Viewer navigation**: browser-like back/forward across document, section, tag, and draft pages, restored through the same selection entry points (explorer + 3D + viewer stay synced)
 - REST API: `/api/concepts/scan*` (mine/review/confirm/blacklist), `/api/crawl/{start,next,finish,confirm,refresh}` (runs live in server memory), `/api/concepts/candidates/draft` (evidence groups)
 
-### Prompts Manager & Internationalization — v1.7.0
+### Prompts Manager & Internationalization — v3.0.0
 - **Prompt template curation**: Full customizable prompts drawer panel for concept mining, vine crawling (seed/file/finish), and document ingestion (text/multimodal vision).
 - **Category tabs & search**: Filter prompt cards by operational category (All, Concept Scan, Vine Crawl, Ingestion) combined with live keyword search across keys and template bodies.
 - **Preview & safe reset**: Cyber confirmation modal with default prompt template preview before resetting to defaults (no browser native alert/confirm).
 - **OS-level locale auto-detection**: Automatically detects system and browser default language (Traditional Chinese, English, Japanese) across Windows, macOS, and Linux on first launch, with localStorage persistence.
 - **Universal component internationalization**: 100% complete multi-language support across all toolbar buttons, 3D controls, AST layers, relationship filters, and interactive dialogs.
+
+### AI conversational knowledge retrieval — v3.0.0
+- **Ask the knowledge base, not a vector store**: a floating chat panel answers questions through DocGraphical's own MCP tools — `docgraphical_search` for library-wide discovery, `docgraphical_toc` + `docgraphical_section` for surgical section reads, `docgraphical_graph` for structural context. Every answer is assembled from verbatim slices; no embeddings, no fuzzy semantic retrieval.
+- **Bounded tool loop, streamed**: up to five tool rounds per turn, streamed to the browser over SSE (`POST /api/chat`) as typed events — `tool_call`, `tool_result`, `delta`, `citation`, `done`, `error`.
+- **Grounded citations that jump**: every claim carries `[[file#heading]]`; the renderer turns each into a click target that opens the exact section in the viewer and locates it on the 3D map.
+- **Context-aware and read-only**: the currently open document is carried as chat context; the tool loop can only read (search / TOC / slice / graph), never write to the library — the human gate stays intact.
+- **App-wide LLM provider**: the chat reuses the same active provider as ingest and mining (OpenAI-compatible, key stored server-side); missing configuration surfaces as a clear in-chat error instead of a silent failure.
+
+### Continuous integration & release automation — v3.0.0
+- **CI gate**: `.github/workflows/ci.yml` lints both packages (`docgraph`, `docgraphical`), syntax-checks the frontend bundle, and runs `pytest` across Python 3.9–3.12 on Linux, Windows, and macOS.
+- **Tag-driven releases**: `.github/workflows/release.yml` builds the sdist/wheel on every `v*` tag, extracts that version's section from `CHANGELOG.md` as the release body, and publishes the GitHub Release with the artifacts attached — no manual upload step.
 
 ---
 
@@ -79,9 +92,9 @@ In one line: **CPU decides which cuts to read; the LLM only reads those cuts int
 
 ```text
 DocGraphical Web (knowledge management UI)
-[3D knowledge map] [TOC reading] [candidate-hit list] [AI chat panel] <- planned
+[3D knowledge map] [TOC reading] [candidate-hit list] [AI chat panel] <- live (v3.0.0)
               ^ Dogma 4: human gate (chat about this section)
-Dialogue backend = tool loop (planned M1: three governed tools)
+Dialogue backend = tool loop (live: search / toc / section / graph, read-only)
 MCP knowledge layer (existing: toc / section / search / graph / index)
 Deterministic foundation (existing: parser / scanner / db)
 Raw originals (immutable raw layer: md / pdf / ppt / word)
@@ -95,8 +108,8 @@ Raw originals (immutable raw layer: md / pdf / ppt / word)
 |---|---|---|
 | Phase 0 decisions | LLM endpoint (O1), hard-link semantics (O4), KB location (O5) | Pending |
 | Phase 1 multi-format ingest (M5) | CPU extract → LLM summarize → store → rescan; web dialog landed | In progress |
-| Phase 2 dialogue backend (M1) | `/api/chat` SSE + tool loop + human gate | Not started |
-| Phase 3 chat UI (M2+M3) | chat-about-this-section, candidate list, streaming panel, citation jumps | Not started |
+| Phase 2 dialogue backend (M1) | `/api/chat` SSE + tool loop + human gate | Done (v3.0.0) |
+| Phase 3 chat UI (M2+M3) | chat-about-this-section, candidate list, streaming panel, citation jumps | Done (v3.0.0) |
 | Phase 4 slice-aggregation QA | Cross-doc search → aggregate → one read-through answer (dogma 3) | Not started |
 | Phase 5 wiki cache layer (M4, stage 2) | Answer write-back + fingerprint invalidation + lint-lite | Stage 2 |
 
@@ -273,6 +286,7 @@ console.log(slice);
 
 ## Development Status
 
+- **v3.0.0** — AI conversational knowledge retrieval live (MCP tool loop, SSE streaming, `[[file#heading]]` citations that jump to viewer + 3D), prompts manager with category tabs / preview / safe reset, OS locale auto-detection, CI + tag-driven releases.
 - **v1.5.0** — concept layer live (Prospect + Vine, staged pool, human promote), crawler hardened (drain-livelock fix, token caps, hard deadlines, requeue), draft-review UX (preview banner, plain-words progress, page history).
 - Web studio (port 5002 main DB / 5003 clean instance) + Electron desktop copy (`app/`, byte-synced).
 - Open issues (O1–O5) and acceptance criteria: see [`PLAN.zh-TW.md`](PLAN.zh-TW.md) §7, §9.
