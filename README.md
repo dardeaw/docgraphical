@@ -68,6 +68,16 @@ In one line: **CPU decides which cuts to read; the LLM only reads those cuts int
 - **Viewer navigation**: browser-like back/forward across document, section, tag, and draft pages, restored through the same selection entry points (explorer + 3D + viewer stay synced)
 - REST API: `/api/concepts/scan*` (mine/review/confirm/blacklist), `/api/crawl/{start,next,finish,confirm,refresh}` (runs live in server memory), `/api/concepts/candidates/draft` (evidence groups)
 
+### Document Ingestion & Knowledge Topology Compound — v3.0.1
+- **Automated multi-format ingest**: Full support for PDF, PPT/PPTX, Word/DOCX, and plain text.
+- **Pass-2 Compound Ingest**: During document summarization, DocGraphical automatically runs a secondary concept comparison against the current knowledge graph, surfacing matching official concepts and mined candidate terms for human review via interactive pills.
+- **Embedded image & attachment indexing**: The indexing engine automatically parses `![Alt Text](Path)` tags and filenames in Markdown; the MCP chat engine automatically inspects and surfaces document attachments to prevent blind spots when querying images.
+
+### Knowledge Library Linting & Governance — v3.0.1
+- **Sub-second deterministic health audit**: Dedicated Linting drawer provides a comprehensive Knowledge Health Score (0–100) on demand.
+- **Five structural inspection dimensions**: Orphan documents, broken links, circular references, empty sections, and unindexed/outdated concept definitions.
+- **One-click surgical navigation**: Pinpoint issues directly by line number with instant jumps to the Markdown viewer and 3D graph locator.
+
 ### Prompts Manager & Internationalization — v3.0.0
 - **Prompt template curation**: Full customizable prompts drawer panel for concept mining, vine crawling (seed/file/finish), and document ingestion (text/multimodal vision).
 - **Category tabs & search**: Filter prompt cards by operational category (All, Concept Scan, Vine Crawl, Ingestion) combined with live keyword search across keys and template bodies.
@@ -286,6 +296,7 @@ console.log(slice);
 
 ## Development Status
 
+- **v3.0.1** — Knowledge Topology Compound Ingest (Pass-2 concept matching & candidate pills), Knowledge Library Linting & Governance (5-dimension health inspection & scoring), and image alt-text & attachment indexing penetration.
 - **v3.0.0** — AI conversational knowledge retrieval live (MCP tool loop, SSE streaming, `[[file#heading]]` citations that jump to viewer + 3D), prompts manager with category tabs / preview / safe reset, OS locale auto-detection, CI + tag-driven releases.
 - **v1.5.0** — concept layer live (Prospect + Vine, staged pool, human promote), crawler hardened (drain-livelock fix, token caps, hard deadlines, requeue), draft-review UX (preview banner, plain-words progress, page history).
 - Web studio (port 5002 main DB / 5003 clean instance) + Electron desktop copy (`app/`, byte-synced).

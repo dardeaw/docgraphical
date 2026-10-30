@@ -279,6 +279,7 @@ html, body {
   flex-direction: column;
   gap: 3px;
   scroll-behavior: smooth;
+  background: #262c36;
 }
 
 /* Tree Nodes */
@@ -301,7 +302,7 @@ html, body {
   text-overflow: ellipsis;
 }
 .tree-node:hover {
-  background: #21262d;
+  background: #333b47;
   color: #58a6ff;
 }
 .tree-node.selected {
@@ -2195,9 +2196,9 @@ html, body {
   border: none;
   border-bottom: 2px solid transparent;
   color: #8b949e;
-  font-size: 13px;
+  font-size: 14.5px;
   font-weight: 600;
-  padding: 7px 12px;
+  padding: 8px 14px;
   cursor: pointer;
   transition: all 0.15s ease;
 }
@@ -2224,11 +2225,11 @@ html, body {
   background: #161b22;
   border: 1px solid #30363d;
   border-radius: 6px;
-  padding: 10px 12px;
+  padding: 11px 13px;
   transition: border-color 0.15s ease, background 0.15s ease;
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 7px;
 }
 
 .concept-card:hover {
@@ -2238,18 +2239,19 @@ html, body {
 
 /* Prompts Manager Styles (1.3x enlarged) */
 .prompt-card {
-  background: #161b22;
-  border: 1px solid #30363d;
+  background: #262c36;
+  border: 1px solid #38424f;
   border-radius: 8px;
   padding: 14px 16px;
   margin-bottom: 12px;
   display: flex;
   flex-direction: column;
   gap: 8px;
-  transition: border-color 0.15s ease;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
 }
 .prompt-card:hover {
   border-color: #58a6ff;
+  box-shadow: 0 4px 14px rgba(0,0,0,0.25);
 }
 .prompt-card-header {
   display: flex;
@@ -2315,17 +2317,17 @@ html, body {
 
 .concept-name-badge {
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 12px;
+  font-size: 14px;
   font-weight: 700;
   color: #f0f6fc;
   display: inline-flex;
   align-items: center;
-  gap: 4px;
+  gap: 5px;
 }
 
 .concept-status-pill {
-  font-size: 10px;
-  padding: 1px 6px;
+  font-size: 12px;
+  padding: 2px 8px;
   border-radius: 10px;
   font-weight: 600;
 }
@@ -2343,33 +2345,220 @@ html, body {
 }
 
 .concept-aliases-text {
-  font-size: 11px;
+  font-size: 13px;
   color: #8b949e;
-  line-height: 1.4;
+  line-height: 1.45;
 }
 
 .concept-card-actions {
   display: flex;
-  gap: 4px;
+  gap: 6px;
   justify-content: flex-end;
+  margin-top: 8px;
+  flex-wrap: wrap;
+}
+
+.concept-action-btn,
+.concept-card .mini-btn {
+  background: #21262d !important;
+  border: 1px solid #30363d !important;
+  color: #c9d1d9 !important;
+  font-size: 13.5px !important;
+  font-weight: 500 !important;
+  padding: 5px 11px !important;
+  border-radius: 5px !important;
+  cursor: pointer;
+  transition: all 0.12s ease;
+  white-space: nowrap !important;
+  line-height: 1.3 !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  gap: 4px !important;
+}
+
+.concept-action-btn:hover,
+.concept-card .mini-btn:hover {
+  background: #30363d !important;
+  color: #fff !important;
+  border-color: #58a6ff !important;
+}
+
+/* Specific button color highlights in enlarged size */
+.concept-card .mini-btn.btn-promote,
+.concept-card .mini-btn[onclick*="promoteCandidate"] {
+  background: #238636 !important;
+  border-color: #2ea043 !important;
+  color: #ffffff !important;
+}
+.concept-card .mini-btn.btn-promote:hover,
+.concept-card .mini-btn[onclick*="promoteCandidate"]:hover {
+  background: #2ea043 !important;
+}
+
+.concept-card .mini-btn.btn-delete,
+.concept-card .mini-btn[onclick*="deleteConcept"],
+.concept-card .mini-btn[onclick*="dismissCandidate"] {
+  color: #f85149 !important;
+  border-color: #da363388 !important;
+}
+.concept-card .mini-btn.btn-delete:hover,
+.concept-card .mini-btn[onclick*="deleteConcept"]:hover,
+.concept-card .mini-btn[onclick*="dismissCandidate"]:hover {
+  background: #da363322 !important;
+  border-color: #f85149 !important;
+  color: #ff7b72 !important;
+}
+
+.concept-card .mini-btn[onclick*="openCardRefresh"],
+.concept-card .mini-btn[onclick*="unblacklistTerm(..., false)"] {
+  color: #58a6ff !important;
+  border-color: #1f6feb !important;
+}
+
+.concept-card .mini-btn[onclick*="unblacklistTerm(..., true)"] {
+  color: #3fb950 !important;
+  border-color: #238636 !important;
+}
+
+/* ==========================================================================
+   Linting & Governance Drawer Styles (Aligned with Explorer & Concepts Scale)
+   ========================================================================== */
+
+.lint-score-card {
+  padding: 12px 14px;
+  margin: 10px 10px 14px;
+  background: #161b22;
+  border: 1px solid #30363d;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.lint-score-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: #8b949e;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin-bottom: 2px;
+}
+
+.lint-score-num {
+  font-size: 26px;
+  font-weight: 700;
+  line-height: 1.1;
+  display: flex;
+  align-items: baseline;
+  gap: 4px;
+}
+
+.lint-score-total {
+  font-size: 13.5px;
+  font-weight: normal;
+  color: #8b949e;
+}
+
+.lint-status-pill {
+  font-size: 12px;
+  font-weight: 700;
+  padding: 3px 10px;
+  border-radius: 12px;
+  color: #ffffff;
+  display: inline-block;
+  line-height: 1.3;
+}
+
+.lint-time-text {
+  font-size: 11.5px;
+  color: #8b949e;
   margin-top: 4px;
 }
 
-.concept-action-btn {
-  background: #21262d;
+.lint-section-card {
+  margin-bottom: 12px;
   border: 1px solid #30363d;
-  color: #c9d1d9;
-  font-size: 10px;
-  padding: 2px 6px;
-  border-radius: 4px;
-  cursor: pointer;
-  transition: all 0.12s ease;
+  border-radius: 8px;
+  background: #161b22;
+  overflow: hidden;
+  transition: border-color 0.15s ease;
 }
 
-.concept-action-btn:hover {
-  background: #30363d;
-  color: #fff;
-  border-color: #58a6ff;
+.lint-section-card:hover {
+  border-color: #58a6ff44;
+}
+
+.lint-section-header {
+  padding: 10px 14px;
+  border-bottom: 1px solid #30363d;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.lint-section-title {
+  font-size: 14px;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  line-height: 1.3;
+}
+
+.lint-count-badge {
+  font-size: 12px;
+  font-weight: 700;
+  padding: 2px 9px;
+  border-radius: 10px;
+  color: #ffffff;
+}
+
+.lint-section-body {
+  padding: 10px 14px;
+  font-size: 13.5px;
+  color: #c9d1d9;
+  line-height: 1.5;
+}
+
+.lint-item-row {
+  padding: 9px 14px;
+  border-bottom: 1px solid #21262d;
+  cursor: pointer;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  transition: background 0.15s ease;
+}
+
+.lint-item-row:last-child {
+  border-bottom: none;
+}
+
+.lint-item-row:hover {
+  background: #1f242c;
+}
+
+.lint-item-title {
+  font-size: 14px;
+  font-weight: 500;
+  color: #e6edf3;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.lint-item-sub {
+  font-size: 12px;
+  color: #8b949e;
+  margin-top: 2px;
+}
+
+.lint-item-btn {
+  font-size: 12.5px;
+  color: #58a6ff;
+  font-weight: 500;
+  margin-left: 8px;
+  flex-shrink: 0;
 }
 
 
@@ -2890,9 +3079,10 @@ select.modal-input,
   background: #0d1117 !important;
   color: #e6edf3 !important;
   border: 1px solid #30363d !important;
-  border-radius: 6px !important;
-  padding: 8px 12px !important;
-  font-size: 13px !important;
+  border-radius: 8px !important;
+  padding: 10px 14px !important;
+  font-size: 14.5px !important;
+  line-height: 1.4 !important;
   box-sizing: border-box !important;
   outline: none !important;
   transition: border-color 0.15s ease, box-shadow 0.15s ease !important;
@@ -2998,9 +3188,10 @@ select.modal-input,
   background: #0d1117 !important;
   color: #e6edf3 !important;
   border: 1px solid #30363d !important;
-  border-radius: 6px !important;
-  padding: 8px 12px !important;
-  font-size: 13px !important;
+  border-radius: 8px !important;
+  padding: 10px 14px !important;
+  font-size: 14.5px !important;
+  line-height: 1.4 !important;
   outline: none !important;
   transition: border-color 0.15s ease, box-shadow 0.15s ease !important;
 }
@@ -3055,14 +3246,15 @@ select.modal-input,
   background-color: #0d1117 !important;
   color: #e6edf3 !important;
   border: 1px solid #30363d !important;
-  border-radius: 6px !important;
-  padding: 8px 32px 8px 12px !important;
-  font-size: 13px !important;
+  border-radius: 8px !important;
+  padding: 10px 36px 10px 14px !important;
+  font-size: 14.5px !important;
+  line-height: 1.4 !important;
   appearance: none !important;
   -webkit-appearance: none !important;
   background-image: url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' fill='%238b949e' viewBox='0 0 16 16'%3E%3Cpath d='M7.247 11.14 2.451 5.658C1.885 5.013 2.345 4 3.204 4h9.592a1 1 0 0 1 .753 1.659l-4.796 5.48a1 1 0 0 1-1.506 0z'/%3E%3C/svg%3E") !important;
   background-repeat: no-repeat !important;
-  background-position: right 10px center !important;
+  background-position: right 12px center !important;
   cursor: pointer !important;
 }
 
@@ -3083,9 +3275,10 @@ select.modal-input:focus,
   background-color: #0d1117 !important;
   color: #e6edf3 !important;
   border: 1px solid #30363d !important;
-  border-radius: 6px !important;
-  padding: 8px 12px !important;
-  font-size: 13px !important;
+  border-radius: 8px !important;
+  padding: 10px 14px !important;
+  font-size: 14.5px !important;
+  line-height: 1.4 !important;
   outline: none !important;
   transition: border-color 0.15s ease, box-shadow 0.15s ease !important;
 }
@@ -3113,15 +3306,24 @@ select.modal-input:focus,
   line-height: 1.4 !important;
   box-sizing: border-box !important;
 }
-/* Concept card action buttons: narrow, ONE row. Scoped + !important beats
-   the three global .mini-btn sledgehammers above (higher specificity). */
+/* Concept card action buttons: responsive, comfortable touch target, clean wrapping */
+#concepts-list-container .concept-card .concept-card-actions {
+  display: flex !important;
+  flex-wrap: wrap !important;
+  justify-content: flex-end !important;
+  gap: 6px !important;
+  margin-top: 8px !important;
+}
+
 #concepts-list-container .concept-card .mini-btn {
-  padding: 1px 4px !important;
+  padding: 4px 9px !important;
   min-width: 0 !important;
-  font-size: 11px !important;
-  gap: 2px !important;
+  font-size: 13.5px !important;
+  font-weight: 500 !important;
+  gap: 3px !important;
   flex-shrink: 0 !important;
-  line-height: 1.4 !important;
+  line-height: 1.35 !important;
+  box-sizing: border-box !important;
 }
 
 .doc-content-viewer table th:last-child,

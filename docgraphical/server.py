@@ -15,6 +15,7 @@ from .db import (
     get_db_path, get_db_stats, get_indexed_file_set, uninit_repository,
     record_log, get_concepts_tree, get_concept_linked_files, save_concept,
     merge_concepts, delete_concept, unlink_concept_file, attach_concept_to_file, list_repo_markdown_files, get_concept_tag_page, save_concept_tag_page,
+    lint_repository,
 )
 from .llm_provider import (
     FnListProviders, FnAddProvider, FnDeleteProvider, FnTestProvider,
@@ -92,6 +93,20 @@ def create_app(initial_paths: Optional[List[str]] = None, search_roots: Optional
         """Lightweight liveness probe for the status bar (#lbl-health)."""
         return jsonify({"status": "ok"})
 
+    @app.route("/api/lint", methods=["GET"])
+    def api_lint():
+        """Instant SQLite knowledge graph health inspection (0 Token)."""
+        repo = (request.args.get("repo") or "").strip()
+        if not repo:
+            roots = get_search_roots(search_roots)
+            repos = scan_doc_repositories(roots)
+            if repos:
+                repo = list(repos.values())[0]
+        if not repo or not os.path.isdir(repo):
+            return jsonify({"ok": False, "error": "Repository not found"}), 404
+        data = lint_repository(repo)
+        return jsonify(data)
+
     @app.route("/api/projects", methods=["GET"])
     def get_projects():
         roots = get_search_roots(search_roots)
@@ -99,9 +114,19 @@ def create_app(initial_paths: Optional[List[str]] = None, search_roots: Optional
         result = []
         for name, p in repos.items():
             indexed_set = get_indexed_file_set(p)  # None => no DB yet
+            has_db = indexed_set is not None
             metrics = get_repo_doc_metrics(p, indexed_set)
             stats = get_db_stats(p)
-            has_db = stats["has_db"]
+            if has_db and metrics.get("pending_count", 0) > 0:
+                # Autonomous Indexing: Automatically incorporate unindexed/modified files into DB & catalog
+                try:
+                    index_repository(p, incremental=True)
+                    indexed_set = get_indexed_file_set(p)
+                    metrics = get_repo_doc_metrics(p, indexed_set)
+                    stats = get_db_stats(p)
+                except Exception:
+                    pass
+
             result.append({
                 "name": name,
                 "path": p,
@@ -206,6 +231,72 @@ def create_app(initial_paths: Optional[List[str]] = None, search_roots: Optional
         return jsonify({"heading": heading, "content": sec, "sliced": True,
                         "full_chars": len(full_text),
                         "sources": _extract_source_rels(full_text)})
+
+    @app.route("/api/doc/image", methods=["GET"])
+    def get_doc_image():
+        """Serve images referenced inside markdown documents.
+        Query: doc=<doc abs or rel path> & img=<image rel path or filename>
+        """
+        doc_path = request.args.get("doc", "").strip()
+        img_path = request.args.get("img", "").strip().replace("/", os.sep)
+        if not img_path:
+            return jsonify({"error": "No image specified"}), 400
+        
+        # Security: block parent directory traversal beyond roots
+        roots = get_search_roots(search_roots)
+        real_doc = resolve_file(doc_path) if doc_path else None
+        target = None
+
+        # 1. Resolve relative to the document's own folder
+        if real_doc:
+            doc_dir = os.path.dirname(real_doc)
+            cand = os.path.realpath(os.path.join(doc_dir, img_path))
+            if os.path.isfile(cand):
+                target = cand
+
+        # 2. Resolve relative to search roots
+        if not target:
+            for r in roots:
+                cand = os.path.realpath(os.path.join(r, img_path))
+                if os.path.isfile(cand):
+                    target = cand
+                    break
+
+        # 3. Fallback search by image basename across search roots
+        if not target:
+            base_name = os.path.basename(img_path)
+            for r in roots:
+                for dirpath, _, filenames in os.walk(r):
+                    if ".git" in dirpath or "node_modules" in dirpath or ".docgraphical" in dirpath:
+                        continue
+                    if base_name in filenames:
+                        target = os.path.realpath(os.path.join(dirpath, base_name))
+                        break
+                if target:
+                    break
+
+        if not target or not os.path.isfile(target):
+            return jsonify({"error": "Image not found: " + img_path}), 404
+
+        # Validate target is under at least one search root
+        is_safe = any(target.startswith(os.path.realpath(r) + os.sep) or target == os.path.realpath(r) for r in roots)
+        if not is_safe:
+            return jsonify({"error": "Access denied"}), 403
+
+        name = os.path.basename(target)
+        ext = os.path.splitext(name)[1].lower()
+        mime_map = {
+            ".png": "image/png",
+            ".jpg": "image/jpeg",
+            ".jpeg": "image/jpeg",
+            ".gif": "image/gif",
+            ".webp": "image/webp",
+            ".svg": "image/svg+xml",
+            ".bmp": "image/bmp",
+            ".ico": "image/x-icon"
+        }
+        mimetype = mime_map.get(ext, "application/octet-stream")
+        return send_file(target, mimetype=mimetype, as_attachment=False, download_name=name)
 
     @app.route("/api/doc/search", methods=["GET"])
     def search_documents():
@@ -532,14 +623,45 @@ def create_app(initial_paths: Optional[List[str]] = None, search_roots: Optional
             return jsonify({"success": False, "error": "沒有收到檔案"}), 400
         return jsonify({"success": True, "files": saved, "staged": b_stage})
 
+    @app.route("/api/ingest/fetch_url", methods=["POST"])
+    def ingest_fetch_url():
+        data = request.get_json(silent=True) or {}
+        url = (data.get("url") or "").strip()
+        if not url:
+            return jsonify({"success": False, "error": "請提供網址"}), 400
+        from .ingest import FnFetchUrlContent
+        res = FnFetchUrlContent(url)
+        if not res.get("ok"):
+            return jsonify({"success": False, "error": res.get("error")}), 400
+        return jsonify({"success": True, "data": res})
+
+    @app.route("/api/ingest/compound_preview", methods=["POST"])
+    def ingest_compound_preview():
+        data = request.get_json(silent=True) or {}
+        summary = (data.get("summary_md") or "").strip()
+        repo = (data.get("repo") or "").strip()
+        if not summary or not repo:
+            return jsonify({"success": False, "error": "缺少摘要內容或 repo"}), 400
+        from .ingest import FnIngestCompoundTagging
+        res = FnIngestCompoundTagging(summary, repo)
+        return jsonify({"success": True, "compounding": res})
+
     @app.route("/api/ingest/summarize", methods=["POST"])
     def ingest_summarize():
         data = request.get_json(silent=True) or {}
         paths = [p for p in (data.get("paths") or []) if p and os.path.isfile(p)]
-        if not paths:
-            return jsonify({"success": False, "error": "沒有可摘要的檔案"}), 400
+        raw_text = (data.get("text") or "").strip()
+        pasted_image_rels = data.get("pasted_image_rels") or []
+
+        if not paths and not raw_text:
+            return jsonify({"success": False, "error": "沒有可摘要的檔案或文字內容"}), 400
+
         texts, sources, notes = [], [], []
         vision_paths = []
+        if raw_text:
+            texts.append(raw_text)
+            sources.append({"path": "clipboard_text", "chars": len(raw_text), "truncated": False})
+
         for p in paths:
             name = os.path.basename(p)
             ext = os.path.splitext(p)[1].lower()
@@ -564,17 +686,39 @@ def create_app(initial_paths: Optional[List[str]] = None, search_roots: Optional
                 vision_paths.append(p)
             else:
                 notes.append("%s：抽不到文字（僅 pdf／pptx／圖片可改走圖片辨識）" % name)
-        if texts:
+
+        # Case 1: Mixed Text + Images (Multimodal combination)
+        if texts and vision_paths:
+            from .ingest import FnExtractImages, FnMultimodalSummarize
+            images = []
             for p in vision_paths:
-                notes.append("%s：無文字未納入本次摘要（圖片型請單批上傳走 vision）"
-                             % os.path.basename(p))
-            combo = "\n\n===== 下一份文件 =====\n\n".join(texts)
-            res = FnChatSummarize(combo, [os.path.basename(p) for p in paths])
+                if len(images) >= VISION_MAX_TOTAL:
+                    break
+                g = FnExtractImages(p)
+                if g.get("ok"):
+                    images.extend(g.get("images") or [])
+            combo = "\n\n===== 下一個段落 =====\n\n".join(texts)
+            res = FnMultimodalSummarize(combo, images, [os.path.basename(p) for p in (paths or ["剪貼簿"])], pasted_image_rels)
             if not res.get("ok"):
                 return jsonify({"success": False, "error": res.get("error")}), 502
             return jsonify({"success": True, "summary": res["summary"],
                             "model": res.get("model"), "sources": sources,
                             "notes": notes})
+
+        # Case 2: Pure Text
+        if texts:
+            for p in vision_paths:
+                notes.append("%s：無文字未納入本次摘要（圖片型請單批上傳走 vision）"
+                             % os.path.basename(p))
+            combo = "\n\n===== 下一份文件 =====\n\n".join(texts)
+            res = FnChatSummarize(combo, [os.path.basename(p) for p in paths] if paths else ["剪貼簿文字"])
+            if not res.get("ok"):
+                return jsonify({"success": False, "error": res.get("error")}), 502
+            return jsonify({"success": True, "summary": res["summary"],
+                            "model": res.get("model"), "sources": sources,
+                            "notes": notes})
+
+        # Case 3: Pure Images (Vision only)
         # All-image batch: open the LLM's eyes (pages/slides -> vision model).
         images, vnotes = [], []
         for p in vision_paths:
@@ -618,10 +762,11 @@ def create_app(initial_paths: Optional[List[str]] = None, search_roots: Optional
         filename = (data.get("filename") or "").strip()
         summary = (data.get("summary_md") or "").strip()
         src_paths = [p for p in (data.get("source_paths") or []) if p and os.path.isfile(p)]
+        source_urls = [u for u in (data.get("source_urls") or []) if u and isinstance(u, str)]
         roots = get_search_roots(search_roots)
         if not target_dir or not os.path.isdir(target_dir) or not FnIngestDirOk(target_dir, roots):
             return jsonify({"success": False, "error": "目標目錄不在搜尋範圍內"}), 400
-        if not summary or not src_paths or not filename:
+        if not summary or (not src_paths and not source_urls) or not filename:
             return jsonify({"success": False, "error": "缺少摘要內文、來源或檔名"}), 400
         repos = scan_doc_repositories(roots)
         repo_root = FnFindOwningRepo(target_dir, repos)
@@ -647,6 +792,8 @@ def create_app(initial_paths: Optional[List[str]] = None, search_roots: Optional
         title = os.path.splitext(os.path.basename(md_path))[0]
         # Physical concept links: wrap official concept mentions as
         # [name](rel/path/to/tags/name.md) so any md renderer jumps.
+        selected_matched = data.get("selected_matched")
+        selected_candidates = data.get("selected_candidates")
         try:
             from .ingest import FnLinkifyConcepts
             _omap: Dict[str, str] = {}
@@ -660,6 +807,9 @@ def create_app(initial_paths: Optional[List[str]] = None, search_roots: Optional
                         for _n, _a in _con.execute(
                                 "SELECT name, aliases FROM concepts"
                                 " WHERE status <> 'candidate'"):
+                            # If caller explicitly provided selected_matched list, only linkify those!
+                            if selected_matched is not None and _n not in selected_matched:
+                                continue
                             if _n:
                                 _omap[_n] = _n
                             for _al in ((_a or "").replace("、", ",").split(",")):
@@ -678,15 +828,60 @@ def create_app(initial_paths: Optional[List[str]] = None, search_roots: Optional
         try:
             with open(md_path, "w", encoding="utf-8") as f:
                 f.write(FnBuildMd(title, rels, summary,
-                                  (data.get("model") or "")))
+                                  (data.get("model") or ""),
+                                  source_urls=source_urls))
         except Exception as e:
             return jsonify({"success": False, "error": str(e)}), 500
         index_res = None
+        compound_res = None
         if repo_root:
             try:
                 index_res = index_repository(repo_root, incremental=True)
             except Exception as e:
                 index_res = {"success": False, "error": str(e)}
+
+            # --- Compounding Ingest (Pass 2): Autonomous Tagging & Candidate Mining ---
+            try:
+                from .ingest import FnIngestCompoundTagging
+                from .db import get_db_path as _FnDbPath
+                c_tag_res = FnIngestCompoundTagging(summary, repo_root)
+                if c_tag_res.get("ok"):
+                    _dbp = _FnDbPath(repo_root)
+                    if _dbp and os.path.isfile(_dbp):
+                        import sqlite3 as _sq
+                        _con = _sq.connect(_dbp)
+                        try:
+                            # 1. Store discovered candidates into candidates pool (filtered by user selection)
+                            _now = _time.strftime("%Y-%m-%d %H:%M:%S")
+                            _cand_added = []
+                            for cand in c_tag_res.get("discovered_candidates") or []:
+                                c_term = ((cand.get("term") or "").strip())[:30]
+                                c_cat = ((cand.get("category") or "機器挖掘").strip())[:20]
+                                c_aliases = ((cand.get("aliases") or "").strip())[:50]
+                                if not c_term or len(c_term) < 2:
+                                    continue
+                                if selected_candidates is not None and c_term not in selected_candidates:
+                                    continue
+                                _con.execute("""
+                                    INSERT OR IGNORE INTO concepts (name, category, aliases, status, created_at)
+                                    VALUES (?, ?, ?, 'candidate', ?)
+                                """, (c_term, c_cat, c_aliases, _now))
+                                _cand_added.append(c_term)
+
+                            _matched = [m.get("name") for m in (c_tag_res.get("matched_concepts") or []) if m.get("name")]
+                            if selected_matched is not None:
+                                _matched = [m for m in _matched if m in selected_matched]
+                            _con.commit()
+                            compound_res = {
+                                "ok": True,
+                                "matched": _matched,
+                                "candidates": _cand_added
+                            }
+                        finally:
+                            _con.close()
+            except Exception as e:
+                compound_res = {"ok": False, "error": str(e)}
+
             # Logging must never break the index response: own try block.
             try:
                 record_log(repo_root, "SAVE_INGEST_MD", target_file=md_path,
@@ -695,7 +890,8 @@ def create_app(initial_paths: Optional[List[str]] = None, search_roots: Optional
             except Exception:
                 pass
         return jsonify({"success": True, "md_path": md_path,
-                        "source_rels": rels, "index": index_res})
+                        "source_rels": rels, "index": index_res,
+                        "compounding": compound_res})
 
     @app.route("/api/ingest/source", methods=["GET"])
     def ingest_source():

@@ -9,6 +9,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [3.0.1] - 2026-10-30
+
+### Added
+- **Knowledge Topology Compound Ingest**: Secondary pass during document ingestion that extracts matching concepts and mines candidate terms for human review via interactive pills.
+- **Knowledge Library Linting & Governance**: Dedicated governance drawer providing a comprehensive 5-dimension health audit (orphans, broken links, circular references, empty sections, unindexed concepts) and 0–100 score with one-click navigation.
+- **Image & Attachment Alt-Text Indexing**: Full-text `search_doc` penetrates `![Alt](Path)` image tags and filenames; the MCP chat loop automatically inspects active document attachments.
+
+### Changed
+- Refined 3D graph concept capsule border width (0.2 fine line) for enhanced visual clarity.
+- Updated Explorer tree body and prompt manager cards to a sleek slate white-gray (`#262c36`).
+- Hardened Vine Crawling to strictly enforce human-review gates and prevent background auto-commit.
+
+---
+
 ## [3.0.0] - 2026-10-26
 
 ### Added

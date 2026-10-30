@@ -243,25 +243,49 @@ def search_doc(
             with open(mf, "r", encoding="utf-8", errors="replace") as f:
                 lines = f.readlines()
 
+            # Pre-parse headings line anchors in this file
+            file_headings = []
+            try:
+                file_headings = parse_headings(mf)
+            except Exception:
+                pass
+
             for idx, line in enumerate(lines, 1):
                 line_lower = line.lower()
-                # Check exact phrase OR all/any keywords
                 matched = False
                 if query_clean in line_lower:
                     matched = True
                 elif keywords and all(kw in line_lower for kw in keywords):
                     matched = True
                 elif len(keywords) > 1 and any(kw in line_lower for kw in keywords):
-                    # Partial match if primary keyword matches
                     if keywords[0] in line_lower:
                         matched = True
+
+                # Image and Attachment Alt-Text / Filename matching
+                if not matched and ("![" in line or "<img" in line):
+                    img_matches = re.findall(r'!\[([^\]]*)\]\(([^)]+)\)', line)
+                    for alt, src in img_matches:
+                        img_haystack = f"{alt} {os.path.basename(src)} {src}".lower()
+                        if query_clean in img_haystack or (keywords and all(kw in img_haystack for kw in keywords)):
+                            matched = True
+                            break
 
                 if matched:
                     rel_path = os.path.relpath(mf, real_path) if os.path.isdir(real_path) else os.path.basename(mf)
                     snippet = line.strip()
                     if len(snippet) > 140:
                         snippet = snippet[:137] + "..."
-                    results.append(f"- **{rel_path}** [L{idx}]: `{snippet}`")
+
+                    # Determine nearest enclosing heading
+                    enclosing_heading = ""
+                    for h in file_headings:
+                        if h.line_number <= idx:
+                            enclosing_heading = h.title
+                        else:
+                            break
+
+                    h_tag = f" > [#{enclosing_heading}]" if enclosing_heading else ""
+                    results.append(f"- **{rel_path}**{h_tag} [L{idx}]: `{snippet}`")
                     if len(results) >= max_results:
                         break
             if len(results) >= max_results:

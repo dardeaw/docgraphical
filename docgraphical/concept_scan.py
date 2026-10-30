@@ -246,7 +246,9 @@ def FnJudgeTerms(cands, official_names):
     cand_lines = "\n".join(lines)
     off_concepts = "、".join(official_names[:40]) or "（無）"
     template = prompt_cfg.get("template") or ""
-    prompt = template.format(official_concepts=off_concepts, candidates=cand_lines)
+    prompt = (template
+              .replace("{official_concepts}", off_concepts)
+              .replace("{candidates}", cand_lines))
     system_msg = prompt_cfg.get("system") or "只輸出 JSON 陣列，不要解釋。"
     payload = json.dumps({
         "model": tgt["model"],
@@ -412,7 +414,7 @@ def FnRecountOneTerm(repo_paths, db_path, term):
                  c["score"], term, now, c["df"], c["tf"]))
             con.commit()
             return {"ok": True, "term": term, "df": c["df"], "tf": c["tf"],
-                    "files": c["files"][:5]}
+                    "files": c["files"][:50]}
         con.execute(
             "INSERT OR REPLACE INTO scan_evidence"
             "(term, sources_json, score, model, created_at, df, tf)"
@@ -447,6 +449,12 @@ def FnRunScan(repo_paths, db_path, max_new=20, min_tf=1,
     try:
         try:
             known = {r[0] for r in con.execute("SELECT name FROM concepts")}
+            # Also exclude all concepts that already exist in edge graph (e.g. tag links or wiki links)
+            for r in con.execute("SELECT target FROM edges WHERE kind = 'wiki_link'"):
+                cname = r[0].replace("concept::", "")
+                if cname:
+                    known.add(cname)
+                    known.add(_FnNorm(cname))
         except Exception:
             known = set()
         try:
@@ -460,6 +468,16 @@ def FnRunScan(repo_paths, db_path, max_new=20, min_tf=1,
             official = []
     finally:
         con.close()
+
+    # Also scan disk for existing tag files (.docgraphical/tags/*.md) across repos
+    for rp in repo_paths:
+        t_dir = os.path.join(rp, ".docgraphical", "tags")
+        if os.path.isdir(t_dir):
+            for tf in os.listdir(t_dir):
+                if tf.lower().endswith(".md"):
+                    c_tag = tf[:-3]
+                    known.add(c_tag)
+                    known.add(_FnNorm(c_tag))
     ex = {_FnNorm(x) for x in (exclude or []) if x}
     fresh = [c for c in mined
              if c["term"] not in known and c["term"] not in rej

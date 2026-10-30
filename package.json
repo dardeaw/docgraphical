@@ -1,6 +1,6 @@
 {
   "name": "docgraphical",
-  "version": "3.0.0",
+  "version": "3.0.1",
   "description": "Surgical precision Markdown AST, TOC outline & section slicer for AI Agents. Save 97% tokens.",
   "main": "electron/main.js",
   "bin": {

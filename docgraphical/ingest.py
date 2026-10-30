@@ -406,6 +406,128 @@ def FnVisionSummarize(images: List[Dict[str, str]],
         return {"ok": False, "error": "%s: %s" % (type(e).__name__, e)}
 
 
+def FnMultimodalSummarize(text: str, images: List[Dict[str, str]],
+                          source_names: List[str],
+                          pasted_image_rels: Optional[List[str]] = None) -> Dict[str, Any]:
+    """Summarize text + images simultaneously (e.g. mixed clipboard text + screenshots)."""
+    from .llm_provider import FnResolveActiveLLM
+    tgt = FnResolveActiveLLM()
+    if not tgt.get("ok"):
+        return {"ok": False, "error": tgt.get("error") or "no LLM provider configured"}
+    import json
+    import urllib.request
+    names = "、".join(source_names) or "剪貼簿混合素材"
+
+    img_hints = []
+    if pasted_image_rels:
+        for idx, rel in enumerate(pasted_image_rels, 1):
+            img_hints.append(f"- 截圖附件 {idx}：`![截圖說明]({rel})`")
+    hints_text = "\n".join(img_hints)
+
+    prompt = f"""請研讀以下剪貼簿提供的文字筆記，以及所附帶的截圖影像，進行嚴謹、結構化的技術與業務摘要。
+若摘要中有說明到各張截圖的關鍵畫面、架構或介面，請在該段落適當處以 Markdown 語法引用該圖片（例如：`![畫面說明](檔案名稱.png)`）。
+
+【可引用的截圖附件清單】：
+{hints_text if hints_text else "（無額外圖片附件）"}
+
+【筆記文字內容】：
+===== 開始 =====
+{text}
+===== 結束 =====
+
+請輸出完整、排版優良的繁體中文 Markdown 摘要。第一行請給出精準的 H1 主標題（格式：`# 主標題`）。"""
+
+    system_msg = "你是繁體中文技術文件摘要助手，擅長解讀混合文字與截圖，只輸出 Markdown。"
+    parts: List[Dict[str, Any]] = [{"type": "text", "text": prompt}]
+    for im in images:
+        parts.append({"type": "image_url",
+                      "image_url": {"url": im["data_url"]}})
+
+    payload = json.dumps({
+        "model": tgt["model"],
+        "messages": [
+            {"role": "system", "content": system_msg},
+            {"role": "user", "content": parts},
+        ],
+    }).encode("utf-8")
+    headers = {"Content-Type": "application/json"}
+    if tgt.get("key"):
+        headers["Authorization"] = "Bearer " + tgt["key"]
+    try:
+        req = urllib.request.Request(tgt["base"] + "/chat/completions",
+                                     data=payload, headers=headers, method="POST")
+        with urllib.request.urlopen(req, timeout=180) as res:
+            data = json.loads(res.read().decode("utf-8"))
+        msg = (((data.get("choices") or [{}])[0].get("message") or {}).get("content") or "").strip()
+        if not msg:
+            return {"ok": False, "error": "LLM 回傳為空"}
+        return {"ok": True, "summary": msg, "model": tgt["model"], "provider": tgt["provider"]}
+    except Exception as e:
+        return {"ok": False, "error": "%s: %s" % (type(e).__name__, e)}
+
+
+def FnFetchUrlContent(url: str) -> Dict[str, Any]:
+    """Fetch URL, extract page title and clean article body text."""
+    import urllib.request
+    import urllib.error
+    import html
+    clean_url = (url or "").strip()
+    if not clean_url.startswith(("http://", "https://")):
+        return {"ok": False, "error": "網址格式不正確，必須以 http:// 或 https:// 開頭"}
+
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        "Accept-Language": "zh-TW,zh;q=0.9,en-US;q=0.8,en;q=0.7",
+    }
+    try:
+        req = urllib.request.Request(clean_url, headers=headers)
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            content_type = resp.headers.get("Content-Type", "").lower()
+            raw_bytes = resp.read()
+            charset = "utf-8"
+            if "charset=" in content_type:
+                charset = content_type.split("charset=")[-1].split(";")[0].strip()
+            try:
+                raw_html = raw_bytes.decode(charset, errors="replace")
+            except Exception:
+                raw_html = raw_bytes.decode("utf-8", errors="replace")
+
+        # Extract title
+        title_m = re.search(r"<title[^>]*>(.*?)</title>", raw_html, re.IGNORECASE | re.DOTALL)
+        raw_title = html.unescape(title_m.group(1)).strip() if title_m else ""
+        raw_title = re.sub(r"[\r\n\t]+", " ", raw_title).strip()
+        if not raw_title:
+            raw_title = clean_url.split("/")[-1].split("?")[0] or "網頁文件"
+
+        # Clean HTML scripts, styles, svg, noscript, header, footer, nav
+        body_html = re.sub(r"<(script|style|svg|noscript|nav|header|footer)[^>]*>.*?</\1>", " ", raw_html, flags=re.IGNORECASE | re.DOTALL)
+        # Convert paragraph/headings/breaks to newlines
+        body_html = re.sub(r"</?(?:p|div|h\d|li|br|tr)[^>]*>", "\n", body_html, flags=re.IGNORECASE)
+        # Strip remaining tags
+        text = re.sub(r"<[^>]+>", " ", body_html)
+        text = html.unescape(text)
+        # Collapse whitespace
+        lines = [re.sub(r"[ \t]+", " ", line).strip() for line in text.split("\n")]
+        lines = [line for line in lines if line]
+        clean_text = "\n\n".join(lines)
+
+        if len(clean_text) < 30:
+            return {"ok": False, "error": "抓取網頁成功，但未解析出足夠的內文"}
+
+        truncated = len(clean_text) > MAX_TEXT_CHARS
+        return {
+            "ok": True,
+            "url": clean_url,
+            "title": raw_title,
+            "text": clean_text[:MAX_TEXT_CHARS],
+            "chars": len(clean_text),
+            "truncated": truncated
+        }
+    except Exception as e:
+        return {"ok": False, "error": f"網址抓取失敗: {e}"}
+
+
 def FnLinkifyConcepts(text: str, official_map: Dict[str, str],
                      md_dir: str, tags_dir: str, *,
                      case_insensitive: bool = False,
@@ -439,8 +561,8 @@ def FnLinkifyConcepts(text: str, official_map: Dict[str, str],
         if in_fence:
             out_lines.append(line)
             continue
-        if idx in skip:
-            # Caller-excluded lines (e.g. H1 title zone): verbatim.
+        if idx in skip or s.startswith("#"):
+            # Caller-excluded lines or Markdown headings: verbatim.
             out_lines.append(line)
             continue
         for surf in surfaces:
@@ -496,13 +618,24 @@ def FnUniqueMdPath(target_dir: str, filename: str) -> str:
 
 
 def FnBuildMd(title: str, source_rels: List[str], summary: str,
-              model: str = "") -> str:
-    """Assemble the final md. Source relative paths are ALWAYS in the header."""
+              model: str = "", source_urls: Optional[List[str]] = None) -> str:
+    """Assemble the final md. Handles source files, URLs, and image attachments in the header."""
     stamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
     lines = ["# %s" % (title or "文件摘要"), ""]
-    lines.append("> 來源檔案（相對路徑）：")
-    for r in source_rels:
-        lines.append("> - `%s`" % r)
+    
+    if source_urls:
+        lines.append("> 來源網址：")
+        for u in source_urls:
+            lines.append("> - [%s](%s)" % (u, u))
+        if source_rels:
+            lines.append("> 附加檔案：")
+            for r in source_rels:
+                lines.append("> - `%s`" % r)
+    else:
+        lines.append("> 來源檔案（相對路徑）：")
+        for r in source_rels:
+            lines.append("> - `%s`" % r)
+            
     lines.append(">")
     lines.append("> 匯入時間：%s%s" % (stamp, ("　生成模型：%s" % model) if model else ""))
     lines.append("")
@@ -511,3 +644,116 @@ def FnBuildMd(title: str, source_rels: List[str], summary: str,
     lines.append((summary or "").strip())
     lines.append("")
     return "\n".join(lines)
+
+
+def FnIngestCompoundTagging(summary_text: str, repo_path: str) -> Dict[str, Any]:
+    """Pass-2 internal tagging pipeline (Compounding Ingest).
+
+    Inspects the summary markdown against official concepts and candidate mining.
+    Returns {ok, matched_concepts: [{name, evidence}], discovered_candidates: [{term, category, reason, aliases}]}.
+    """
+    from .llm_provider import FnResolveActiveLLM
+    tgt = FnResolveActiveLLM()
+    if not tgt.get("ok"):
+        return {"ok": False, "error": tgt.get("error") or "no LLM provider configured"}
+
+    import json
+    import sqlite3
+    import urllib.request
+    from .db import get_db_path
+
+    # 1. Fetch official concepts and blacklisted terms from db
+    official_concepts = []
+    blacklist_terms = []
+    db_p = None
+    try:
+        db_p = get_db_path(repo_path)
+    except Exception:
+        db_p = None
+
+    if db_p and os.path.isfile(db_p):
+        try:
+            con = sqlite3.connect(db_p)
+            try:
+                for r in con.execute("SELECT name, aliases, category FROM concepts WHERE status <> 'candidate'"):
+                    c_name = r[0]
+                    c_aliases = r[1] or ""
+                    c_cat = r[2] or ""
+                    alias_str = f" (別名: {c_aliases})" if c_aliases else ""
+                    cat_str = f" [{c_cat}]" if c_cat else ""
+                    official_concepts.append(f"- {c_name}{alias_str}{cat_str}")
+                for r in con.execute("SELECT term FROM rejected_terms"):
+                    if r[0]:
+                        blacklist_terms.append(r[0])
+            finally:
+                con.close()
+        except Exception as e:
+            pass
+
+    official_list_str = "\n".join(official_concepts) if official_concepts else "(尚無官方概念)"
+    blacklist_str = "、".join(blacklist_terms) if blacklist_terms else "無"
+
+    system_msg = (
+        "你是知識庫拓撲架構師。你的唯一天職是依據技術摘要，比對現有官方概念並發掘新領域術語。"
+        "嚴格只輸出單一合法的 JSON 物件，絕不輸出任何 Markdown 代碼塊或額外解釋。"
+    )
+
+    user_prompt = f"""【現有官方概念清單】：
+{official_list_str}
+
+【黑名單排除詞彙（絕對不可再提）】：
+{blacklist_str}
+
+【輸入技術文件摘要內容】：
+===== 摘要開始 =====
+{summary_text[:8000]}
+===== 摘要結束 =====
+
+請仔細研讀上述摘要，精準輸出以下 JSON 格式：
+{{
+  "matched_concepts": [
+    {{"name": "吻合的官方概念名", "evidence": "摘要中提及此概念的佐證段落（15字內）"}}
+  ],
+  "discovered_candidates": [
+    {{"term": "高價值新領域專有名詞（設備、代號、工藝，嚴禁通用詞）", "category": "建議分類", "reason": "收錄原因（10字內）", "aliases": "可能的別名或縮寫"}}
+  ]
+}}
+無吻合或無新詞時請給空陣列 []。只輸出純 JSON。"""
+
+    payload = json.dumps({
+        "model": tgt["model"],
+        "messages": [
+            {"role": "system", "content": system_msg},
+            {"role": "user", "content": user_prompt},
+        ],
+    }).encode("utf-8")
+
+    headers = {"Content-Type": "application/json"}
+    if tgt.get("key"):
+        headers["Authorization"] = "Bearer " + tgt["key"]
+
+    try:
+        req = urllib.request.Request(tgt["base"] + "/chat/completions",
+                                     data=payload, headers=headers, method="POST")
+        with urllib.request.urlopen(req, timeout=90) as res:
+            raw_data = json.loads(res.read().decode("utf-8"))
+        msg = (((raw_data.get("choices") or [{}])[0].get("message") or {}).get("content") or "").strip()
+        if not msg:
+            return {"ok": False, "error": "LLM 打標回傳為空"}
+
+        # Strip possible markdown code fences
+        cleaned = re.sub(r"^```(?:json)?\s*", "", msg, flags=re.MULTILINE)
+        cleaned = re.sub(r"\s*```$", "", cleaned, flags=re.MULTILINE).strip()
+        parsed = json.loads(cleaned)
+
+        matched = parsed.get("matched_concepts") or []
+        candidates = parsed.get("discovered_candidates") or []
+
+        return {
+            "ok": True,
+            "matched_concepts": matched,
+            "discovered_candidates": candidates,
+            "model": tgt["model"]
+        }
+    except Exception as e:
+        return {"ok": False, "error": "%s: %s" % (type(e).__name__, e)}

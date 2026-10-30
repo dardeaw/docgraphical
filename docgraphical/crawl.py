@@ -174,6 +174,18 @@ def _catalog_file(db_path, repo):
     return "", ""
 
 
+def _is_doc_file(f):
+    if not f:
+        return False
+    fn = f.replace("\\", "/").strip()
+    base = os.path.basename(fn).upper()
+    if base == "DOC_CATALOG.MD" or base == "LOG.MD":
+        return False
+    if "/.docgraphical/" in ("/" + fn) or "/.docgraph/" in ("/" + fn) or fn.startswith("."):
+        return False
+    return True
+
+
 def _norm_target(db_path, target, repo=""):
     """Normalize an LLM-picked next node to walkable id(s).
 
@@ -184,24 +196,58 @@ def _norm_target(db_path, target, repo=""):
     if not t:
         return []
     if t.startswith("file::"):
-        return [{"kind": "file", "id": t[len("file::"):]}]
+        fid = t[len("file::"):].strip()
+        if not _is_doc_file(fid):
+            return []
+        return [{"kind": "file", "id": fid}]
     if repo:
         root = os.path.realpath(repo)
-        cand = os.path.join(root, t)
-        if os.path.isfile(cand):
-            return [{"kind": "file",
-                     "id": os.path.relpath(cand, root).replace("\\", "/")}]
-        base = os.path.basename(t)
-        if base and base != t:
-            cand2 = os.path.join(root, base)
-            if os.path.isfile(cand2):
-                return [{"kind": "file",
-                         "id": os.path.relpath(cand2, root).replace("\\", "/")}]
+        t_clean = t.replace("\\", "/").strip()
+        
+        # Candidate paths to check (exact, .md, base, base.md)
+        cands_to_check = [
+            t_clean,
+            t_clean + ".md",
+            os.path.basename(t_clean),
+            os.path.basename(t_clean) + ".md"
+        ]
+        for c in cands_to_check:
+            cand_path = os.path.join(root, c)
+            if os.path.isfile(cand_path):
+                rel = os.path.relpath(cand_path, root).replace("\\", "/")
+                if not _is_doc_file(rel):
+                    continue
+                return [{"kind": "file", "id": rel}]
+
+        # Case-insensitive / partial match in repo files
+        base_low = os.path.basename(t_clean).lower()
+        if base_low.endswith(".md"):
+            base_low = base_low[:-3]
+        if base_low:
+            for root_dir, dirs, files in os.walk(root):
+                dirs[:] = [d for d in dirs if not d.startswith(".") and d not in ("node_modules", ".git", ".docgraphical")]
+                for f in files:
+                    if not f.endswith(".md"):
+                        continue
+                    rel = os.path.relpath(os.path.join(root_dir, f), root).replace("\\", "/")
+                    if not _is_doc_file(rel):
+                        continue
+                    f_name_no_ext = f[:-3].lower()
+                    if base_low == f_name_no_ext or base_low in f_name_no_ext or f_name_no_ext in base_low:
+                        return [{"kind": "file", "id": rel}]
+
     try:
         rs = FnResolveSeed(db_path, t)
     except Exception:
         return []
-    return rs.get("starts") or []
+    starts = []
+    for s in (rs.get("starts") or []):
+        if s.get("kind") == "file":
+            fid = s.get("id") or ""
+            if not _is_doc_file(fid):
+                continue
+        starts.append(s)
+    return starts
 
 
 def _node_id(kind, ident):
@@ -288,6 +334,16 @@ def FnCrawlStart(repo, seed_text="", max_starts=MAX_STARTS, lang="zh"):
     for _verb, name, why in picks:
         for st in _norm_target(db_path, name, repo)[:2]:
             starts.append({"seed": name, "why": why, "kind": st["kind"], "id": st["id"]})
+    if not starts and lit:
+        for s in lit[:3]:
+            if s.get("kind") == "file" and os.path.basename(s.get("id") or "").upper() == "DOC_CATALOG.MD":
+                continue
+            starts.append({"seed": seed, "why": "字面落點起手", "kind": s["kind"], "id": s["id"]})
+
+    if not starts:
+        for st in _norm_target(db_path, seed, repo)[:2]:
+            starts.append({"seed": seed, "why": "種子自身起手", "kind": st["kind"], "id": st["id"]})
+
     if not starts:
         return {"ok": False, "error": "picks resolve to nothing",
                 "guide_text": res.get("text") or ""}
@@ -343,11 +399,12 @@ def _process_concept_node(run, db_path, ident):
     except Exception:
         nb = {}
     cands = []
-    for f in (nb.get("files") or [])[:5]:
-        if f.get("path"):
-            cands.append({"kind": "file", "id": f["path"]})
+    for f in (nb.get("files") or [])[:8]:
+        p = f.get("path") or ""
+        if _is_doc_file(p):
+            cands.append({"kind": "file", "id": p})
     for c in (nb.get("concepts") or [])[:5]:
-        if c.get("name"):
+        if c.get("name") and c["name"] != ident:
             cands.append({"kind": "concept", "id": c["name"]})
     for c in cands:
         nid = _node_id(c["kind"], c["id"])
@@ -464,6 +521,8 @@ def _process_file_nodes(run, run_id, db_path, repo, idents):
         con = sqlite3.connect(db_path)
         for b in blocks:
             ident = b["ident"]
+            if os.path.basename(ident).upper() == "DOC_CATALOG.MD":
+                continue
             text = b["text"] or ""
             parsed = by_file.get(ident) or []
             staged, pushed = [], []
@@ -580,6 +639,8 @@ def FnCrawlNext(run_id, max_files=MAX_FILES_PER_RUN):
             continue
         read.add(nid)
         if cand["kind"] == "file":
+            if not _is_doc_file(cand["id"]):
+                continue
             file_idents.append(cand["id"])
         elif concept_cur is None and not file_idents:
             # Free CPU expand now (returns immediately after loop).
@@ -659,6 +720,7 @@ def FnCrawlFinish(run_id):
         con.close()
     except Exception:
         kept = []
+    kept = [(f, m) for f, m in kept if _is_doc_file(f)]
     run["title"], run["spent_final"] = title, run["spent"]
     # Node landing for the dialog checklist (same resolver as the draft
     # overlay): mention -> heading + line, so rows render sections.
@@ -736,8 +798,7 @@ def FnCrawlRefresh(repo, name, max_files=MAX_FILES_PER_RUN):
             "SELECT status FROM concepts WHERE name = ?", (name,)).fetchone()
     finally:
         con.close()
-    if not row or (row[0] or "") != "candidate":
-        return {"ok": False, "error": "not a candidate: %s" % name}
+    is_candidate = (row and (row[0] or "") == "candidate")
     res = FnCrawlRun(repo, seed_text=name,
                      max_files=max(1, min(50, max_files or MAX_FILES_PER_RUN)))
     if not res.get("ok"):
@@ -748,12 +809,13 @@ def FnCrawlRefresh(repo, name, max_files=MAX_FILES_PER_RUN):
     try:
         existing = {(r[0], r[1]) for r in con.execute(
             "SELECT file, mention FROM staged_items"
-            " WHERE repo = ? AND concept = ? AND status = 'kept'",
+            " WHERE repo = ? AND concept = ? AND status IN ('kept', 'applied')",
             (repo, name)).fetchall()}
         added = 0
+        new_items = []
         for k in kept:
             f, m = (k or {}).get("file"), (k or {}).get("term")
-            if not f or not m:
+            if not f or not m or not _is_doc_file(f):
                 continue
             if (f, m) in existing:
                 con.execute(
@@ -766,11 +828,16 @@ def FnCrawlRefresh(repo, name, max_files=MAX_FILES_PER_RUN):
                     " WHERE run_id = ? AND status = 'kept'"
                     " AND file = ? AND mention = ?", (name, run_id, f, m))
                 added += 1
+                new_items.append(k)
                 existing.add((f, m))
         con.commit()
     finally:
         con.close()
+
+    # For official concept refresh, do NOT auto-apply! Application is controlled by the user's interactive review dialog.
+
     return {"ok": True, "title": name, "added": added,
+            "new_items": new_items, "all_items": kept,
             "kept": len(kept), "spent": res.get("spent", 0),
             "model": res.get("model") or ""}
 
@@ -1344,18 +1411,28 @@ def _place_heading_tags(lines, title, tag_rel, mentions, url_hint="", skip=()):
             want.append(h)
     placed = 0
     tag_html = "[%s](%s)" % (title, tag_rel)
+    # Match title in any form: [title](url), [[title]], or bare title word
+    title_in_tagline_pat = re.compile(r"\[%s\]\(|\[\[%s(?:\]\]|\|)|(?<![A-Za-z0-9_])%s(?![A-Za-z0-9_])" % (
+        re.escape(title), re.escape(title), re.escape(title)), re.IGNORECASE)
     for h in sorted(want, reverse=True):
         j = h + 1
         while j < len(lines) and not lines[j].strip():
             j += 1
         if j < len(lines) and tagline_pat.match(lines[j]):
-            if tag_html in lines[j]:
+            if title_in_tagline_pat.search(lines[j]):
                 continue
             lines[j] = lines[j].rstrip() + "、" + tag_html
             placed += 1
         else:
-            lines.insert(h + 1, "> 🏷️ 標籤： " + tag_html)
-            placed += 1
+            # Check if immediately followed by another tag line within 3 lines
+            already = False
+            for k in range(h + 1, min(len(lines), h + 4)):
+                if tagline_pat.match(lines[k]) and title_in_tagline_pat.search(lines[k]):
+                    already = True
+                    break
+            if not already:
+                lines.insert(h + 1, "> 🏷️ 標籤： " + tag_html)
+                placed += 1
     return lines, placed
 
 
@@ -1470,6 +1547,23 @@ def FnApplyStaged(repo, title):
                 "UPDATE staged_items SET status = 'applied'"
                 " WHERE repo = ? AND concept = ? AND status = 'kept'", (repo, title))
             con.commit()
+            con.close()
+        except Exception:
+            pass
+        # Force re-index of applied files so AST, headings and wiki_link edges update instantly
+        try:
+            from .db import _FnDeleteFileRows, _FnInsertFileNodes, _FnWalkDocFiles, _FnRebuildDocLinks, _FnSyncGlobalIndex
+            con = sqlite3.connect(db_path)
+            cur = con.cursor()
+            for rel in applied_files:
+                abs_f = os.path.join(repo_real, rel)
+                if os.path.isfile(abs_f):
+                    _FnDeleteFileRows(cur, rel)
+                    _FnInsertFileNodes(cur, repo_real, abs_f, rel)
+            all_mds = _FnWalkDocFiles(repo_real)
+            _FnRebuildDocLinks(cur, repo_real, all_mds)
+            con.commit()
+            _FnSyncGlobalIndex(cur, repo_real)
             con.close()
         except Exception:
             pass

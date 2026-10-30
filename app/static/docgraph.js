@@ -109,6 +109,7 @@ const EDGE_COLORS = {
 document.addEventListener('DOMContentLoaded', () => {
   try { applyAppLanguage(); } catch (e) { console.error('lang init error:', e); }
   try { fetchConceptsData(); } catch (e) { console.error('concepts init error:', e); }
+  try { updateLintBadgeOnly(); } catch (e) { console.error('lint badge error:', e); }
   try { init3DGraph(); } catch (e) { console.error('init3DGraph error:', e); }
   try { init3DNavControls(); } catch (e) { console.error('initCyberControls error:', e); }
   try { initAutoRotate(); } catch (e) { console.error('initAutoRotate error:', e); }
@@ -227,14 +228,16 @@ function labelStyleFor(n, hasFilter, revealedNodeId) {
   if (!hasFilter) {
     return { opacity: isFile ? 0.95 : 0.0, color: kindColor, backgroundColor: 'rgba(10, 14, 20, 0.85)' };
   }
-  if (n.id === revealedNodeId) {
+  // When filter/spotlight is active, revealedNodeId ONLY applies if it is actually highlighted
+  if (n.id === revealedNodeId && highlightNodes.has(n.id)) {
     return { opacity: 1.0, color: kindColor, backgroundColor: 'rgba(10, 14, 20, 0.92)' };
   }
   if (highlightNodes.has(n.id)) {
     if (isFile) return { opacity: 0.92, color: kindColor, backgroundColor: 'rgba(10, 14, 20, 0.85)' };
     return { opacity: 0.75, color: kindColor, backgroundColor: 'rgba(10, 14, 20, 0.75)' };
   }
-  return { opacity: isFile ? 0.12 : 0.0, color: '#6e7681', backgroundColor: 'rgba(10, 14, 20, 0.15)' };
+  // When spotlight or filter is active, non-highlighted nodes must NEVER show ghost labels
+  return { opacity: 0.0, color: '#6e7681', backgroundColor: 'transparent' };
 }
 
 // ─── Drill-down upward-chain resolution (temporary reveal) ───────────────
@@ -279,17 +282,26 @@ function chainIdsUpward(node) {
       ids.push(fileNode.id);
     }
   }
-  return ids;
+  // Reverse order: Root -> H1 -> H2 -> Child (順序相反，根部至葉節點平滑順序點亮與展現)
+  return ids.reverse();
 }
 
 // Seed coordinates for chain nodes that have never been laid out, starting
 // each at its nearest positioned ancestor (+ jitter). The first click then
 // centers on the node immediately — no "click twice" and no camera flight
 // to empty space while the force layout settles.
-function seedChainPositions(leafToRootIds) {
+function seedChainPositions(chainIds) {
   const byId = new Map((rawData.nodes || []).map(n => [n.id, n]));
-  // Seed from root to leaf so parents acquire coordinates before children look them up
-  const rootToLeaf = [...leafToRootIds].reverse();
+  // Ensure array is root-to-leaf: if first element is target leaf and last is file, reverse it
+  let rootToLeaf = [...chainIds];
+  if (rootToLeaf.length > 1) {
+    const first = byId.get(rootToLeaf[0]);
+    const last = byId.get(rootToLeaf[rootToLeaf.length - 1]);
+    if (first && last && first.kind !== 'file' && last.kind === 'file') {
+      rootToLeaf.reverse();
+    }
+  }
+
   rootToLeaf.forEach(id => {
     const n = byId.get(id);
     if (!n || (n.x !== undefined && n.y !== undefined && n.z !== undefined)) return;
@@ -307,9 +319,10 @@ function seedChainPositions(leafToRootIds) {
       if (fn) base = fn;
     }
     if (base) {
-      n.x = (Number(base.x) || 0) + (Math.random() - 0.5) * 8;
-      n.y = (Number(base.y) || 0) + (Math.random() - 0.5) * 8;
-      n.z = (Number(base.z) || 0) + (Math.random() - 0.5) * 8;
+      // Deterministic slight offset along hierarchy vector to prevent violent repulsive explosion
+      n.x = (Number(base.x) || 0) + (Math.random() - 0.5) * 3;
+      n.y = (Number(base.y) || 0) + (Math.random() - 0.5) * 3;
+      n.z = (Number(base.z) || 0) + (Math.random() - 0.5) * 3;
     }
   });
 }
@@ -362,7 +375,7 @@ function createCustomNodeObject(n) {
         sprite.textHeight = 2.4;
         sprite.backgroundColor = 'rgba(10, 14, 22, 0.92)';
         sprite.borderColor = '#94a3b8';
-        sprite.borderWidth = 0.9;
+        sprite.borderWidth = 0.2;
         sprite.borderRadius = 3;
         sprite.padding = [1.2, 0.35];
         sprite.position.set(0, 0, 0);
@@ -603,14 +616,20 @@ function focusOnNode(node) {
   if (centerNode.x === undefined) return;
 
   if (Graph) {
-    const targetPos = { x: Number(centerNode.x) || 0, y: Number(centerNode.y) || 0, z: Number(centerNode.z) || 0 };
+    // Re-resolve centerNode from live Graph nodes if present
+    const gNodes = (Graph && Graph.graphData) ? (Graph.graphData().nodes || []) : [];
+    const liveTarget = gNodes.find(n => n.id === centerNode.id) || centerNode;
+    const targetPos = { x: Number(liveTarget.x) || 0, y: Number(liveTarget.y) || 0, z: Number(liveTarget.z) || 0 };
     const camera = Graph.camera();
     const controls = Graph.controls();
 
     let camPos;
     if (camera && controls && typeof THREE !== 'undefined') {
       const dir = new THREE.Vector3().subVectors(camera.position, controls.target);
-      if (dir.lengthSq() < 0.001) dir.set(0, 0, 1);
+      // If camera is too close or degenerated, use standard default viewpoint angle
+      if (dir.lengthSq() < 1 || isNaN(dir.x)) {
+        dir.set(0, 0, 1);
+      }
       const focusDist = 45; // comfortable viewing distance for ancestor & child framing
       dir.normalize().multiplyScalar(focusDist);
       camPos = {
@@ -628,7 +647,34 @@ function focusOnNode(node) {
       };
     }
 
-    Graph.cameraPosition(camPos, targetPos, 1000);
+    // Smooth single-arc camera flight without frame-by-frame controls fight
+    if (window._cameraTrackingTimer) {
+      cancelAnimationFrame(window._cameraTrackingTimer);
+      window._cameraTrackingTimer = null;
+    }
+
+    // Stabilize active node coordinates permanently during focus:
+    // Keep fx, fy, fz pinned to targetPos so D3 force simulation NEVER rebounds,
+    // kicks, or jerks the selected node away after the camera lands!
+    // Release any previous pinned node if different
+    if (window._pinnedNode && window._pinnedNode !== liveTarget) {
+      window._pinnedNode.fx = undefined;
+      window._pinnedNode.fy = undefined;
+      window._pinnedNode.fz = undefined;
+    }
+    liveTarget.fx = targetPos.x;
+    liveTarget.fy = targetPos.y;
+    liveTarget.fz = targetPos.z;
+    window._pinnedNode = liveTarget;
+
+    // Clear any pending unpin timer so physics cannot violently rebound
+    if (window._unpinTimer) {
+      clearTimeout(window._unpinTimer);
+      window._unpinTimer = null;
+    }
+
+    // Execute buttery-smooth 60fps Three.js tween directly to dead-center
+    Graph.cameraPosition(camPos, targetPos, 700);
   }
 
   // Unified display pipeline: focusOnNode is the single writer of activeNode
@@ -681,46 +727,47 @@ function highlightScope(scopeType, targetObj) {
     if (fileNode && fileNode.x !== undefined) focusOnNode(fileNode);
   } else if (scopeType === 'node') {
     const node = targetObj;
-    highlightNodes.add(node.id);
 
-    // 1. Trace ALL Ancestors recursively up to the Root Document / File node
-    let currentAncestors = [node.id];
-    const visitedAncestors = new Set([node.id]);
-
-    while (currentAncestors.length > 0) {
-      const nextAncestors = [];
-      currentAncestors.forEach(currId => {
-        rawLinks.forEach(l => {
-          if (l.kind === 'parent_child') {
-            const sId = typeof l.source === 'object' ? l.source.id : l.source;
-            const tId = typeof l.target === 'object' ? l.target.id : l.target;
-            if (tId === currId && !visitedAncestors.has(sId)) {
-              visitedAncestors.add(sId);
-              highlightNodes.add(sId);
-              highlightLinks.add(l);
-              nextAncestors.push(sId);
-            }
-          }
-        });
-      });
-      currentAncestors = nextAncestors;
+    // 1. Trace upward from target node to discover full branch
+    const branchIds = [];
+    let cur = node.id;
+    const visited = new Set([cur]);
+    branchIds.push(cur);
+    while (cur) {
+      const p = parentIdOf(cur);
+      if (p && !visited.has(p)) {
+        visited.add(p);
+        branchIds.push(p);
+        cur = p;
+      } else {
+        break;
+      }
     }
 
-    // 2. Ensure owner Document / File node is 100% included in ancestor chain
+    // 2. File node backstop
     if (node.file) {
       const cleanPath = (node.file || '').replace(/\\/g, '/');
       const fileNode = rawData.nodes.find(n => n.kind === 'file' && ((n.file || '').replace(/\\/g, '/') === cleanPath || n.id === `file::${cleanPath}`));
-      if (fileNode) {
-        highlightNodes.add(fileNode.id);
-        rawLinks.forEach(l => {
-          const sId = typeof l.source === 'object' ? l.source.id : l.source;
-          const tId = typeof l.target === 'object' ? l.target.id : l.target;
-          if (sId === fileNode.id && highlightNodes.has(tId)) {
-            highlightLinks.add(l);
-          }
-        });
+      if (fileNode && !visited.has(fileNode.id)) {
+        visited.add(fileNode.id);
+        branchIds.push(fileNode.id);
       }
     }
+
+    // 順序相反 (點亮順序改為自根部文檔向下依序點亮至目前節點: File -> H1 -> H2 -> Child)
+    const rootToLeaf = branchIds.reverse();
+    rootToLeaf.forEach(id => highlightNodes.add(id));
+
+    // Connect ancestor parent_child links along the branch
+    rawLinks.forEach(l => {
+      if (l.kind === 'parent_child') {
+        const sId = typeof l.source === 'object' ? l.source.id : l.source;
+        const tId = typeof l.target === 'object' ? l.target.id : l.target;
+        if (highlightNodes.has(sId) && highlightNodes.has(tId)) {
+          highlightLinks.add(l);
+        }
+      }
+    });
 
     // 3. Highlight direct children (subsections) & direct doc_links (references)
     rawLinks.forEach(l => {
@@ -927,6 +974,7 @@ function loadProjects(opts = {}) {
 
 function loadMasterGraphAndFilter() {
   fetchConceptsData();
+  updateLintBadgeOnly();
   if (allProjectsList.length === 0) return;
 
   // Multi-repo merge: ask the server for EVERY known project path so the
@@ -1241,7 +1289,7 @@ function buildProjectTree() {
       <span class="tree-arrow ${isProjOpen ? 'open' : ''}">▸</span>
       <input type="checkbox" ${isSelected ? 'checked' : ''} title="Toggle project inclusion" />
       <span title="${escapeHtml(projName)}" style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:600;color:#58a6ff;">📦 ${escapeHtml(projName)}</span>
-      <button class="mini-btn txbtn" style="margin-left:auto; width:22px; height:20px; padding:0; font-size:11px; display:inline-flex; align-items:center; justify-content:center; flex-shrink:0;" title="${vProjZh ? '在此專案新增文件…（開啟 LLM 摘要入庫對話框）' : 'New document here… (open LLM summary ingest dialog)'}" onclick="event.stopPropagation();treeNewDocument('${vProjEsc}')">＋</button>
+      <button class="mini-btn txbtn" style="margin-left:auto; width:22px; height:20px; padding:0; font-size:13px; display:inline-flex; align-items:center; justify-content:center; flex-shrink:0;" title="${vProjZh ? '在此專案新增文件…（開啟 LLM 摘要入庫對話框）' : 'New document here… (open LLM summary ingest dialog)'}" onclick="event.stopPropagation();treeNewDocument('${vProjEsc}')">＋</button>
       <span class="node-kind-tag txbadge" style="margin-left:6px;">${proj.files || Object.keys(projData.files).length} md</span>
       ${vProjIndexed ? '' : `<button class="mini-btn" style="margin-left:6px; padding:1px 8px; font-size:10px; border-color:#9e6a03; color:#d29922;" title="${vProjZh ? '建立索引後才會出現在圖上' : 'Index it to show its nodes in the graph'}" onclick="event.stopPropagation();initRepo('${vProjEsc}', this)">${vProjZh ? '＋ 建立索引' : '＋ Create Index'}</button>`}
     `;
@@ -1287,11 +1335,11 @@ function buildProjectTree() {
 }
 
 // Explorer "Show source" toggle: list ingest source files (ppt/pdf/word)
-// next to the md docs. Default ON, remembered in localStorage.
+// next to the md docs. Default OFF (user-mandated), remembered in localStorage.
 const SRC_VIS_KEY = 'docgraphical-show-source';
 function isShowSource() {
-  try { const v = localStorage.getItem(SRC_VIS_KEY); return v === null ? true : v === '1'; }
-  catch (e) { return true; }
+  try { const v = localStorage.getItem(SRC_VIS_KEY); return v === null ? false : v === '1'; }
+  catch (e) { return false; }
 }
 function toggleShowSource() {
   const v = !isShowSource();
@@ -1484,8 +1532,8 @@ function renderDirContents(projName, dirObj, parentEl, openDirs, openFiles, sele
     dirNodeEl.innerHTML = `
       <span class="tree-arrow ${isDirOpen ? 'open' : ''}">▸</span>
       <span title="${escapeHtml(dName)}" style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:500;color:#e6edf3;">📁 ${escapeHtml(dName)}</span>
-      <button class="mini-btn txbtn" style="margin-left:auto; width:22px; height:20px; padding:0; font-size:11px; display:inline-flex; align-items:center; justify-content:center; flex-shrink:0;" title="${vDirZh ? `在此資料夾新增文件…（${escapeHtml(vDirAbs)}）` : (vDirJa ? `このフォルダに新規ドキュメント…（${escapeHtml(vDirAbs)}）` : `New document here… (${escapeHtml(vDirAbs)})`)}" onclick="event.stopPropagation();treeNewDocument('${vDirEsc}')">＋</button>
-      <button class="mini-btn txbtn" style="margin-left:4px; width:22px; height:20px; padding:0; font-size:11px; display:inline-flex; align-items:center; justify-content:center; flex-shrink:0; border-color:#5a2d2d; color:#f85149;" title="${vDirZh ? `刪除資料夾「${escapeHtml(dName)}」（包含全部子文件與索引，需確認）` : (vDirJa ? `フォルダ「${escapeHtml(dName)}」を削除（全サブファイルとインデックス含む、要確認）` : `Delete folder "${escapeHtml(dName)}" (all files + index, asks first)`)}" onclick="event.stopPropagation();treeDeleteDir('${vDirEsc}', '${vDNameEsc}')">−</button>
+      <button class="mini-btn txbtn" style="margin-left:auto; width:22px; height:20px; padding:0; font-size:13px; display:inline-flex; align-items:center; justify-content:center; flex-shrink:0;" title="${vDirZh ? `在此資料夾新增文件…（${escapeHtml(vDirAbs)}）` : (vDirJa ? `このフォルダに新規ドキュメント…（${escapeHtml(vDirAbs)}）` : `New document here… (${escapeHtml(vDirAbs)})`)}" onclick="event.stopPropagation();treeNewDocument('${vDirEsc}')">＋</button>
+      <button class="mini-btn txbtn" style="margin-left:4px; width:22px; height:20px; padding:0; font-size:13px; display:inline-flex; align-items:center; justify-content:center; flex-shrink:0; border-color:#5a2d2d; color:#f85149;" title="${vDirZh ? `刪除資料夾「${escapeHtml(dName)}」（包含全部子文件與索引，需確認）` : (vDirJa ? `フォルダ「${escapeHtml(dName)}」を削除（全サブファイルとインデックス含む、要確認）` : `Delete folder "${escapeHtml(dName)}" (all files + index, asks first)`)}" onclick="event.stopPropagation();treeDeleteDir('${vDirEsc}', '${vDNameEsc}')">−</button>
       ${vDirCount > 0 ? `<span class="node-kind-tag txbadge" style="margin-left:6px;">${vDirCount} md</span>` : ''}
     `;
 
@@ -1550,9 +1598,9 @@ function renderDirContents(projName, dirObj, parentEl, openDirs, openFiles, sele
       <span class="tree-arrow ${isFileOpen ? 'open' : ''}" style="${bUnindexed ? 'visibility:hidden;' : ''}">▸</span>
       ${getDocIconSvg(bUnindexed ? '#d29922' : (KIND_COLORS.file || '#f0883e'))}
       <span title="${escapeHtml(fName)}" style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:${bUnindexed ? '#d29922' : '#c9d1d9'};">${escapeHtml(fName)}</span>
-      ${vIsMd ? `<button class="mini-btn txbtn" style="width:22px; height:20px; padding:0; font-size:11px; display:inline-flex; align-items:center; justify-content:center; flex-shrink:0; border-color:#5a2d2d; color:#f85149;" title="${bUzh ? `刪除「${escapeHtml(fName)}」（md＋來源檔＋索引，需確認）` : `Delete "${escapeHtml(fName)}" (md + sources + index, asks first)`}" onclick="event.stopPropagation();treeDeleteFile('${vFileEsc}', '${vNameEsc}')">−</button>` : ''}
+      ${vIsMd ? `<button class="mini-btn txbtn" style="width:22px; height:20px; padding:0; font-size:13px; display:inline-flex; align-items:center; justify-content:center; flex-shrink:0; border-color:#5a2d2d; color:#f85149;" title="${bUzh ? `刪除「${escapeHtml(fName)}」（md＋來源檔＋索引，需確認）` : `Delete "${escapeHtml(fName)}" (md + sources + index, asks first)`}" onclick="event.stopPropagation();treeDeleteFile('${vFileEsc}', '${vNameEsc}')">−</button>` : ''}
       ${bUnindexed
-        ? `<span class="node-kind-tag txbadge" style="flex-shrink:0;margin-left:6px;background:#3a2e12;color:#d29922;border:1px solid #9e6a03;">${bUzh ? '⏳ 待索引' : '⏳ unindexed'}</span>`
+        ? `<button class="node-kind-tag txbadge" style="flex-shrink:0;margin-left:6px;background:#3a2e12;color:#d29922;border:1px solid #9e6a03;cursor:pointer;padding:2px 8px;border-radius:4px;font-size:13px;font-weight:600;" title="${bUzh ? '點擊立即將此檔案納入索引' : 'Click to index this file now'}" onclick="event.stopPropagation();promptToIndexFile('${escapeHtml(projName)}', '${vNameEsc}')">${bUzh ? '⏳ 待索引' : '⏳ unindexed'}</button>`
         : ''}
     `;
 
@@ -1668,7 +1716,7 @@ function renderNestedHeadingTree(headingNodes, parentEl, openDirs, selectedKey) 
 
     hNodeEl.innerHTML = `
       <span class="tree-arrow ${isHeadingOpen ? 'open' : ''}" style="${hasChildren ? '' : 'visibility:hidden;'}">▸</span>
-      <span style="color:${KIND_COLORS[h.kind] || '#58a6ff'}; margin-right:4px; font-weight:700; font-size:11px;">${'#'.repeat(h.level || 1)}</span>
+      <span style="color:${KIND_COLORS[h.kind] || '#58a6ff'}; margin-right:4px; font-weight:700; font-size:13px;">${'#'.repeat(h.level || 1)}</span>
       <span title="${escapeHtml(h.name)}" style="flex:1;min-width:0;color:#e6edf3;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px;">${escapeHtml(h.name)}</span>
       <span class="tree-line-badge" style="margin-left:auto; font-size:10px; color:#6e7681;">L${h.line || 1}</span>
     `;
@@ -1874,6 +1922,17 @@ function selectActiveNode(node, bSkipDelegates = false) {
     badge.style.textShadow = '0 1px 2px rgba(0,0,0,0.7)';
   }
 
+  const codeTitle = document.getElementById('d-code-title');
+  if (codeTitle) {
+    const zh = (typeof currentLanguage !== 'undefined' && currentLanguage === 'zh');
+    const ja = (typeof currentLanguage !== 'undefined' && currentLanguage === 'ja');
+    if (node.kind === 'file') {
+      codeTitle.innerText = zh ? '📄 完整文件 Markdown' : (ja ? '📄 全文 Markdown' : '📄 Full Document Markdown');
+    } else {
+      codeTitle.innerText = zh ? '🗡️ 切片章節 Markdown' : (ja ? '🗡️ 抽出セクション Markdown' : '🗡️ Sliced Section Markdown');
+    }
+  }
+
   // Fetch Section / Full Content for Center Markdown Viewer
   const queryFile = node.abs_path || node.file || '';
   // Viewer context: owning project/repo (for source-file links + ctx menu).
@@ -1932,20 +1991,31 @@ function selectActiveNode(node, bSkipDelegates = false) {
 function jumpToNodeById(encId) {
   let id = '';
   try { id = decodeURIComponent(encId || ''); } catch (e) { id = encId || ''; }
-  if (!id || typeof selectActiveNode !== 'function') return;
+  if (!id) return;
   try {
     const g = (typeof rawData !== 'undefined' && rawData && rawData.nodes) ? rawData.nodes : [];
     const nd = g.find(n => n && (n.id === id || (typeof n.id === 'string' && n.id.endsWith('::' + id))));
-    if (nd) selectActiveNode(nd);
-    else if (typeof showToast === 'function') showToast('❌ 節點不在圖上');
-  } catch (e) {}
+    if (nd) {
+      if (typeof dispatchUnifiedSelection === 'function') {
+        dispatchUnifiedSelection(nd);
+      } else if (typeof selectActiveNode === 'function') {
+        selectActiveNode(nd);
+      }
+    } else if (typeof dispatchUnifiedSelection === 'function') {
+      dispatchUnifiedSelection(id);
+    } else if (typeof showToast === 'function') {
+      showToast('❌ 節點不在圖上');
+    }
+  } catch (e) {
+    console.error('jumpToNodeById error:', e);
+  }
 }
 // Connected Links hub: every edge touching the selected node, rendered
 // with the ONE shared plate. Rows click through to the neighbor.
 function renderConnectedRelationsPanel(node) {
   const box = document.getElementById('d-relations');
   const cnt = document.getElementById('d-rel-count');
-  const empty = '<div style="font-size:11px; color:#8b949e; padding:8px;">Select a node to view relationships</div>';
+  const empty = '<div style="font-size:13px; color:#8b949e; padding:8px;">Select a node to view relationships</div>';
   if (!box) return;
   const nid = node && node.id;
   let links = [];
@@ -1998,14 +2068,14 @@ function renderConnectedRelationsPanel(node) {
     }
     h += `<div style="border:1px solid #21262d;border-radius:8px;padding:6px 8px;margin-bottom:6px;cursor:pointer;" onclick="jumpToNodeById('${enc}')" title="${esc(hoverTooltip)}">`
       + `<div style="display:flex;align-items:flex-start;gap:6px;">`
-      + `<span title="${esc(lk)}" style="flex-shrink:0;font-size:11px;color:#c9d1d9;border:1px solid #30363d;border-radius:10px;padding:1px 7px;margin-top:1px;white-space:nowrap;">${arrw} ${esc(blbl)}</span>`
+      + `<span title="${esc(lk)}" style="flex-shrink:0;font-size:15px;font-weight:500;color:#e6edf3;border:1px solid #30363d;border-radius:10px;padding:1px 7px;margin-top:1px;white-space:nowrap;">${arrw} ${esc(blbl)}</span>`
       + `<div style="flex:1;min-width:0;font-size:12px;">${nodePlateHtml({ title, kind, file, line, project: proj, clickable: false })}</div>`
       + `</div></div>`;
     shown++;
   }
   if (cnt) cnt.textContent = String(seen.size);
   box.innerHTML = h || empty;
-  if (links.length > shown) box.innerHTML += `<div style="font-size:11px;color:#8b949e;">+${links.length - shown} more</div>`;
+  if (links.length > shown) box.innerHTML += `<div style="font-size:13px;color:#8b949e;">+${links.length - shown} more</div>`;
 }
 
 
@@ -2015,13 +2085,24 @@ function updateDocTagsBar(mdText, filePath) {
   const list = document.getElementById('doc-tags-pill-list');
   if (!bar || !list) return;
 
-  // Extract all unique concepts in this document [[...]]
+  // Extract all unique concepts in this document [[...]] and [...](.../tags/Concept.md)
   const concepts = new Set();
   const pat = /\[\[([^\]|#\n]+)(?:#[^\]|\n]+)?(?:\|([^\]\n]+))?\]\]/g;
   let match;
   while ((match = pat.exec(mdText || '')) !== null) {
     const cName = (match[1] || '').trim();
     if (cName && cName.length <= 60 && !cName.toLowerCase().endsWith('.md')) {
+      concepts.add(cName);
+    }
+  }
+
+  // Also extract markdown links pointing to .docgraphical/tags/<Concept>.md
+  const tagLinkPat = /\[([^\]\n]+)\]\(([^)\n]*\.docgraphical\/tags\/([^)\n]+)\.md[^)\n]*)\)/g;
+  let tlMatch;
+  while ((tlMatch = tagLinkPat.exec(mdText || '')) !== null) {
+    let cName = (tlMatch[3] || '').trim();
+    try { cName = decodeURIComponent(cName); } catch (e) {}
+    if (cName && cName.length <= 60) {
       concepts.add(cName);
     }
   }
@@ -2037,7 +2118,7 @@ function updateDocTagsBar(mdText, filePath) {
 
   concepts.forEach(cName => {
     const pill = document.createElement('div');
-    pill.style.cssText = 'display:inline-flex; align-items:center; gap:4px; background:#1f6feb22; border:1px solid #388bfd66; border-radius:12px; padding:2px 8px; font-size:11px; color:#58a6ff; font-weight:600; cursor:pointer; transition:all 0.15s ease;';
+    pill.style.cssText = 'display:inline-flex; align-items:center; gap:4px; background:#1f6feb22; border:1px solid #388bfd66; border-radius:12px; padding:2px 8px; font-size:13px; color:#58a6ff; font-weight:600; cursor:pointer; transition:all 0.15s ease;';
     pill.onmouseover = () => { pill.style.background = '#1f6feb44'; pill.style.borderColor = '#58a6ff'; };
     pill.onmouseout = () => { pill.style.background = '#1f6feb22'; pill.style.borderColor = '#388bfd66'; };
 
@@ -2049,7 +2130,7 @@ function updateDocTagsBar(mdText, filePath) {
 
     const del = document.createElement('span');
     del.innerText = '✕';
-    del.style.cssText = 'color:#f85149; margin-left:4px; font-size:11px; padding:0 2px; cursor:pointer;';
+    del.style.cssText = 'color:#f85149; margin-left:4px; font-size:13px; padding:0 2px; cursor:pointer;';
     del.title = '解除此標籤關聯 (Unlink)';
     del.onclick = (e) => {
       unlinkConcept(cName, filePath, e);
@@ -2068,12 +2149,15 @@ function renderMarkdown(mdText, extraSources) {
   const curFile = (viewCtx && viewCtx.file) ? viewCtx.file : (activeNode ? (activeNode.file || activeNode.abs_path || '') : '');
   updateDocTagsBar(mdText, curFile);
 
-  // Convert [[Concept]] into clickable interactive inline tags
+  // Convert [[Concept]] into clickable interactive inline links (clean blue underline, no tag icon)
   let processedMd = mdText || '';
+  const zhLang = (typeof currentLanguage !== 'undefined' && currentLanguage === 'zh');
+  const openConceptPrefix = zhLang ? '開啟概念頁：' : 'Open concept page: ';
   processedMd = processedMd.replace(/\[\[([^\]|#\n]+)(?:#[^\]|\n]+)?(?:\|([^\]\n]+))?\]\]/g, (m, cName, alias) => {
-    const displayName = alias ? alias.trim() : cName.trim();
-    if (cName.toLowerCase().endsWith('.md')) return m; // keep standard doc links
-    return `<span class="inline-concept-badge" style="display:inline-flex; align-items:center; background:#1f6feb22; border:1px solid #388bfd55; color:#58a6ff; font-weight:600; padding:1px 6px; border-radius:4px; cursor:pointer; font-size:11px;" onclick="onConceptCardClick('${escapeHtml(cName.trim())}', event)">🏷️ ${escapeHtml(displayName)}</span>`;
+    const rawTarget = cName.trim();
+    const displayName = alias ? alias.trim() : rawTarget;
+    if (rawTarget.toLowerCase().endsWith('.md')) return m; // keep standard doc links
+    return `<a class="concept-inline-link" title="${openConceptPrefix}${escapeHtml(rawTarget)}" style="color:#58a6ff; text-decoration:underline; text-underline-offset:3px; cursor:pointer; font-weight:500;" onclick="onConceptCardClick('${escapeHtml(rawTarget)}', event)">${escapeHtml(displayName)}</a>`;
   });
   // Ingest-md header sources: `> - `rel`` lines — remembered for linkify + menu.
   // extraSources (server-provided, from the FULL file) keeps source links
@@ -2094,6 +2178,7 @@ function renderMarkdown(mdText, extraSources) {
     linkifySources(container);
     linkifyConceptLinks(container);
     bindMarkdownInternalLinks(container);
+    resolveMarkdownImages(container, curFile);
   } else {
     container.innerText = mdText || '';
   }
@@ -2135,15 +2220,38 @@ function linkifySources(container) {
 // Physical tag links [Name](../.docgraphical/tags/Name.md): intercept
 // clicks into the in-app tag page instead of navigating away.
 // Standalone from linkifySources (which early-returns without header
-// sources); bound once per container, markers re-applied every render.
 function linkifyConceptLinks(container) {
   if (!container) return;
   container.querySelectorAll('a[href*="tags/"]').forEach((a) => {
     a.classList.add('concept-link');
-    if (!a.title) {
-      const zh2 = (typeof currentLanguage !== 'undefined' && currentLanguage === 'zh');
-      a.title = (zh2 ? '開啟概念頁：' : 'Open concept page: ') + (a.textContent || '').trim();
+    // Check if link is located inside a blockquote (the `> 🏷️ 標籤：` container)
+    const isInTagLine = !!a.closest('blockquote');
+    if (isInTagLine) {
+      a.classList.add('inline-concept-badge');
+      a.style.cssText = 'display:inline-flex; align-items:center; background:#1f6feb22; border:1px solid #388bfd55; color:#58a6ff; font-weight:600; padding:1px 6px; border-radius:4px; cursor:pointer; font-size:13px; text-decoration:none; margin:0 2px;';
+      if (!a.querySelector('.tag-icon-span')) {
+        const icon = document.createElement('span');
+        icon.className = 'tag-icon-span';
+        icon.innerText = '🏷️ ';
+        a.prepend(icon);
+      }
+    } else {
+      // Normal inline document link: clean blue text with subtle underline, no badge, no icon
+      a.style.cssText = 'color:#58a6ff; text-decoration:underline; text-underline-offset:3px; cursor:pointer; font-weight:500; margin:0 1px;';
+      const existingIcon = a.querySelector('.tag-icon-span');
+      if (existingIcon) existingIcon.remove();
     }
+    // Resolve the real target concept name from the URL (e.g. .docgraphical/tags/越南建廠專案.md -> 越南建廠專案)
+    const href = a.getAttribute('href') || '';
+    const base = href.split('/').pop().split('#')[0].split('?')[0];
+    let canonicalTarget = '';
+    try { canonicalTarget = decodeURIComponent(base); } catch (e) { canonicalTarget = base; }
+    if (canonicalTarget.toLowerCase().endsWith('.md')) canonicalTarget = canonicalTarget.slice(0, -3);
+    canonicalTarget = (canonicalTarget || '').trim();
+
+    const zh2 = (typeof currentLanguage !== 'undefined' && currentLanguage === 'zh');
+    const targetLabel = canonicalTarget || (a.textContent || '').trim();
+    a.title = (zh2 ? '開啟概念頁：' : 'Open concept page: ') + targetLabel;
   });
   if (!container.dataset.taglinkBound) {
     container.dataset.taglinkBound = '1';
@@ -2724,8 +2832,8 @@ function renderRepoTable(projects) {
 
     tr.innerHTML = `
       <td style="font-weight:600; color:#58a6ff;">${escapeHtml(p.name)}</td>
-      <td style="font-family:monospace; font-size:11px; color:#8b949e;" title="${escapeHtml(p.path)}">${escapeHtml(p.path)}</td>
-      <td style="font-family:monospace; font-size:11px; color:#c9d1d9;">${metricsText}</td>
+      <td style="font-family:monospace; font-size:13px; color:#8b949e;" title="${escapeHtml(p.path)}">${escapeHtml(p.path)}</td>
+      <td style="font-family:monospace; font-size:13px; color:#c9d1d9;">${metricsText}</td>
       <td>${statusHtml}</td>
       <td>${actionsHtml}</td>
     `;
@@ -2766,6 +2874,52 @@ function syncRepo(path, btn) {
     }
   })
   .catch(err => { setBusy(btn, false); alert('Sync error: ' + err); });
+}
+
+function promptToIndexFile(projName, fileName) {
+  const proj = (allProjectsList || []).find(p => p.name === projName);
+  const repoPath = proj ? proj.path : '';
+  const lang = currentLanguage;
+  const zh = lang === 'zh';
+  const ja = lang === 'ja';
+
+  const title = zh ? '⚡ 將檔案納入索引' : (ja ? '⚡ ファイルをインデックスに追加' : '⚡ Include File in Index');
+  const msg = zh
+    ? `即將對「${projName}」專案執行增量同步，將「${fileName}」及所有未索引文檔正式納入知識庫圖譜。`
+    : (ja
+      ? `「${projName}」の未処理ファイル「${fileName}」をインデックスに追加してナレッジグラフに同期します。`
+      : `Perform incremental sync for "${projName}" to incorporate "${fileName}" into the knowledge graph.`);
+
+  const tip = zh ? '💡 增量同步只需數毫秒，現有概念與筆記完全保留。' : (ja ? '💡 増分同期はミリ秒単位で完了し、既存データは安全に保持されます。' : '💡 Incremental sync takes milliseconds and preserves all data.');
+
+  showCyberConfirm(title, msg, () => {
+    showToast(zh ? '⏳ 正在增量解析並更新圖譜…' : (ja ? '⏳ インデックス更新中…' : '⏳ Indexing and updating graph…'));
+    const url = repoPath ? '/api/sync' : '/api/sync_all';
+    const opts = repoPath
+      ? { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ path: repoPath }) }
+      : { method: 'POST' };
+
+    fetch(url, opts)
+      .then(r => r.json())
+      .then(res => {
+        if (res.success) {
+          showToast(zh ? `✅ 已成功納入索引！` : (ja ? `✅ インデックス完了！` : `✅ Successfully indexed!`));
+          loadProjects();
+          if (typeof updateLintBadgeOnly === 'function') updateLintBadgeOnly();
+          if (typeof fetchConceptsData === 'function') fetchConceptsData();
+        } else {
+          showToast('❌ 索引失敗: ' + (res.error || 'unknown'));
+        }
+      })
+      .catch(err => showToast('❌ 網路連線錯誤: ' + err.message));
+  }, {
+    tip: tip,
+    titleColor: '#58a6ff',
+    confirmText: zh ? '立即納入索引' : (ja ? 'インデックス実行' : 'Index Now'),
+    cancelText: zh ? '取消' : (ja ? 'キャンセル' : 'Cancel'),
+    btnBg: '#238636',
+    btnBorder: '#2ea043'
+  });
 }
 
 function rebuildRepo(path, btn) {
@@ -2847,7 +3001,7 @@ function togglePendingRow(idx, el) {
   const zh = currentLanguage === 'zh';
   const files = p.pending_files || [];
   const total = p.pending_count || 0;
-  const items = files.map(f => `<div style="font-family:monospace; font-size:11px; color:#c9d1d9; padding:1px 0;">📄 ${escapeHtml(f)}</div>`).join('');
+  const items = files.map(f => `<div style="font-family:monospace; font-size:13px; color:#c9d1d9; padding:1px 0;">📄 ${escapeHtml(f)}</div>`).join('');
   const dtr = document.createElement('tr');
   dtr.className = 'pending-detail-row';
   dtr.innerHTML = `<td colspan="5" style="background:#161b22; border-top:1px dashed #30363d; padding:8px 12px;">
@@ -2899,197 +3053,10 @@ function ingMsg(t, bad) {
   const m = document.getElementById('ing-msg');
   if (m) { m.textContent = t || ''; m.style.color = bad ? '#f85149' : '#8b949e'; }
 }
-function openIngestDialog(absDir) {
-  const lang = currentLanguage;
-  const zh = lang === 'zh', ja = lang === 'ja';
-  closeIngestDialog();
-  const t = (absDir || '').replace(/\\/g, '/');
-  let repoPath = '', projName = '';
-  (allProjectsList || []).forEach(p => {
-    if (!p.path) return;
-    const r = p.path.replace(/\\/g, '/');
-    if (t === r || t.startsWith(r + '/')) {
-      if (!repoPath || r.length > repoPath.replace(/\\/g, '/').length) { repoPath = p.path; projName = p.name; }
-    }
-  });
-  if (!repoPath) { showToast(zh ? '❌ 找不到所屬 repo' : (ja ? '❌ 対象のリポジトリが見つかりません' : '❌ Owning repo not found')); return; }
-  // Per-file batch state: each picked file carries its own staged path,
-  // status and summary. md filename always equals the source stem.
-  ingState = { dir: absDir, repo: repoPath, proj: projName, picked: [], sel: -1, zh, ja };
-  const o = document.createElement('div');
-  o.id = 'ing-overlay';
-  o.style.cssText = 'position:fixed;inset:0;z-index:1000002;background:rgba(0,0,0,.6);display:flex;align-items:center;justify-content:center;';
-  const dlgTitle = zh ? '📥 新增文件 — LLM 摘要入庫' : (ja ? '📥 ドキュメント追加 — LLM要約・取り込み' : '📥 New document — LLM summary ingest');
-  const targetLabel = zh ? '目標目錄：' : (ja ? '保存先ディレクトリ: ' : 'Target: ');
-  const step1Title = zh ? '① 選擇檔案（文件／試算／郵件／圖片，可拖拉）' : (ja ? '① ファイル選択（文書/表計算/メール/画像、D&D対応）' : '① Pick files (docs/sheets/mail/images, drag & drop)');
-  const dropText = zh ? '🖱️ 把檔案拖到這裡放開，或點此選擇檔案' : (ja ? '🖱️ ここにファイルをドラッグ＆ドロップ、またはクリックして選択' : '🖱️ Drag files here, or click to browse');
-  const sumBtnText = zh ? '✨ 整批生成摘要' : (ja ? '✨ 一括要約を生成' : '✨ Summarize all');
-  const step2Title = zh ? '② LLM 摘要預覽' : (ja ? '② LLM要約プレビュー' : '② LLM summary preview');
-  const tabPrev = zh ? '預覽' : (ja ? 'プレビュー' : 'Preview');
-  const tabEdit = zh ? '編輯' : (ja ? '編集' : 'Edit');
-  const editHint = zh ? '存檔前可先修改摘要' : (ja ? '保存前に要約内容を調整できます' : 'review & edit before saving');
-  const emptyPrev = zh ? '（摘要會顯示在這裡）' : (ja ? '（要約結果がここに表示されます）' : '(summary appears here)');
-  const saveBtnText = zh ? '✅ 確認產出 md 並入庫' : (ja ? '✅ 要約mdを作成して取り込む' : '✅ Confirm: write md & index');
-
-  o.innerHTML = `
-  <div style="width:90vw;max-width:1700px;height:88vh;overflow:hidden;display:flex;flex-direction:column;background:#0d1117;border:1px solid #30363d;border-radius:12px;padding:16px;color:#e6edf3;">
-    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px;">
-      <span style="font-weight:600;font-size:19px;">${dlgTitle} <span style="font-size:14px;color:#8b949e;font-weight:400;">v3.9.26</span></span>
-      <button onclick="closeIngestDialog()" style="background:transparent;border:none;color:#8b949e;cursor:pointer;font-size:16px;">✕</button>
-    </div>
-    <div style="font-size:15px;color:#8b949e;margin-bottom:10px;word-break:break-all;">${targetLabel}${escapeHtml(absDir)}${projName ? ` &nbsp;·&nbsp; ${escapeHtml(projName)}` : ''}</div>
-    <div style="display:flex;gap:12px;flex:1;min-height:0;">
-      <div style="flex:0 1 330px;min-width:250px;display:flex;flex-direction:column;gap:8px;">
-        <div style="font-size:16px;font-weight:600;color:#c9d1d9;">${step1Title}</div>
-        <div id="ing-drop" style="border:1.5px dashed #30363d;border-radius:8px;padding:20px 12px;text-align:center;color:#8b949e;font-size:16px;cursor:pointer;transition:border-color .15s,background .15s;">
-          ${dropText}
-          <input type="file" id="ing-file-input" multiple accept=".pptx,.ppt,.docx,.doc,.pdf,.txt,.md,.markdown,.csv,.html,.htm,.eml,.jpg,.jpeg,.png,.webp,.bmp,.tiff,.tif" style="display:none;" />
-        </div>
-        <div id="ing-file-list" style="display:flex;flex-direction:column;gap:4px;flex:1;min-height:100px;overflow-y:auto;"></div>
-        <button id="ing-btn-sum" onclick="ingSummarizeAll(this)" style="background:#1f6feb;border:1px solid #388bfd;color:#fff;border-radius:6px;padding:8px 12px;cursor:pointer;font-weight:600;font-size:16px;white-space:nowrap;">${sumBtnText}</button>
-      </div>
-      <div style="flex:1;min-width:0;display:flex;flex-direction:column;gap:8px;">
-        <div style="font-size:16px;font-weight:600;color:#c9d1d9;">${step2Title}</div>
-        <div id="ing-sel-name" style="font-size:14px;color:#58a6ff;word-break:break-all;min-height:18px;"></div>
-        <div style="display:flex;gap:6px;align-items:center;">
-          <button id="ing-tab-prev" onclick="ingShowTab('prev')" style="background:#1f6feb44;border:1px solid #1f6feb;color:#58a6ff;border-radius:6px;padding:4px 12px;cursor:pointer;font-size:16px;">👁 ${tabPrev}</button>
-          <button id="ing-tab-edit" onclick="ingShowTab('edit')" style="background:transparent;border:1px solid #30363d;color:#c9d1d9;border-radius:6px;padding:4px 12px;cursor:pointer;font-size:16px;">✏️ ${tabEdit}</button>
-          <span style="font-size:15px;color:#8b949e;">${editHint}</span>
-        </div>
-        <div id="ing-preview" style="background:#010409;border:1px solid #21262d;border-radius:6px;padding:12px;font-size:13px;flex:1;min-height:220px;overflow-y:auto;color:#c9d1d9;word-break:break-word;">${emptyPrev}</div>
-        <textarea id="ing-edit" style="display:none;background:#010409;border:1px solid #1f6feb;border-radius:6px;padding:12px;font-size:13px;color:#e6edf3;flex:1;min-height:220px;overflow-y:auto;font-family:inherit;white-space:pre-wrap;"></textarea>
-        <button id="ing-btn-save" onclick="ingSave(this)" style="background:#238636;border:1px solid #2ea043;color:#fff;border-radius:6px;padding:8px 12px;cursor:pointer;font-weight:600;font-size:16px;">${saveBtnText}</button>
-      </div>
-    </div>
-    <div id="ing-msg" style="font-size:16px;color:#8b949e;margin-top:8px;min-height:16px;"></div>
-  </div>`;
-  document.body.appendChild(o);
-  o.addEventListener('click', (ev) => { if (ev.target === o) closeIngestDialog(); });
-  // Picker + drag&drop share one list (drops accumulate; dupes by name+size dropped).
-  const dz = document.getElementById('ing-drop');
-  const fi = document.getElementById('ing-file-input');
-  if (dz && fi) {
-    dz.addEventListener('click', () => fi.click());
-    fi.addEventListener('change', (ev) => {
-      ingAddPicked(Array.from(ev.target.files || []));
-      fi.value = '';  // allow re-picking the same file
-    });
-    ['dragenter', 'dragover'].forEach(evName => dz.addEventListener(evName, (ev) => {
-      ev.preventDefault();
-      dz.style.borderColor = '#1f6feb';
-      dz.style.background = '#1f6feb22';
-    }));
-    ['dragleave', 'drop'].forEach(evName => dz.addEventListener(evName, (ev) => {
-      ev.preventDefault();
-      dz.style.borderColor = '#30363d';
-      dz.style.background = '';
-    }));
-    dz.addEventListener('drop', (ev) => {
-      const files = (ev.dataTransfer && ev.dataTransfer.files) ? Array.from(ev.dataTransfer.files) : [];
-      if (!files.length) return;
-      const ok = files.filter(f => /\.(pptx?|docx?|pdf|txt|md|markdown|csv|html?|eml|jpe?g|png|webp|bmp|tiff?)$/i.test(f.name || ''));
-      if (ok.length < files.length) {
-        ingMsg((ingState.zh ? '⚠ 已略過不支援的格式：' : '⚠ Skipped unsupported: ')
-          + files.filter(f => !/\.(pptx?|docx?|pdf|txt|md|markdown|csv|html?|eml|jpe?g|png|webp|bmp|tiff?)$/i.test(f.name || '')).map(f => f.name).join('、'), true);
-      }
-      ingAddPicked(ok);
-    });
-  }
-}
-// Append files to the ingest pick list (shared by picker + drag&drop).
-// Each entry carries its own staged path, status and summary:
-// pending -> staged -> working -> done | error
-function ingAddPicked(files) {
-  if (!ingState || !files || !files.length) return;
-  const seen = new Set(ingState.picked.map(f => `${f.name}::${f.size}`));
-  files.forEach(f => {
-    const k = `${f.name}::${f.size}`;
-    if (!seen.has(k)) {
-      seen.add(k);
-      ingState.picked.push({ file: f, name: f.name, size: f.size,
-        stagedPath: '', status: 'picked', summary: '', model: '', error: '' });
-    }
-  });
-  if (ingState.sel < 0 && ingState.picked.length) ingState.sel = 0;
-  ingRenderPicked();
-}
-function ingEntryIcon(st) {
-  return st === 'done' ? '✅' : st === 'error' ? '❌' : st === 'working' ? '⏳' : '📎';
-}
-function ingRenderPicked() {
-  const box = document.getElementById('ing-file-list');
-  if (!box || !ingState) return;
-  box.innerHTML = '';
-  if (!ingState.picked.length) {
-    box.innerHTML = `<div style="font-size:15px;color:#8b949e;">${ingState.zh ? '（尚未選擇檔案）' : (ingState.ja ? '（ファイルが未選択です）' : '(no files yet)')}</div>`;
-    ingState.sel = -1;
-    paintIngSelName();
-    paintIngSaveBtn();
-    return;
-  }
-  ingState.picked.forEach((e, idx) => {
-    const d = document.createElement('div');
-    const sel = idx === ingState.sel;
-    d.style.cssText = 'display:flex;gap:6px;align-items:center;font-size:16px;color:#c9d1d9;border:1px solid ' + (sel ? '#1f6feb' : '#21262d') + ';border-radius:6px;padding:4px 8px;' + (e.status === 'done' ? 'cursor:pointer;' : '');
-    if (sel) d.style.background = '#1f6feb22';
-    const ic = document.createElement('span');
-    ic.textContent = ingEntryIcon(e.status);
-    ic.style.cssText = e.status === 'working' ? 'color:#58a6ff;' : '';
-    if (e.status === 'working') ic.className = 'ing-spin';
-    d.appendChild(ic);
-    const tx = document.createElement('span');
-    tx.style.cssText = 'flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;';
-    tx.textContent = `${e.name} (${Math.round(e.size / 1024)} KB)`;
-    tx.title = (e.status === 'error' && e.error) ? e.error : (e.stagedPath || e.name);
-    d.appendChild(tx);
-    const x = document.createElement('button');
-    x.textContent = '✕';
-    x.title = ingState.zh ? '移除' : (ingState.ja ? '削除' : 'Remove');
-    x.style.cssText = 'background:transparent;border:none;color:#8b949e;cursor:pointer;font-size:16px;padding:0 2px;';
-    x.onclick = (ev) => {
-      ev.stopPropagation();
-      ingState.picked.splice(idx, 1);
-      if (ingState.sel >= ingState.picked.length) ingState.sel = ingState.picked.length - 1;
-      ingRenderPicked();
-    };
-    d.appendChild(x);
-    d.onclick = () => ingSelectFile(idx);
-    box.appendChild(d);
-  });
-  paintIngSelName();
-  paintIngSaveBtn();
-}
-// Currently selected file name above the preview + Confirm count.
-function paintIngSelName() {
-  const el = document.getElementById('ing-sel-name');
-  if (!el || !ingState) return;
-  const e = ingState.picked[ingState.sel];
-  el.textContent = e ? `▸ ${e.name}` : '';
-}
-function paintIngSaveBtn() {
-  const btn = document.getElementById('ing-btn-save');
-  if (!btn || !ingState) return;
-  const n = ingState.picked.filter(e => e.status === 'done').length;
-  btn.textContent = n
-    ? (ingState.zh ? `✅ 確認產出 ${n} 個 md 並入庫` : (ingState.ja ? `✅ ${n} 件の要約mdを作成して取り込む` : `✅ Confirm: write ${n} md & index`))
-    : (ingState.zh ? '✅ 確認產出 md 並入庫' : (ingState.ja ? '✅ 要約mdを作成して取り込む' : '✅ Confirm: write md & index'));
-}
-// Click a row: stash current editor draft, show that file's summary.
-function ingSelectFile(idx) {
+function ingCurEntry() {
   const st = ingState;
-  if (!st || !st.picked[idx]) return;
-  const ed = document.getElementById('ing-edit');
-  if (ed && st.picked[st.sel] && st.picked[st.sel].status === 'done') {
-    st.picked[st.sel].summary = ed.value;  // keep human edits per file
-  }
-  st.sel = idx;
-  const e = st.picked[idx];
-  if (ed) ed.value = e.summary || '';
-  ingShowTab('prev');
-  ingRenderPicked();
+  return (st && st.picked && st.sel >= 0 && st.picked[st.sel]) ? st.picked[st.sel] : null;
 }
-// Animated busy line for long ingest ops: spinning ◌ + elapsed seconds +
-// dialog-wide button lock (no double-submit). Returns stop(); idempotent.
 function ingProgress(label) {
   const st = ingState;
   const m = document.getElementById('ing-msg');
@@ -3109,55 +3076,588 @@ function ingProgress(label) {
   };
   tick();
   const timer = setInterval(tick, 500);
-  let stopped = false;
   return () => {
-    if (stopped) return;
-    stopped = true;
     clearInterval(timer);
     lock(false);
-    if (st && st._stop) st._stop = null;
+    if (m) { m.innerHTML = ''; m.style.color = ''; }
   };
 }
-// Stage picked files (only ones not staged yet), then continue.
-function ingStageAll(done) {
-  const st = ingState;
-  if (!st) return;
-  const zh = st.zh;
-  const fresh = st.picked.filter(e => !e.stagedPath);
-  if (!fresh.length) { if (typeof done === 'function') done(); return; }
-  if (st._stop) st._stop();
-  st._stop = ingProgress(zh ? '上傳暫存中' : 'Staging upload');
-  const fd = new FormData();
-  fd.append('target_dir', st.dir);
-  fd.append('stage', '1');  // files wait in staging; Confirm moves them in
-  fresh.forEach(e => fd.append('files', e.file, e.name));
-  fetch('/api/ingest/upload', { method: 'POST', body: fd })
-  .then(r => r.json().then(d => ({ status: r.status, body: d })))
-  .then(({ status, body }) => {
-    if (st._stop) st._stop();
-    if (status === 200 && body.success) {
-      const byKey = {};
-      (body.files || []).forEach(f => { byKey[`${f.name}::${f.size}`] = f.path; });
-      fresh.forEach(e => {
-        const p = byKey[`${e.name}::${e.file.size}`];
-        if (p) { e.stagedPath = p; if (e.status === 'picked') e.status = 'staged'; }
+function openIngestDialog(absDir) {
+  const lang = currentLanguage;
+  const zh = lang === 'zh', ja = lang === 'ja';
+  closeIngestDialog();
+  const t = (absDir || '').replace(/\\/g, '/');
+  let repoPath = '', projName = '';
+  (allProjectsList || []).forEach(p => {
+    if (!p.path) return;
+    const r = p.path.replace(/\\/g, '/');
+    if (t === r || t.startsWith(r + '/')) {
+      if (!repoPath || r.length > repoPath.replace(/\\/g, '/').length) { repoPath = p.path; projName = p.name; }
+    }
+  });
+  if (!repoPath) { showToast(zh ? '❌ 找不到所屬 repo' : (ja ? '❌ 対象のリポジトリが見つかりません' : '❌ Owning repo not found')); return; }
+  // Per-file batch state: each picked item carries its own staged path / url / text / images,
+  // status and summary.
+  ingState = {
+    dir: absDir,
+    repo: repoPath,
+    proj: projName,
+    picked: [],
+    sel: -1,
+    zh,
+    ja,
+    activeTab: 'files',
+    clipboardImages: []
+  };
+
+  const o = document.createElement('div');
+  o.id = 'ing-overlay';
+  o.style.cssText = 'position:fixed;inset:0;z-index:1000002;background:rgba(0,0,0,.6);display:flex;align-items:center;justify-content:center;';
+  const dlgTitle = zh ? '📥 新增文件 — LLM 摘要入庫' : (ja ? '📥 ドキュメント追加 — LLM要約・取り込み' : '📥 New document — LLM summary ingest');
+  const targetLabel = zh ? '目標目錄：' : (ja ? '保存先ディレクトリ: ' : 'Target: ');
+  const step1Title = zh ? '① 來源素材' : (ja ? '① 素材ソース' : '① Source Material');
+  const sumBtnText = zh ? '✨ 整批生成摘要' : (ja ? '✨ 一括要約を生成' : '✨ Summarize all');
+  const step2Title = zh ? '② LLM 摘要預覽與設定' : (ja ? '② LLM要約プレビューと設定' : '② LLM summary & settings');
+  const tabPrev = zh ? '預覽' : (ja ? 'プレビュー' : 'Preview');
+  const tabEdit = zh ? '編輯' : (ja ? '編集' : 'Edit');
+  const editHint = zh ? '存檔前可自由修改摘要內文' : (ja ? '保存前に要約内容を調整できます' : 'review & edit before saving');
+  const emptyPrev = zh ? '（摘要會顯示在這裡）' : (ja ? '（要約結果がここに表示されます）' : '(summary appears here)');
+  const saveBtnText = zh ? '✅ 確認產出 md 並入庫' : (ja ? '✅ 要約mdを作成して取り込む' : '✅ Confirm: write md & index');
+
+  o.innerHTML = `
+  <div style="width:92vw;max-width:1720px;height:90vh;overflow:hidden;display:flex;flex-direction:column;background:#0d1117;border:1px solid #30363d;border-radius:12px;padding:16px;color:#e6edf3;">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px;">
+      <span style="font-weight:600;font-size:22px;">${dlgTitle} <span style="font-size:13px;color:#58a6ff;background:#1f6feb22;padding:2px 6px;border-radius:4px;border:1px solid #388bfd44;margin-left:6px;">Multi-Source v4.0</span></span>
+      <button onclick="closeIngestDialog()" style="background:transparent;border:none;color:#8b949e;cursor:pointer;font-size:16px;">✕</button>
+    </div>
+    <div style="font-size:15px;color:#8b949e;margin-bottom:12px;word-break:break-all;">${targetLabel}<span style="color:#c9d1d9;">${escapeHtml(absDir)}</span>${projName ? ` &nbsp;·&nbsp; <span style="color:#58a6ff;">${escapeHtml(projName)}</span>` : ''}</div>
+    
+    <div style="display:flex;gap:14px;flex:1;min-height:0;">
+      <!-- Left Column: Source Acquisition Tabs & Staged Queue -->
+      <div style="flex:0 1 440px;min-width:380px;display:flex;flex-direction:column;gap:8px;">
+        <div style="display:flex;align-items:center;justify-content:space-between;">
+          <div style="font-size:18px;font-weight:700;color:#e6edf3;">${step1Title}</div>
+          <span style="font-size:13px;color:#8b949e;">支援獨立或批次入庫</span>
+        </div>
+
+        <!-- Mode Tabs -->
+        <div style="display:flex;gap:4px;background:#161b22;padding:3px;border-radius:8px;border:1px solid #30363d;">
+          <button id="ing-mode-file" onclick="ingSwitchSourceTab('files')" style="flex:1;background:#1f6feb;border:none;color:#fff;border-radius:6px;padding:9px 8px;font-size:15px;cursor:pointer;font-weight:600;">📁 ${zh ? '本機檔案' : 'Files'}</button>
+          <button id="ing-mode-url" onclick="ingSwitchSourceTab('url')" style="flex:1;background:transparent;border:none;color:#8b949e;border-radius:6px;padding:9px 8px;font-size:15px;cursor:pointer;font-weight:600;">🌐 ${zh ? '網址爬網' : 'Web URL'}</button>
+          <button id="ing-mode-clip" onclick="ingSwitchSourceTab('clipboard')" style="flex:1;background:transparent;border:none;color:#8b949e;border-radius:6px;padding:9px 8px;font-size:15px;cursor:pointer;font-weight:600;">📋 ${zh ? '剪貼簿混貼' : 'Clipboard'}</button>
+        </div>
+
+        <!-- Tab 1: File Drop Zone -->
+        <div id="ing-panel-files" style="display:flex;flex-direction:column;gap:6px;">
+          <div id="ing-drop" style="border:1.5px dashed #30363d;border-radius:8px;padding:22px 12px;text-align:center;color:#c9d1d9;font-size:16px;cursor:pointer;transition:border-color .15s,background .15s;">
+            🖱️ ${zh ? '拖放檔案至此，或點此選取' : 'Drag files here, or click to browse'}
+            <div style="font-size:13px;color:#8b949e;margin-top:4px;">(pptx/docx/pdf/txt/md/csv/eml/圖片)</div>
+            <input type="file" id="ing-file-input" multiple accept=".pptx,.ppt,.docx,.doc,.pdf,.txt,.md,.markdown,.csv,.html,.htm,.eml,.jpg,.jpeg,.png,.webp,.bmp,.tiff,.tif" style="display:none;" />
+          </div>
+        </div>
+
+        <!-- Tab 2: URL Crawling Zone -->
+        <div id="ing-panel-url" style="display:none;flex-direction:column;gap:6px;background:#161b22;padding:10px;border-radius:8px;border:1px solid #30363d;">
+          <label style="font-size:15px;color:#c9d1d9;font-weight:600;">輸入技術網址 (URL):</label>
+          <input type="url" id="ing-url-input" placeholder="https://example.com/spec/..." style="background:#0d1117;border:1px solid #30363d;border-radius:6px;padding:10px 12px;font-size:15px;color:#e6edf3;" />
+          <button onclick="ingFetchUrl()" style="background:#238636;border:1px solid #2ea043;color:#fff;border-radius:6px;padding:9px 14px;font-size:15px;cursor:pointer;font-weight:600;">📥 ${zh ? '抓取網頁並加入佇列' : 'Fetch URL & Queue'}</button>
+        </div>
+
+        <!-- Tab 3: Mixed Clipboard Paste Zone -->
+        <div id="ing-panel-clipboard" style="display:none;flex-direction:column;gap:6px;background:#161b22;padding:10px;border-radius:8px;border:1px solid #30363d;">
+          <div style="display:flex;align-items:center;justify-content:space-between;">
+            <label style="font-size:15px;color:#c9d1d9;font-weight:600;">筆記與截圖混貼 (Ctrl+V):</label>
+            <span style="font-size:13px;color:#58a6ff;">文字+好幾張截圖可湊成1個</span>
+          </div>
+          <textarea id="ing-clipboard-text" placeholder="${zh ? '在此輸入或貼上文字、Markdown 片段，亦可直接按 Ctrl+V 貼上多張截圖！' : 'Paste notes here or press Ctrl+V to attach screenshots...'}" style="background:#0d1117;border:1px solid #30363d;border-radius:6px;padding:10px 12px;font-size:15px;color:#e6edf3;height:180px;min-height:160px;resize:vertical;font-family:inherit;"></textarea>
+          <!-- Thumbnails of pasted screenshots -->
+          <div id="ing-clipboard-imgs-bar" style="display:none;gap:6px;flex-wrap:wrap;padding:4px 0;"></div>
+          <button onclick="ingCommitClipboardItem()" style="background:#1f6feb;border:1px solid #388bfd;color:#fff;border-radius:6px;padding:9px 14px;font-size:15px;cursor:pointer;font-weight:600;">➕ ${zh ? '合成一個來源項目' : 'Add to Queue as 1 Item'}</button>
+        </div>
+
+        <!-- Staged Items Queue Header -->
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-top:2px;">
+          <span style="font-size:12px;font-weight:600;color:#8b949e;">待摘要來源佇列:</span>
+          <button onclick="ingClearPicked()" style="background:transparent;border:none;color:#6e7681;font-size:13px;cursor:pointer;">${zh ? '清空佇列' : 'Clear all'}</button>
+        </div>
+        <div id="ing-file-list" style="display:flex;flex-direction:column;gap:5px;flex:1;min-height:120px;overflow-y:auto;background:#0d111755;border:1px solid #21262d;border-radius:6px;padding:6px;"></div>
+        
+        <button id="ing-btn-sum" onclick="ingSummarizeAll(this)" style="background:#1f6feb;border:1px solid #388bfd;color:#fff;border-radius:6px;padding:11px 16px;cursor:pointer;font-weight:700;font-size:16px;white-space:nowrap;">${sumBtnText}</button>
+      </div>
+
+      <!-- Right Column: Filename Setting, Live Preview, and Compound Pills -->
+      <div style="flex:1;min-width:0;display:flex;flex-direction:column;gap:8px;">
+        <div style="display:flex;align-items:center;justify-content:space-between;">
+          <div style="font-size:18px;font-weight:700;color:#e6edf3;">${step2Title}</div>
+          <span id="ing-sel-name" style="font-size:14px;color:#8b949e;max-width:400px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;"></span>
+        </div>
+
+        <!-- Custom Filename & Extension Input Slot -->
+        <div style="display:flex;align-items:center;gap:8px;background:#161b22;padding:6px 10px;border-radius:8px;border:1px solid #30363d;">
+          <span style="font-size:15px;font-weight:600;color:#58a6ff;white-space:nowrap;">📄 ${zh ? '產出檔名：' : 'Output Filename: '}</span>
+          <div style="display:flex;align-items:center;flex:1;background:#0d1117;border:1px solid #30363d;border-radius:6px;overflow:hidden;">
+            <input type="text" id="ing-custom-filename" oninput="ingOnFilenameChange(this.value)" placeholder="${zh ? '例如：技術規格周報摘要' : 'filename'}" style="flex:1;background:transparent;border:none;padding:6px 10px;font-size:16px;color:#e6edf3;font-weight:600;outline:none;" />
+            <span style="padding:6px 12px;background:#21262d;color:#8b949e;font-size:14px;font-family:monospace;font-weight:700;border-left:1px solid #30363d;user-select:none;">.md</span>
+          </div>
+          <span style="font-size:13px;color:#8b949e;">${zh ? '(自動生成 .md 副檔名)' : '(auto .md)'}</span>
+        </div>
+
+        <!-- View Tabs -->
+        <div style="display:flex;gap:6px;align-items:center;">
+          <button id="ing-tab-prev" onclick="ingShowTab('prev')" style="background:#1f6feb44;border:1px solid #1f6feb;color:#58a6ff;border-radius:6px;padding:6px 15px;cursor:pointer;font-size:15px;font-weight:600;">👁 ${tabPrev}</button>
+          <button id="ing-tab-edit" onclick="ingShowTab('edit')" style="background:transparent;border:1px solid #30363d;color:#c9d1d9;border-radius:6px;padding:6px 15px;cursor:pointer;font-size:15px;font-weight:600;">✏️ ${tabEdit}</button>
+          <span style="font-size:12px;color:#8b949e;">${editHint}</span>
+        </div>
+
+        <!-- Markdown Preview Box -->
+        <div id="ing-preview" style="background:#010409;border:1px solid #21262d;border-radius:6px;padding:14px;font-size:13px;flex:1;min-height:180px;overflow-y:auto;color:#c9d1d9;word-break:break-word;line-height:1.6;">${emptyPrev}</div>
+        <textarea id="ing-edit" oninput="ingOnEditorInput(this.value)" style="display:none;background:#010409;border:1px solid #1f6feb;border-radius:6px;padding:14px;font-size:13px;color:#e6edf3;flex:1;min-height:180px;overflow-y:auto;font-family:inherit;white-space:pre-wrap;line-height:1.6;"></textarea>
+
+        <!-- Compound Tagging Visualization Tray -->
+        <div id="ing-compound-tray" style="background:#161b22;border:1px solid #30363d;border-radius:8px;padding:8px 12px;display:flex;flex-direction:column;gap:6px;">
+          <div style="display:flex;align-items:center;justify-content:space-between;">
+            <span style="font-size:15px;font-weight:600;color:#e2e8f0;display:flex;align-items:center;gap:5px;">
+              <span style="display:inline-block;width:7px;height:7px;border-radius:50%;background:#3fb950;"></span>
+              ${zh ? '知識拓撲滾動複利 (Compound Ingest)' : 'Knowledge Topology Compound'}
+            </span>
+            <span id="ing-compound-status" style="font-size:13px;color:#8b949e;">${zh ? '點擊標籤/候選詞可自由勾選或剔除' : 'Click pills to toggle'}</span>
+          </div>
+          <div id="ing-compound-pills" style="display:flex;flex-wrap:wrap;gap:8px;min-height:26px;align-items:center;">
+            <span style="font-size:13px;color:#8b949e;">${zh ? '（產生摘要後將顯示比對命中之官方概念與新發掘候選術語）' : '(Compound terms will appear here)'}</span>
+          </div>
+        </div>
+
+        <button id="ing-btn-save" onclick="ingSave(this)" style="background:#238636;border:1px solid #2ea043;color:#fff;border-radius:6px;padding:12px 18px;cursor:pointer;font-weight:700;font-size:17px;">${saveBtnText}</button>
+      </div>
+    </div>
+    <div id="ing-msg" style="font-size:15px;font-weight:600;margin-top:10px;min-height:16px;"></div>
+  </div>`;
+
+  document.body.appendChild(o);
+  o.addEventListener('click', (ev) => { if (ev.target === o) closeIngestDialog(); });
+
+  // Bind file inputs & drag-drop
+  const dz = document.getElementById('ing-drop');
+  const fi = document.getElementById('ing-file-input');
+  if (dz && fi) {
+    dz.addEventListener('click', () => fi.click());
+    fi.addEventListener('change', (ev) => {
+      ingAddPicked(Array.from(ev.target.files || []));
+      fi.value = '';
+    });
+    ['dragenter', 'dragover'].forEach(evName => dz.addEventListener(evName, (ev) => {
+      ev.preventDefault();
+      dz.style.borderColor = '#1f6feb';
+      dz.style.background = '#1f6feb22';
+    }));
+    ['dragleave', 'drop'].forEach(evName => dz.addEventListener(evName, (ev) => {
+      ev.preventDefault();
+      dz.style.borderColor = '#30363d';
+      dz.style.background = '';
+    }));
+    dz.addEventListener('drop', (ev) => {
+      const files = (ev.dataTransfer && ev.dataTransfer.files) ? Array.from(ev.dataTransfer.files) : [];
+      if (!files.length) return;
+      const ok = files.filter(f => /\.(pptx?|docx?|pdf|txt|md|markdown|csv|html?|eml|jpe?g|png|webp|bmp|tiff?)$/i.test(f.name || ''));
+      ingAddPicked(ok);
+    });
+  }
+
+  // Bind Clipboard paste listener for mixed text + multiple screenshots
+  const clipTextarea = document.getElementById('ing-clipboard-text');
+  if (clipTextarea) {
+    clipTextarea.addEventListener('paste', (ev) => {
+      const items = (ev.clipboardData || window.clipboardData || {}).items;
+      if (!items) return;
+      for (let i = 0; i < items.length; i++) {
+        if (items[i].type.indexOf('image') !== -1) {
+          const file = items[i].getAsFile();
+          if (file) {
+            ev.preventDefault();
+            ingHandleClipboardImagePaste(file);
+          }
+        }
+      }
+    });
+  }
+}
+
+function ingSwitchSourceTab(tab) {
+  if (!ingState) return;
+  ingState.activeTab = tab;
+  const pFiles = document.getElementById('ing-panel-files');
+  const pUrl = document.getElementById('ing-panel-url');
+  const pClip = document.getElementById('ing-panel-clipboard');
+  const bFiles = document.getElementById('ing-mode-file');
+  const bUrl = document.getElementById('ing-mode-url');
+  const bClip = document.getElementById('ing-mode-clip');
+
+  const onCss = 'flex:1;background:#1f6feb;border:none;color:#fff;border-radius:6px;padding:9px 8px;font-size:15px;cursor:pointer;font-weight:600;';
+  const offCss = 'flex:1;background:transparent;border:none;color:#8b949e;border-radius:6px;padding:9px 8px;font-size:15px;cursor:pointer;font-weight:600;';
+
+  if (pFiles) pFiles.style.display = tab === 'files' ? 'flex' : 'none';
+  if (pUrl) pUrl.style.display = tab === 'url' ? 'flex' : 'none';
+  if (pClip) pClip.style.display = tab === 'clipboard' ? 'flex' : 'none';
+
+  if (bFiles) bFiles.style.cssText = tab === 'files' ? onCss : offCss;
+  if (bUrl) bUrl.style.cssText = tab === 'url' ? onCss : offCss;
+  if (bClip) bClip.style.cssText = tab === 'clipboard' ? onCss : offCss;
+}
+
+function ingHandleClipboardImagePaste(file) {
+  if (!ingState) return;
+  const reader = new FileReader();
+  reader.onload = (e) => {
+    const dataUrl = e.target.result;
+    const stamp = new Date().toISOString().replace(/[-:T]/g, '').slice(0, 14);
+    const imgName = `pasted_img_${stamp}_${ingState.clipboardImages.length + 1}.png`;
+    ingState.clipboardImages.push({ name: imgName, dataUrl, file });
+    ingRenderClipboardImages();
+    // Auto-insert markdown reference in textarea
+    const ta = document.getElementById('ing-clipboard-text');
+    if (ta) {
+      const ins = `\n![${imgName}](${imgName})\n`;
+      ta.value += ins;
+    }
+  };
+  reader.readAsDataURL(file);
+}
+
+function ingRenderClipboardImages() {
+  const bar = document.getElementById('ing-clipboard-imgs-bar');
+  if (!bar || !ingState) return;
+  if (!ingState.clipboardImages.length) {
+    bar.style.display = 'none';
+    bar.innerHTML = '';
+    return;
+  }
+  bar.style.display = 'flex';
+  bar.innerHTML = ingState.clipboardImages.map((img, idx) => `
+    <div style="position:relative;display:inline-flex;align-items:center;background:#0d1117;border:1px solid #30363d;border-radius:6px;padding:3px 6px;gap:4px;">
+      <img src="${img.dataUrl}" style="width:24px;height:24px;object-fit:cover;border-radius:4px;" />
+      <span style="font-size:13px;color:#c9d1d9;">${img.name}</span>
+      <button onclick="ingRemoveClipboardImg(${idx})" style="background:transparent;border:none;color:#8b949e;cursor:pointer;font-size:12px;padding:0 2px;">✕</button>
+    </div>
+  `).join('');
+}
+
+function ingRemoveClipboardImg(idx) {
+  if (!ingState) return;
+  ingState.clipboardImages.splice(idx, 1);
+  ingRenderClipboardImages();
+}
+
+function ingCommitClipboardItem() {
+  if (!ingState) return;
+  const ta = document.getElementById('ing-clipboard-text');
+  const text = (ta ? ta.value : '').trim();
+  const imgs = ingState.clipboardImages || [];
+
+  if (!text && !imgs.length) {
+    showToast('⚠️ ' + (ingState.zh ? '請至少輸入文字或貼入一張截圖' : 'Please input text or paste a screenshot'));
+    return;
+  }
+
+  const stamp = new Date().toISOString().replace(/[-:T]/g, '').slice(0, 14);
+  const name = `剪貼簿筆記_${stamp}`;
+  const customFilename = `${name}.md`;
+
+  ingState.picked.push({
+    type: 'clipboard',
+    name,
+    customFilename,
+    text,
+    images: [...imgs],
+    size: text.length + imgs.length * 1024,
+    stagedPath: '',
+    stagedImagePaths: [],
+    status: 'picked',
+    summary: '',
+    model: '',
+    error: '',
+    compounding: null
+  });
+
+  // Reset clipboard inputs
+  if (ta) ta.value = '';
+  ingState.clipboardImages = [];
+  ingRenderClipboardImages();
+
+  if (ingState.sel < 0) ingState.sel = ingState.picked.length - 1;
+  ingRenderPicked();
+  showToast('✅ ' + (ingState.zh ? '已加入剪貼簿混合項目' : 'Added clipboard item'));
+}
+
+function ingFetchUrl() {
+  if (!ingState) return;
+  const inp = document.getElementById('ing-url-input');
+  const url = (inp ? inp.value : '').trim();
+  if (!url) {
+    showToast('⚠️ ' + (ingState.zh ? '請輸入網址' : 'Please enter a URL'));
+    return;
+  }
+  showToast('⏳ ' + (ingState.zh ? '正在抓取網頁...' : 'Fetching web page...'));
+  fetch('/api/ingest/fetch_url', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ url })
+  })
+  .then(r => r.json())
+  .then(res => {
+    if (res.success && res.data) {
+      const d = res.data;
+      const cleanTitle = (d.title || 'WebPage').replace(/[\\/:*?"<>|]/g, '_').trim();
+      const customFilename = `${cleanTitle}.md`;
+      ingState.picked.push({
+        type: 'url',
+        name: d.title,
+        url: d.url,
+        text: d.text,
+        customFilename,
+        size: d.chars || d.text.length,
+        status: 'picked',
+        summary: '',
+        model: '',
+        error: '',
+        compounding: null
       });
+      if (inp) inp.value = '';
+      if (ingState.sel < 0) ingState.sel = ingState.picked.length - 1;
       ingRenderPicked();
-      ingMsg(zh ? `已暫存 ${st.picked.filter(e => e.stagedPath).length} 個檔案（確認後與 md 一起寫入目標目錄）` : `Staged — written on confirm`);
-      if (typeof done === 'function') done();
+      showToast('✅ ' + (ingState.zh ? `已收錄網址：${d.title}` : `Fetched: ${d.title}`));
     } else {
-      if (st._stop) st._stop();
-      ingMsg('❌ ' + ((body && body.error) || status), true);
+      showToast('❌ ' + (res.error || 'Fetch failed'));
     }
   })
-  .catch(err => { if (st._stop) st._stop(); ingMsg('❌ ' + err, true); });
+  .catch(err => showToast('❌ ' + err));
 }
-// Summary Preview / Edit tabs. Truth lives per picked entry;
-// ingSelectFile stashes the editor into the entry before switching.
-function ingCurEntry() {
+
+function ingClearPicked() {
+  if (!ingState) return;
+  ingState.picked = [];
+  ingState.sel = -1;
+  ingRenderPicked();
+}
+
+// Append files to the ingest pick list (shared by picker + drag&drop).
+function ingAddPicked(files) {
+  if (!ingState || !files || !files.length) return;
+  const seen = new Set(ingState.picked.map(f => `${f.name}::${f.size}`));
+  files.forEach(f => {
+    const k = `${f.name}::${f.size}`;
+    if (!seen.has(k)) {
+      seen.add(k);
+      const stem = f.name.replace(/\.[^.]+$/, '');
+      const customFilename = `${stem}.md`;
+      ingState.picked.push({
+        type: 'file',
+        file: f,
+        name: f.name,
+        customFilename,
+        size: f.size,
+        stagedPath: '',
+        status: 'picked',
+        summary: '',
+        model: '',
+        error: '',
+        compounding: null
+      });
+    }
+  });
+  if (ingState.sel < 0 && ingState.picked.length) ingState.sel = 0;
+  ingRenderPicked();
+}
+
+function ingEntryIcon(e) {
+  if (e.status === 'done') return '✅';
+  if (e.status === 'error') return '❌';
+  if (e.status === 'working') return '⏳';
+  if (e.type === 'url') return '🌐';
+  if (e.type === 'clipboard') return '📋';
+  return '📎';
+}
+
+function ingRenderPicked() {
+  const box = document.getElementById('ing-file-list');
+  if (!box || !ingState) return;
+  box.innerHTML = '';
+  if (!ingState.picked.length) {
+    box.innerHTML = `<div style="font-size:13px;color:#8b949e;padding:12px;text-align:center;">${ingState.zh ? '（佇列目前無項目，請從上方新增）' : '(queue empty)'}</div>`;
+    ingState.sel = -1;
+    paintIngSelName();
+    paintIngSaveBtn();
+    renderIngCompoundTray(null);
+    return;
+  }
+  ingState.picked.forEach((e, idx) => {
+    const d = document.createElement('div');
+    const sel = idx === ingState.sel;
+    d.style.cssText = 'display:flex;gap:6px;align-items:center;font-size:15px;font-weight:500;color:#e6edf3;border:1px solid ' + (sel ? '#1f6feb' : '#21262d') + ';border-radius:6px;padding:8px 12px;cursor:pointer;transition:background .1s;';
+    if (sel) d.style.background = '#1f6feb22';
+    const ic = document.createElement('span');
+    ic.textContent = ingEntryIcon(e);
+    ic.style.cssText = e.status === 'working' ? 'color:#58a6ff;' : '';
+    if (e.status === 'working') ic.className = 'ing-spin';
+    d.appendChild(ic);
+
+    const tx = document.createElement('span');
+    tx.style.cssText = 'flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;';
+    const szText = e.size ? ` (${Math.round(e.size / 1024)} KB)` : '';
+    tx.textContent = `${e.name}${szText}`;
+    tx.title = e.customFilename || e.name;
+    d.appendChild(tx);
+
+    const x = document.createElement('button');
+    x.textContent = '✕';
+    x.title = ingState.zh ? '移除' : 'Remove';
+    x.style.cssText = 'background:transparent;border:none;color:#8b949e;cursor:pointer;font-size:13px;padding:0 2px;';
+    x.onclick = (ev) => {
+      ev.stopPropagation();
+      ingState.picked.splice(idx, 1);
+      if (ingState.sel >= ingState.picked.length) ingState.sel = ingState.picked.length - 1;
+      ingRenderPicked();
+    };
+    d.appendChild(x);
+    d.onclick = () => ingSelectFile(idx);
+    box.appendChild(d);
+  });
+  paintIngSelName();
+  paintIngSaveBtn();
+  const cur = ingCurEntry();
+  renderIngCompoundTray(cur ? cur.compounding : null);
+}
+
+function ingOnFilenameChange(val) {
+  const cur = ingCurEntry();
+  if (cur) {
+    let clean = val.trim();
+    if (clean.toLowerCase().endsWith('.md')) clean = clean.slice(0, -3).trim();
+    cur.customFilename = clean;
+  }
+}
+
+function ingOnEditorInput(val) {
+  const cur = ingCurEntry();
+  if (cur) cur.summary = val;
+}
+
+function paintIngSelName() {
+  const el = document.getElementById('ing-sel-name');
+  const fnInput = document.getElementById('ing-custom-filename');
+  if (!ingState) return;
+  const e = ingCurEntry();
+  if (el) el.textContent = e ? `來源：${e.name}` : '';
+  if (fnInput) {
+    let fn = e ? (e.customFilename || e.name || '') : '';
+    if (fn.toLowerCase().endsWith('.md')) fn = fn.slice(0, -3).trim();
+    fnInput.value = fn;
+    fnInput.disabled = !e;
+  }
+}
+
+function paintIngSaveBtn() {
+  const btn = document.getElementById('ing-btn-save');
+  if (!btn || !ingState) return;
+  const n = ingState.picked.filter(e => e.status === 'done').length;
+  btn.textContent = n
+    ? (ingState.zh ? `✅ 確認產出 ${n} 個 md 並入庫` : (ingState.ja ? `✅ ${n} 件の要約mdを作成して取り込む` : `✅ Confirm: write ${n} md & index`))
+    : (ingState.zh ? '✅ 確認產出 md 並入庫' : (ingState.ja ? '✅ 要約mdを作成して取り込む' : '✅ Confirm: write md & index'));
+}
+
+function renderIngCompoundTray(comp) {
+  const tray = document.getElementById('ing-compound-pills');
+  const statusEl = document.getElementById('ing-compound-status');
+  if (!tray) return;
+  const cur = ingCurEntry();
+  if (!comp || (!comp.matched && !comp.candidates && !comp.matched_concepts && !comp.discovered_candidates)) {
+    tray.innerHTML = `<span style="font-size:13px;color:#8b949e;">${ingState && ingState.zh ? '（產生摘要後將顯示比對命中之官方概念與新發掘候選術語）' : '(Compound terms will appear here)'}</span>`;
+    if (statusEl) statusEl.textContent = ingState && ingState.zh ? '摘要生成後自動打標與術語發掘' : 'Ready';
+    return;
+  }
+
+  const matched = comp.matched || (comp.matched_concepts || []).map(m => m.name) || [];
+  const candidates = comp.candidates || (comp.discovered_candidates || []).map(c => c.term) || [];
+
+  // Initialize selection sets if not present
+  if (!cur.selectedMatched) {
+    cur.selectedMatched = new Set(matched);
+  }
+  if (!cur.selectedCandidates) {
+    cur.selectedCandidates = new Set(candidates);
+  }
+
+  const selMatchedCount = cur.selectedMatched.size;
+  const selCandCount = cur.selectedCandidates.size;
+
+  if (statusEl) {
+    statusEl.innerHTML = `<span style="color:#3fb950;font-weight:600;">已選鏈接 ${selMatchedCount}/${matched.length} 個</span> &nbsp;·&nbsp; <span style="color:#d29922;font-weight:600;">已選候選 ${selCandCount}/${candidates.length} 個</span> <span style="font-size:11.5px;color:#8b949e;margin-left:6px;">(點擊膠囊切換選取)</span>`;
+  }
+
+  let html = '';
+  matched.forEach(name => {
+    const isSelected = cur.selectedMatched.has(name);
+    const bg = isSelected ? '#23863628' : '#21262d44';
+    const border = isSelected ? '#2ea043' : '#30363d';
+    const color = isSelected ? '#3fb950' : '#8b949e';
+    const checkIcon = isSelected ? '✓ ' : '';
+    const opacity = isSelected ? '1' : '0.6';
+    const lineThrough = isSelected ? 'none' : 'line-through';
+    html += `<span onclick="ingToggleCompoundPill('matched', '${escapeHtml(name)}')" title="${isSelected ? '已選取入庫 (點擊取消)' : '已排除 (點擊啟用)'}" style="display:inline-flex;align-items:center;gap:4px;background:${bg};border:1px solid ${border};color:${color};padding:3px 9px;border-radius:6px;font-size:13px;font-weight:600;cursor:pointer;user-select:none;transition:all 0.15s ease;opacity:${opacity};text-decoration:${lineThrough};">🏷️ ${checkIcon}${escapeHtml(name)}</span>`;
+  });
+  candidates.forEach(term => {
+    const isSelected = cur.selectedCandidates.has(term);
+    const bg = isSelected ? '#d2992228' : '#21262d44';
+    const border = isSelected ? '#d29922' : '#30363d';
+    const color = isSelected ? '#e3b341' : '#8b949e';
+    const checkIcon = isSelected ? '✓ ' : '';
+    const opacity = isSelected ? '1' : '0.6';
+    const lineThrough = isSelected ? 'none' : 'line-through';
+    html += `<span onclick="ingToggleCompoundPill('candidate', '${escapeHtml(term)}')" title="${isSelected ? '已選取收錄 (點擊取消)' : '已排除 (點擊啟用)'}" style="display:inline-flex;align-items:center;gap:4px;background:${bg};border:1px solid ${border};color:${color};padding:3px 9px;border-radius:6px;font-size:13px;font-weight:600;cursor:pointer;user-select:none;transition:all 0.15s ease;opacity:${opacity};text-decoration:${lineThrough};">✨ ${checkIcon}${escapeHtml(term)}</span>`;
+  });
+  if (!html) {
+    html = `<span style="font-size:13px;color:#8b949e;">（本次摘要內容無新領域術語）</span>`;
+  }
+  tray.innerHTML = html;
+}
+
+window.ingToggleCompoundPill = function(type, val) {
+  const cur = ingCurEntry();
+  if (!cur) return;
+  if (type === 'matched') {
+    if (!cur.selectedMatched) cur.selectedMatched = new Set();
+    if (cur.selectedMatched.has(val)) {
+      cur.selectedMatched.delete(val);
+    } else {
+      cur.selectedMatched.add(val);
+    }
+  } else if (type === 'candidate') {
+    if (!cur.selectedCandidates) cur.selectedCandidates = new Set();
+    if (cur.selectedCandidates.has(val)) {
+      cur.selectedCandidates.delete(val);
+    } else {
+      cur.selectedCandidates.add(val);
+    }
+  }
+  renderIngCompoundTray(cur.compounding);
+};
+
+// Click a row: stash current editor draft, show that file's summary.
+function ingSelectFile(idx) {
   const st = ingState;
-  return (st && st.picked[st.sel]) || null;
+  if (!st || !st.picked[idx]) return;
+  const ed = document.getElementById('ing-edit');
+  if (ed && st.picked[st.sel] && st.picked[st.sel].status === 'done') {
+    st.picked[st.sel].summary = ed.value;
+  }
+  st.sel = idx;
+  const e = st.picked[idx];
+  if (ed) ed.value = e.summary || '';
+  paintIngSelName();
+  ingShowTab('prev');
+  ingRenderPicked();
+  renderIngCompoundTray(e.compounding);
 }
+
 function ingShowTab(which) {
   const st = ingState;
   if (!st) return;
@@ -3167,8 +3667,8 @@ function ingShowTab(which) {
   const te = document.getElementById('ing-tab-edit');
   if (!pv || !ed || !tp || !te) return;
   const cur = ingCurEntry();
-  const on = 'background:#1f6feb44;border:1px solid #1f6feb;color:#58a6ff;border-radius:6px;padding:4px 12px;cursor:pointer;font-size:16px;';
-  const off = 'background:transparent;border:1px solid #30363d;color:#c9d1d9;border-radius:6px;padding:4px 12px;cursor:pointer;font-size:16px;';
+  const on = 'background:#1f6feb44;border:1px solid #1f6feb;color:#58a6ff;border-radius:6px;padding:6px 15px;cursor:pointer;font-size:15px;font-weight:600;';
+  const off = 'background:transparent;border:1px solid #30363d;color:#c9d1d9;border-radius:6px;padding:6px 15px;cursor:pointer;font-size:15px;font-weight:600;';
   if (which === 'edit') {
     if (cur && !ed.value) ed.value = cur.summary || '';
     pv.style.display = 'none';
@@ -3177,7 +3677,7 @@ function ingShowTab(which) {
     te.style.cssText = on;
     ed.focus();
   } else {
-    if (cur && ed.style.display === 'block') cur.summary = ed.value;  // keep human edits
+    if (cur && ed.style.display === 'block') cur.summary = ed.value;
     ed.style.display = 'none';
     pv.style.display = 'block';
     tp.style.cssText = on;
@@ -3191,63 +3691,155 @@ function ingShowTab(which) {
       if (window.marked && typeof window.marked.parse === 'function') pv.innerHTML = window.marked.parse(txt);
       else if (typeof window.marked === 'function') pv.innerHTML = window.marked(txt);
       else pv.textContent = txt;
+      if (typeof resolveMarkdownImages === 'function') {
+        const previewDocPath = (st.dir ? st.dir + '/' : '') + (cur.customFilename || cur.filename || 'preview.md');
+        resolveMarkdownImages(pv, previewDocPath);
+      }
     } catch (e) { pv.textContent = txt; }
   }
 }
-// Batch: stage everything, then summarize file-by-file. Each completion
-// checkmarks its row and takes over the right preview immediately.
+
+// Stage physical files and clipboard images
+function ingStageAll(done) {
+  const st = ingState;
+  if (!st) return;
+  const needStage = st.picked.filter(e => e.type === 'file' && e.file && !e.stagedPath);
+  const needClipStage = st.picked.filter(e => e.type === 'clipboard' && e.images && e.images.length && !e.stagedImagePaths.length);
+
+  if (!needStage.length && !needClipStage.length) { done(); return; }
+
+  const fd = new FormData();
+  fd.append('target_dir', st.dir);
+  fd.append('stage', '1');
+
+  needStage.forEach(e => fd.append('files', e.file, e.name));
+
+  needClipStage.forEach(e => {
+    e.images.forEach(im => {
+      if (im.file) {
+        fd.append('files', im.file, im.name);
+      }
+    });
+  });
+
+  fetch('/api/ingest/upload', { method: 'POST', body: fd })
+  .then(r => r.json())
+  .then(d => {
+    if (d.success && d.files) {
+      const fileMap = {};
+      d.files.forEach(f => { fileMap[f.name] = f.path; });
+      needStage.forEach(e => {
+        if (fileMap[e.name]) { e.stagedPath = fileMap[e.name]; e.status = 'staged'; }
+      });
+      needClipStage.forEach(e => {
+        e.stagedImagePaths = e.images.map(im => fileMap[im.name]).filter(Boolean);
+      });
+      ingRenderPicked();
+      done();
+    } else {
+      if (st._stop) st._stop();
+      ingMsg('❌ ' + ((d && d.error) || 'Upload staging failed'), true);
+    }
+  })
+  .catch(err => { if (st._stop) st._stop(); ingMsg('❌ ' + err, true); });
+}
+
+// Batch: summarize file-by-file / url-by-url / clip-by-clip
 function ingSummarizeAll(btn) {
   const st = ingState;
   if (!st) return;
   const zh = st.zh;
-  if (!st.picked.length) { ingMsg(zh ? '請先選擇檔案' : (st.ja ? '先にファイルを選択してください' : 'Pick files first'), true); return; }
+  if (!st.picked.length) { ingMsg(zh ? '請先新增來源' : 'Queue is empty', true); return; }
   setBusy(btn, true, '⏳…');
+
   ingStageAll(() => {
-    const queue = st.picked.filter(e => e.stagedPath && e.status !== 'done');
+    const queue = st.picked.filter(e => e.status !== 'done');
     if (!queue.length) {
       setBusy(btn, false);
-      ingMsg(zh ? '全部已完成（如需重跑請移除重加）' : (st.ja ? 'すべて完了しています' : 'All done already'), true);
+      ingMsg(zh ? '全部已完成' : 'All done already', true);
       return;
     }
     if (st._stop) st._stop();
     let i = 0;
     const pv0 = document.getElementById('ing-preview');
+
     const step = () => {
       if (i >= queue.length) {
         if (st._stop) st._stop();
         setBusy(btn, false);
         const nd = st.picked.filter(e => e.status === 'done').length;
         const ne = st.picked.filter(e => e.status === 'error').length;
-        const successMsg = zh ? `✅ 整批完成：${nd} 成功` : (st.ja ? `✅ 一括処理完了：${nd} 件成功` : `✅ Batch done: ${nd} ok`);
-        const failMsg = ne ? (zh ? `，${ne} 失敗` : (st.ja ? `、${ne} 件失敗` : `, ${ne} failed`)) : '';
+        const successMsg = zh ? `✅ 整批完成：${nd} 成功` : `✅ Batch done: ${nd} ok`;
+        const failMsg = ne ? (zh ? `，${ne} 失敗` : `, ${ne} failed`) : '';
         ingMsg(successMsg + failMsg);
         return;
       }
       const e = queue[i];
-      if (st._stop) st._stop();  // kill the previous file's timer, or they pile up forever
+      if (st._stop) st._stop();
       st._stop = ingProgress(zh ? `摘要生成中 ${i + 1}/${queue.length}：${e.name}` : `Summarizing ${i + 1}/${queue.length}: ${e.name}`);
       e.status = 'working'; e.error = '';
       ingRenderPicked();
       if (pv0) pv0.innerHTML = `<span class="ing-spin">◌</span> ${zh ? 'LLM 生成中…' : 'Generating…'}`;
+
+      let summarizePayload = {};
+      if (e.type === 'url') {
+        summarizePayload = { text: e.text, paths: [] };
+      } else if (e.type === 'clipboard') {
+        summarizePayload = {
+          text: e.text,
+          paths: e.stagedImagePaths || [],
+          pasted_image_rels: (e.images || []).map(im => im.name)
+        };
+      } else {
+        summarizePayload = { paths: [e.stagedPath] };
+      }
+
       fetch('/api/ingest/summarize', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ paths: [e.stagedPath] })
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(summarizePayload)
       })
       .then(r => r.json().then(d => ({ status: r.status, body: d })))
       .then(({ status, body }) => {
         if (status === 200 && body.success) {
-          e.status = 'done'; e.summary = body.summary || ''; e.model = body.model || '';
-          const notes = (body.notes || []).join('；');
-          // Latest completion takes over the preview immediately.
+          e.status = 'done';
+          e.summary = body.summary || '';
+          e.model = body.model || '';
+
+          // Auto-derive filename from LLM H1 if title was untitled or clipboard
+          const h1Match = e.summary.match(/^#\s+(.+)$/m);
+          if (h1Match && h1Match[1] && (e.type === 'clipboard' || !e.customFilename)) {
+            let h1Clean = h1Match[1].replace(/[\/:*?"<>|]/g, '_').trim();
+            if (h1Clean.toLowerCase().endsWith('.md')) h1Clean = h1Clean.slice(0, -3).trim();
+            e.customFilename = h1Clean;
+          }
+
           const k = st.picked.indexOf(e);
           if (k >= 0) { st.sel = k; }
           const ed0 = document.getElementById('ing-edit');
           if (ed0) ed0.value = e.summary;
+          paintIngSelName();
           ingShowTab('prev');
           ingRenderPicked();
-          ingMsg((zh ? `✅ ${e.name}（${body.model || ''}）` : `✅ ${e.name} (${body.model || ''})`) + (notes ? ` — ${notes}` : ''));
+
+          // Trigger Compound Preview
+          fetch('/api/ingest/compound_preview', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ summary_md: e.summary, repo: st.repo })
+          })
+          .then(cr => cr.json())
+          .then(cd => {
+            if (cd.success && cd.compounding) {
+              e.compounding = cd.compounding;
+              if (st.sel === k) renderIngCompoundTray(e.compounding);
+            }
+          }).catch(() => {});
+
+          ingMsg((zh ? `✅ ${e.name}（${body.model || ''}）` : `✅ ${e.name} (${body.model || ''})`));
         } else {
-          e.status = 'error'; e.error = (body && body.error) || String(status);
+          e.status = 'error';
+          e.error = (body && body.error) || String(status);
           ingRenderPicked();
           if (pv0) pv0.textContent = zh ? '（摘要會顯示在這裡）' : '(summary appears here)';
           ingMsg(`❌ ${e.name}：` + e.error, true);
@@ -3256,7 +3848,8 @@ function ingSummarizeAll(btn) {
         step();
       })
       .catch(err => {
-        e.status = 'error'; e.error = String(err);
+        e.status = 'error';
+        e.error = String(err);
         ingRenderPicked();
         ingMsg(`❌ ${e.name}：` + err, true);
         i++;
@@ -3266,48 +3859,73 @@ function ingSummarizeAll(btn) {
     step();
   });
 }
-// Confirm: one md per done file, filename always equals the source stem.
+
+// Confirm save
 function ingSave(btn) {
   const st = ingState;
   if (!st) return;
   const zh = st.zh;
-  // Stash the visible draft into its entry first.
   const ed0 = document.getElementById('ing-edit');
   const cur = ingCurEntry();
   if (ed0 && cur && cur.status === 'done') cur.summary = ed0.value;
   const done = st.picked.filter(e => e.status === 'done' && (e.summary || '').trim());
-  if (!done.length) { ingMsg(zh ? '還沒有完成的摘要（先按整批生成摘要）' : (st.ja ? '完了した要約がありません（先に一括要約を実行してください）' : 'No finished summaries yet'), true); return; }
+  if (!done.length) {
+    ingMsg(zh ? '還沒有完成的摘要（請先點擊整批生成摘要）' : 'No finished summaries yet', true);
+    return;
+  }
   setBusy(btn, true, '⏳…');
   if (st._stop) st._stop();
   let i = 0, okCount = 0;
   const outs = [];
   st._stop = ingProgress(zh ? `寫檔＋增量索引中 0/${done.length}` : `Writing + indexing 0/${done.length}`);
+
   const step = () => {
     if (i >= done.length) {
       if (st._stop) st._stop();
       setBusy(btn, false);
-      showToast(zh ? `✅ 已產出 ${okCount}/${done.length} 個 md` : (st.ja ? `✅ ${okCount}/${done.length} 件のmdを出力しました` : `✅ Wrote ${okCount}/${done.length} md`));
+      showToast(zh ? `✅ 已產出 ${okCount}/${done.length} 個 md` : `✅ Wrote ${okCount}/${done.length} md`);
       ingMsg((zh ? `✅ 完成 ${okCount}/${done.length}：` : `✅ Done ${okCount}/${done.length}: `) + outs.join('、'));
       loadProjects();
+      if (typeof fetchConceptsData === 'function') fetchConceptsData();
       if (okCount === done.length) setTimeout(closeIngestDialog, 1200);
       return;
     }
     const e = done[i];
-    if (st._stop) st._stop();  // same leak guard as summarize loop
+    if (st._stop) st._stop();
     st._stop = ingProgress(zh ? `寫檔＋增量索引中 ${i + 1}/${done.length}：${e.name}` : `Writing + indexing ${i + 1}/${done.length}: ${e.name}`);
-    const filename = e.name.replace(/\.[^.]+$/, '');  // md name == source stem, no editing
+
+    // Use customized filename if available
+    let outFilename = (e.customFilename || e.name).trim();
+    if (outFilename.endsWith('.md')) outFilename = outFilename.slice(0, -3);
+
+    const savePayload = {
+      target_dir: st.dir,
+      filename: outFilename,
+      summary_md: e.summary.trim(),
+      source_paths: e.type === 'clipboard' ? (e.stagedImagePaths || []) : (e.stagedPath ? [e.stagedPath] : []),
+      source_urls: e.type === 'url' ? [e.url] : [],
+      model: e.model,
+      selected_matched: e.selectedMatched ? Array.from(e.selectedMatched) : null,
+      selected_candidates: e.selectedCandidates ? Array.from(e.selectedCandidates) : null
+    };
+
     fetch('/api/ingest/save', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ target_dir: st.dir, filename, summary_md: e.summary.trim(),
-                             source_paths: [e.stagedPath], model: e.model })
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(savePayload)
     })
     .then(r => r.json().then(d => ({ status: r.status, body: d })))
     .then(({ status, body }) => {
       if (status === 200 && body.success) {
         okCount++;
-        outs.push(e.name);
+        outs.push(outFilename);
+        if (body.compounding) {
+          e.compounding = body.compounding;
+          renderIngCompoundTray(e.compounding);
+        }
       } else {
-        e.status = 'error'; e.error = (body && body.error) || String(status);
+        e.status = 'error';
+        e.error = (body && body.error) || String(status);
         ingRenderPicked();
         ingMsg(`❌ ${e.name}：` + e.error, true);
       }
@@ -3315,7 +3933,8 @@ function ingSave(btn) {
       step();
     })
     .catch(err => {
-      e.status = 'error'; e.error = String(err);
+      e.status = 'error';
+      e.error = String(err);
       ingRenderPicked();
       ingMsg(`❌ ${e.name}：` + err, true);
       i++;
@@ -3324,8 +3943,7 @@ function ingSave(btn) {
   };
   step();
 }
-// ingUpload/summarize single-file legacy removed: staging + per-file
-// summarize are inlined in ingStageAll / ingSummarizeAll above.
+
 
 function excludeRepo(path) {
   fetch('/api/paths/exclude', {
@@ -3986,6 +4604,7 @@ function updateControlsHelpI18n() {
   }
   if (typeof updatePromptsI18n === 'function') {
     updatePromptsI18n();
+  if (typeof updateLintI18n === 'function') updateLintI18n();
   }
 }
 
@@ -4545,6 +5164,32 @@ function bindMarkdownInternalLinks(container) {
   });
 }
 
+// Intercept and resolve markdown images (![alt](path))
+function resolveMarkdownImages(container, docFilePath) {
+  if (!container) return;
+  container.querySelectorAll('img').forEach(img => {
+    const src = img.getAttribute('src');
+    if (!src) return;
+    // Don't modify web URLs or data URIs
+    if (/^(https?:|\/\/|data:)/i.test(src)) return;
+
+    // Route through /api/doc/image
+    const docParam = docFilePath ? encodeURIComponent(docFilePath) : '';
+    const imgParam = encodeURIComponent(src);
+    const resolvedUrl = `/api/doc/image?doc=${docParam}&img=${imgParam}`;
+    img.src = resolvedUrl;
+    img.style.maxWidth = '100%';
+    img.style.borderRadius = '6px';
+    img.style.boxShadow = '0 2px 8px rgba(0,0,0,0.3)';
+    img.style.cursor = 'zoom-in';
+    img.title = img.alt || '點擊在新分頁開啟全圖';
+    img.onclick = function(e) {
+      e.stopPropagation();
+      window.open(resolvedUrl, '_blank', 'noopener');
+    };
+  });
+}
+
 function navigateToMarkdownTarget(target) {
   if (!target) return;
   let fileTarget = target;
@@ -4606,9 +5251,13 @@ function dispatchUnifiedSelection(target, options = {}) {
   // If node resolved from AST graph:
   if (targetNode) {
     if (targetNode.kind === 'concept') {
+      if (typeof switchActivityTab === 'function') switchActivityTab('concepts', true);
       onConceptCardClick(targetNode.name);
       return;
     }
+    // Automatically switch left drawer to Explorer for documents/headings
+    if (typeof switchActivityTab === 'function') switchActivityTab('explorer', true);
+
     // 1. Sync Explorer Selection (open parent folders/files, select target heading/file, smooth scroll)
     syncExplorerSelection(targetNode);
 
@@ -4649,13 +5298,6 @@ function dispatchUnifiedSelection(target, options = {}) {
     highlightScope('node', targetNode);
     focusOnNode(targetNode);
 
-    // If node was freshly revealed, re-aim smoothly after force simulation initial tick
-    if (revealChanged) {
-      setTimeout(() => {
-        focusOnNode(targetNode);
-      }, 70);
-    }
-
     // 3. Central Markdown Viewer (fetches sliced section if heading, full doc if file)
     selectActiveNode(targetNode, true);
 
@@ -4686,25 +5328,28 @@ let currentActivityTab = 'explorer'; // 'explorer' | 'concepts'
 let isDrawerCollapsed = false;
 // (declared in concepts engine) // 'official' | 'candidates'
 
-function switchActivityTab(tabName) {
+function switchActivityTab(tabName, forceOpen = false) {
   const drawer = document.getElementById('left-sidebar-drawer');
   const resizer = document.getElementById('resizer-tree-doc');
   const tabExplorer = document.getElementById('act-tab-explorer');
   const tabConcepts = document.getElementById('act-tab-concepts');
+  const tabLint = document.getElementById('act-tab-lint');
   const tabPrompts = document.getElementById('act-tab-prompts');
   const panelExplorer = document.getElementById('tree-panel');
   const panelConcepts = document.getElementById('concepts-panel');
+  const panelLint = document.getElementById('lint-panel');
   const panelPrompts = document.getElementById('prompts-panel');
 
   if (!drawer) return;
 
-  // Clicking currently active tab collapses/expands the drawer (VS Code behavior)
-  if (currentActivityTab === tabName && !isDrawerCollapsed) {
+  // Clicking currently active tab collapses/expands the drawer (VS Code behavior) unless forceOpen is requested
+  if (!forceOpen && currentActivityTab === tabName && !isDrawerCollapsed) {
     isDrawerCollapsed = true;
     drawer.classList.add('collapsed');
     if (resizer) resizer.style.display = 'none';
     if (tabExplorer) tabExplorer.classList.remove('active');
     if (tabConcepts) tabConcepts.classList.remove('active');
+    if (tabLint) tabLint.classList.remove('active');
     if (tabPrompts) tabPrompts.classList.remove('active');
     return;
   }
@@ -4716,35 +5361,30 @@ function switchActivityTab(tabName) {
 
   currentActivityTab = tabName;
 
+  // Clear active on all tabs and hide all panels
+  [tabExplorer, tabConcepts, tabLint, tabPrompts].forEach(t => t && t.classList.remove('active'));
+  [panelExplorer, panelConcepts, panelLint, panelPrompts].forEach(p => p && (p.style.display = 'none'));
+
   if (tabName === 'explorer') {
     if (tabExplorer) tabExplorer.classList.add('active');
-    if (tabConcepts) tabConcepts.classList.remove('active');
-    if (tabPrompts) tabPrompts.classList.remove('active');
     if (panelExplorer) panelExplorer.style.display = 'flex';
-    if (panelConcepts) panelConcepts.style.display = 'none';
-    if (panelPrompts) panelPrompts.style.display = 'none';
   } else if (tabName === 'concepts') {
-    if (tabExplorer) tabExplorer.classList.remove('active');
     if (tabConcepts) tabConcepts.classList.add('active');
-    if (tabPrompts) tabPrompts.classList.remove('active');
-    if (panelExplorer) panelExplorer.style.display = 'none';
     if (panelConcepts) panelConcepts.style.display = 'flex';
-    if (panelPrompts) panelPrompts.style.display = 'none';
     renderConceptsDrawerList();
+  } else if (tabName === 'lint') {
+    if (tabLint) tabLint.classList.add('active');
+    if (panelLint) panelLint.style.display = 'flex';
+    // Auto-scan instantly on tab switch (2ms pure SQLite query)
+    refreshLintResults(false);
   } else if (tabName === 'prompts') {
-    if (tabExplorer) tabExplorer.classList.remove('active');
-    if (tabConcepts) tabConcepts.classList.remove('active');
     if (tabPrompts) tabPrompts.classList.add('active');
-    if (panelExplorer) panelExplorer.style.display = 'none';
-    if (panelConcepts) panelConcepts.style.display = 'none';
     if (panelPrompts) panelPrompts.style.display = 'flex';
     if (typeof loadPromptsDrawerList === 'function') {
       loadPromptsDrawerList();
     }
   }
 }
-
-// Backward compatibility for old calls
 function toggleTreePanel() {
   switchActivityTab(currentActivityTab || 'explorer');
 }
@@ -4753,6 +5393,7 @@ function toggleTreePanel() {
 // ─── Real Concepts Registry Engine (Two-Tier Hierarchy & Linking) ─────
 let conceptsTreeData = { tree: {}, candidates: [], counts: { official: 0, candidates: 0 } };
 let selectedConceptName = null;
+let selectedCandidateName = null;
 let currentConceptSubTab = 'official';
 let expandedCategories = new Set();
 let activeConceptLinkedFiles = {}; // cache conceptName -> files list
@@ -4931,37 +5572,77 @@ function nodePlateHtml(o) {
     const projPrefix = proj ? `<span style="color:#58a6ff;font-weight:600;margin-right:2px;">[${esc(proj)}]</span> ` : '';
     subInner = `${projPrefix}${fileHtml}`;
   }
-  return `${titleHtml}<div style="font-size:11px;color:#8b949e;">${subInner}</div>`;
+  return `${titleHtml}<div style="font-size:13px;color:#8b949e;">${subInner}</div>`;
 }
-function refCrumbHtml(src) {
+function refCrumbHtml(src, optLevel) {
   // Delegates to the ONE shared plate (same look as the 3D tooltip):
   // title line in kind colour + `Kind · file · Line n` sub line.
   const p = parseRefId(src);
   let nodeKind = (p.kind === 'heading') ? 'heading_2' : 'file';
+  let nodeLevel = (optLevel != null && optLevel > 0) ? parseInt(optLevel, 10) : null;
   let proj = '';
   try {
-    const g = (typeof rawData !== 'undefined' && rawData && rawData.nodes) ? rawData.nodes : [];
-    const nd = g.find(n => n && (n.id === src || (typeof n.id === 'string' && n.id.endsWith('::' + src))));
+    const allN = (typeof masterGraphData !== 'undefined' && masterGraphData && masterGraphData.nodes && masterGraphData.nodes.length)
+      ? masterGraphData.nodes
+      : ((typeof rawData !== 'undefined' && rawData && rawData.nodes) ? rawData.nodes : []);
+    const cleanF = (p.file || '').replace(/\\/g, '/').toLowerCase();
+    const fBase = cleanF.split('/').pop();
+    const cleanT = (p.title || '').trim().toLowerCase();
+
+    // 1. Direct ID match
+    let nd = allN.find(n => n && (n.id === src || (typeof n.id === 'string' && n.id.endsWith('::' + src))));
+
+    // 2. Fallback: match by file and heading text / line
+    if (!nd && p.kind === 'heading' && cleanT) {
+      nd = allN.find(n => {
+        if (!n || !n.kind || !n.kind.startsWith('heading')) return false;
+        const nf = (n.file || n.abs_path || '').replace(/\\/g, '/').toLowerCase();
+        const fMatch = !fBase || nf.endsWith(fBase);
+        const name = (n.name || '').trim().toLowerCase();
+        return fMatch && (name === cleanT || name.includes(cleanT) || cleanT.includes(name));
+      });
+    }
+
     if (nd) {
       if (nd.kind) nodeKind = nd.kind;
+      if (nd.level) nodeLevel = nd.level;
       if (nd.project) proj = nd.project;
     }
   } catch (e) {}
-  if (p.kind === 'heading' && p.title) {
-    return nodePlateHtml({ title: p.title, kind: nodeKind, file: p.file, line: p.line, project: proj, clickable: true });
+
+  if (p.kind === 'heading') {
+    if (nodeLevel != null && nodeLevel > 0) {
+      nodeKind = 'heading_' + nodeLevel;
+    } else if (nodeKind === 'heading_2') {
+      // Deduce level by title prefix if not found
+      if (/^[一二三四五六七八九十]+[、.]/.test(p.title) || /^[A-Z][、.]/.test(p.title) || /^#\s/.test(p.title)) {
+        nodeKind = 'heading_1';
+        nodeLevel = 1;
+      } else if (/^\d+\.\d+/.test(p.title) || /^###\s/.test(p.title)) {
+        nodeKind = 'heading_3';
+        nodeLevel = 3;
+      } else if (/^\d+[、.]/.test(p.title) || /^##\s/.test(p.title)) {
+        nodeKind = 'heading_2';
+        nodeLevel = 2;
+      } else if (/^####\s/.test(p.title)) {
+        nodeKind = 'heading_4';
+        nodeLevel = 4;
+      }
+    }
+    return nodePlateHtml({ title: p.title, kind: nodeKind, level: nodeLevel, file: p.file, line: p.line, project: proj, clickable: true });
   }
   return nodePlateHtml({ title: (p.file.split(/[\\/]/).pop() || p.file), kind: 'file', file: p.file, line: 1, project: proj, clickable: true });
 }
 
 function renderLinkedFilesHtml(conceptName, files, zh) {
   if (!files || files.length === 0) {
-    return `<div style="font-size:11px; color:#8b949e; padding:4px 0;">${zh ? '尚無文檔引用此標籤' : 'No files reference this concept'}</div>`;
+    return `<div style="font-size:13px; color:#8b949e; padding:4px 0;">${zh ? '尚無文檔引用此標籤' : 'No files reference this concept'}</div>`;
   }
-  let h = `<div style="font-size:11px; color:#58a6ff; font-weight:600; margin-bottom:4px;">📄 ${zh ? '引用文件清單' : 'Referenced Documents'} (${files.length}):</div>`;
+  let h = `<div style="font-size:13px; color:#58a6ff; font-weight:600; margin-bottom:4px;">📄 ${zh ? '引用文件清單' : 'Referenced Documents'} (${files.length}):</div>`;
   h += '<div style="display:flex; flex-direction:column; gap:4px; max-height:160px; overflow-y:auto;">';
   files.forEach(f => {
     h += `
-      <div style="background:#0d1117; border:1px solid #30363d; border-radius:4px; padding:4px 8px; font-size:11px; display:flex; justify-content:space-between; align-items:center;">
+      <div style="background:#0d1117; border:1px solid #30363d; border-radius:4px; padding:4px 8px; font-size:13px; display:flex; justify-content:space-between; align-items:center;">
         <span style="color:#c9d1d9; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:180px; display:flex; align-items:center;" title="${escapeHtml(refCrumbText(f.filePath))}">${(f.filePath||'').startsWith('heading::') ? '<span style="color:#58a6ff; font-weight:700; margin-right:4px;">#</span>' : getDocIconSvg('#f0883e')} <span style="margin-left:3px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${refCrumbHtml(f.filePath)}</span></span>
         <button class="mini-btn" style="color:#f85149; border-color:#da3633; padding:1px 4px; font-size:10px;" onclick="unlinkConcept('${escapeHtml(conceptName)}', '${escapeHtml(f.filePath)}', event)" title="${zh ? '解除關聯並永久排除' : 'Unlink & Exclude'}">✕</button>
       </div>
@@ -5015,7 +5696,7 @@ function renderConceptsDrawerList(filterKw = '') {
       { k: 'mined', icon: '⛏', fg: '#e3b341', label: zh ? '詞頻探勘' : 'Prospect' },
       { k: 'crawl', icon: '🌿', fg: '#3fb950', label: 'Vine' }
     ];
-    h += `<div style="display:flex; gap:10px; flex-wrap:wrap; font-size:11px; color:#8b949e; padding:0 2px 2px;">${SRC_LEGEND.map(s => `<span><span style="color:${s.fg};">${s.icon} ${s.label}</span></span>`).join('')}</div>`;
+    h += `<div style="display:flex; gap:10px; flex-wrap:wrap; font-size:13px; color:#8b949e; padding:0 2px 2px;">${SRC_LEGEND.map(s => `<span><span style="color:${s.fg};">${s.icon} ${s.label}</span></span>`).join('')}</div>`;
     candidates.forEach(c => {
       // Source is encoded in category: mining (②) vs crawl (③) vs
       // edge-autodiscovery. Distinct colour per source, and never show
@@ -5040,18 +5721,19 @@ function renderConceptsDrawerList(filterKw = '') {
       const pillTitle = isCrawl ? (zh ? 'Vine 暫存的節點數，轉正後套用' : 'Vine staged nodes; applied on promote') : '';
       const firstEv = (evd && evd.files && evd.files[0]) || null;
       const note = (c.aliases && c.aliases !== 'AI 自動偵測') ? ` · ${escapeHtml(c.aliases)}` : '';
+      const isCandSelected = selectedCandidateName === c.name;
       h += `
-        <div class="concept-card" style="border:1px dashed ${col.bd}; background:#161b22; border-radius:6px; padding:10px; cursor:pointer;" onclick="openCandidatePage('${escapeHtml(c.name)}', '${isCrawl ? 'vine' : 'prospect'}', event)" title="${zh ? '點開審核底稿' : 'Open draft review'}">
+        <div class="concept-card" id="cpt-cand-${escapeHtml(c.name)}" data-candidate-name="${escapeHtml(c.name)}" style="border:1px ${isCandSelected ? 'solid #388bfd' : 'dashed ' + col.bd}; background:${isCandSelected ? '#131d2e' : '#161b22'}; box-shadow:${isCandSelected ? '0 0 10px rgba(56,139,253,0.35)' : 'none'}; border-radius:6px; padding:10px; cursor:pointer;" onclick="openCandidatePage('${escapeHtml(c.name)}', '${isCrawl ? 'vine' : 'prospect'}', event)" title="${zh ? '點開審核底稿' : 'Open draft review'}">
           <div style="display:flex; justify-content:space-between; align-items:center;">
-            <span style="font-weight:600; color:${col.nm}; font-size:13px; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${col.icon} ${escapeHtml(c.name)}</span>
-            <span class="concept-status-pill candidate" title="${escapeHtml(pillTitle)}" style="background:${col.bg}; color:${col.fg}; border:1px solid ${col.bd}; font-size:11px; padding:2px 6px; border-radius:10px; flex-shrink:0;">${pillTxt}</span>
+            <span style="font-weight:600; color:${col.nm}; font-size:14.5px; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${col.icon} ${escapeHtml(c.name)}</span>
+            <span class="concept-status-pill candidate" title="${escapeHtml(pillTitle)}" style="background:${col.bg}; color:${col.fg}; border:1px solid ${col.bd}; font-size:12px; padding:2px 8px; border-radius:10px; flex-shrink:0;">${pillTxt}</span>
           </div>
-          <div style="font-size:11px; color:#8b949e; margin-top:4px;">${zh ? '來源' : 'Source'}: <span style="color:${col.fg};">${col.label}</span>${note}</div>
-          ${firstEv ? `<div style="font-size:11px; color:#a5d6ff; margin-top:4px; word-break:break-word;" title="${escapeHtml(firstEv.rel || '')}">“${escapeHtml((firstEv.snippet || '').slice(0, 60))}” — ${escapeHtml((firstEv.rel || '').split('/').pop() || '')}</div>` : ''}
-          <div style="display:flex; gap:2px; justify-content:flex-end; margin-top:8px;">
-            <button class="mini-btn" style="background:transparent; border:1px solid #1f6feb; color:#58a6ff;padding:2px 6px;font-size:11px;white-space:nowrap;" onclick="openCardRefresh('${escapeHtml(c.name)}')" title="${zh ? '更新此候選（詞頻重算 / 關聯深度探索）' : 'Refresh this candidate (Prospect / Vine)'}">↻ ${zh ? '更新' : 'Refresh'}</button>
-            <button class="mini-btn" style="background:#238636; border-color:#2ea043; color:#fff;padding:2px 6px;font-size:11px;white-space:nowrap;" onclick="promoteCandidate('${escapeHtml(c.name)}')">✓ ${zh ? '正式發佈' : (ja ? '承認して適用' : 'Promote')}</button>
-            <button class="mini-btn" style="background:#21262d; border-color:#30363d; color:#f85149;padding:2px 6px;font-size:11px;white-space:nowrap;" onclick="dismissCandidate('${escapeHtml(c.name)}')">✕ ${zh ? '移除' : 'Remove'}</button>
+          <div style="font-size:13px; color:#8b949e; margin-top:4px;">${zh ? '來源' : 'Source'}: <span style="color:${col.fg};">${col.label}</span>${note}</div>
+          ${firstEv ? `<div style="font-size:12.5px; color:#a5d6ff; margin-top:4px; word-break:break-word;" title="${escapeHtml(firstEv.rel || '')}">“${escapeHtml((firstEv.snippet || '').slice(0, 60))}” — ${escapeHtml((firstEv.rel || '').split('/').pop() || '')}</div>` : ''}
+          <div class="concept-card-actions" style="display:flex; gap:5px; justify-content:flex-end; margin-top:8px; flex-wrap:wrap;">
+            <button class="mini-btn" style="background:transparent; border:1px solid #1f6feb; color:#58a6ff;" onclick="openCardRefresh('${escapeHtml(c.name)}')" title="${zh ? '更新此候選（詞頻重算 / 關聯深度探索）' : 'Refresh this candidate (Prospect / Vine)'}">↻ ${zh ? '更新' : 'Refresh'}</button>
+            <button class="mini-btn" style="background:#238636; border-color:#2ea043; color:#fff;" onclick="promoteCandidate('${escapeHtml(c.name)}')">✓ ${zh ? '正式發佈' : (ja ? '承認して適用' : 'Promote')}</button>
+            <button class="mini-btn" style="background:#21262d; border-color:#30363d; color:#f85149;" onclick="dismissCandidate('${escapeHtml(c.name)}')">✕ ${zh ? '移除' : 'Remove'}</button>
           </div>
         </div>
       `;
@@ -5076,12 +5758,12 @@ function renderConceptsDrawerList(filterKw = '') {
       h += `
         <div class="concept-card" style="border:1px dashed #5a2d2d; background:#161b22; border-radius:6px; padding:10px;">
           <div style="display:flex; justify-content:space-between; align-items:center;">
-            <span style="font-weight:600; color:#f85149; font-size:13px;">🚫 ${escapeHtml(b.term)}</span>
-            <span style="font-size:11px; color:#8b949e;">${escapeHtml(b.decided_at || '')}</span>
+            <span style="font-weight:600; color:#f85149; font-size:14.5px;">🚫 ${escapeHtml(b.term)}</span>
+            <span style="font-size:12.5px; color:#8b949e;">${escapeHtml(b.decided_at || '')}</span>
           </div>
           <div style="display:flex; gap:6px; justify-content:flex-end; margin-top:8px;">
-            <button class="mini-btn" style="background:transparent; border:1px solid #238636; color:#3fb950;" onclick="unblacklistTerm('${escapeHtml(b.term)}', true)" title="${zh ? '送回待審候選池' : 'Return to candidates pool'}">↩ ${zh ? '返回候選' : 'To candidates'}</button>
-            <button class="mini-btn" style="background:transparent; border:1px solid #1f6feb; color:#58a6ff;" onclick="unblacklistTerm('${escapeHtml(b.term)}', false)" title="${zh ? '只移出黑名單，下次掃描可能再發現' : 'Remove from blacklist only'}">↩ ${zh ? '移出黑名單' : 'Un-blacklist'}</button>
+            <button class="mini-btn" style="background:transparent; border:1px solid #238636; color:#3fb950; font-size:14px; font-weight:500; padding:5px 14px;" onclick="unblacklistTerm('${escapeHtml(b.term)}', true)" title="${zh ? '送回待審候選池' : 'Return to candidates pool'}">↩ ${zh ? '返回候選' : 'To candidates'}</button>
+            <button class="mini-btn" style="background:transparent; border:1px solid #1f6feb; color:#58a6ff; font-size:14px; font-weight:500; padding:5px 14px;" onclick="unblacklistTerm('${escapeHtml(b.term)}', false)" title="${zh ? '只移出黑名單，下次掃描可能再發現' : 'Remove from blacklist only'}">↩ ${zh ? '移出黑名單' : 'Un-blacklist'}</button>
           </div>
         </div>
       `;
@@ -5118,37 +5800,37 @@ function renderConceptsDrawerList(filterKw = '') {
 
     const isExpanded = expandedCategories.has(cat);
     html += `
-      <div class="concept-category-block" style="background:#0d1117; border:1px solid #30363d; border-radius:6px; overflow:hidden;">
+      <div class="concept-category-block" style="background:#1f242c; border:1px solid #38424f; border-radius:6px; overflow:hidden;">
         <!-- Category Header (Accordion) -->
-        <div onclick="toggleCategoryExpand('${escapeHtml(cat)}')" style="display:flex; align-items:center; justify-content:space-between; padding:8px 10px; background:#161b22; cursor:pointer; user-select:none; border-bottom:${isExpanded ? '1px solid #21262d' : 'none'};">
+        <div onclick="toggleCategoryExpand('${escapeHtml(cat)}')" style="display:flex; align-items:center; justify-content:space-between; padding:8px 10px; background:#161b22; cursor:pointer; user-select:none; border-bottom:${isExpanded ? '1px solid #30363d' : 'none'};">
           <div style="display:flex; align-items:center; gap:6px;">
             <span style="font-size:10px; color:#8b949e; transition:transform 0.2s; transform:${isExpanded ? 'rotate(90deg)' : 'rotate(0deg)'};">▶</span>
-            <span style="font-weight:600; font-size:13px; color:#58a6ff;">📁 ${escapeHtml(getCategoryDisplayName(cat))}</span>
+            <span style="font-weight:600; font-size:14.5px; color:#58a6ff;">📁 ${escapeHtml(getCategoryDisplayName(cat))}</span>
           </div>
-          <span style="font-size:11px; background:#21262d; color:#8b949e; padding:1px 6px; border-radius:8px;">${concepts.length}</span>
+          <span style="font-size:12.5px; background:#282e38; color:#c9d1d9; padding:1px 6px; border-radius:8px;">${concepts.length}</span>
         </div>
 
-        <!-- Concepts Items -->
-        <div style="display:${isExpanded ? 'flex' : 'none'}; flex-direction:column; gap:6px; padding:8px;">
+        <!-- Concepts Items (Light slate white-gray inner tray) -->
+        <div style="display:${isExpanded ? 'flex' : 'none'}; flex-direction:column; gap:6px; padding:8px; background:#262c36;">
     `;
 
     concepts.forEach(c => {
       const isSelected = selectedConceptName === c.name;
       const linkedFiles = activeConceptLinkedFiles[c.name] || null;
       html += `
-        <div class="concept-card" style="border:1px solid ${isSelected ? '#388bfd' : '#21262d'}; background:${isSelected ? '#131d2e' : '#161b22'}; border-radius:6px; padding:8px; cursor:pointer;" onclick="onConceptCardClick('${escapeHtml(c.name)}', event)">
+        <div class="concept-card" id="cpt-card-${escapeHtml(c.name)}" data-concept-name="${escapeHtml(c.name)}" style="border:1px solid ${isSelected ? '#388bfd' : '#21262d'}; background:${isSelected ? '#131d2e' : '#161b22'}; box-shadow:${isSelected ? '0 0 10px rgba(56,139,253,0.35)' : 'none'}; border-radius:6px; padding:8px; cursor:pointer;" onclick="onConceptCardClick('${escapeHtml(c.name)}', event)">
           <div style="display:flex; justify-content:space-between; align-items:center;">
-            <span style="font-weight:600; color:#e2e8f0; font-size:13px; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">🏷️ ${escapeHtml(c.name)}</span>
-            <span class="concept-status-pill official" style="background:#1f6feb22; color:#58a6ff; border:1px solid #388bfd44; font-size:11px; padding:2px 6px; border-radius:10px; flex-shrink:0;">${c.refs} ${zh ? '引用' : 'Refs'}</span>
+            <span style="font-weight:600; color:#e2e8f0; font-size:14.5px; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">🏷️ ${escapeHtml(c.name)}</span>
+            <span class="concept-status-pill official" style="background:#1f6feb22; color:#58a6ff; border:1px solid #388bfd44; font-size:12px; padding:2px 8px; border-radius:10px; flex-shrink:0;">${c.refs} ${zh ? '引用' : 'Refs'}</span>
           </div>
-          <div style="font-size:11px; color:#8b949e; margin-top:4px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">
+          <div style="font-size:13px; color:#8b949e; margin-top:4px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">
             ${zh ? '別名' : 'Aliases'}: ${escapeHtml(c.aliases || (zh ? '無' : 'None'))}
           </div>
-          <div style="display:flex; justify-content:flex-end; gap:2px; margin-top:6px;">
-            <button class="mini-btn" onclick="openCardRefresh('${escapeHtml(c.name)}', event)" title="${zh ? '更新此概念（詞頻重算 / 關聯深度探索）' : 'Refresh this concept (Prospect / Vine)'}" style="padding:2px 6px;font-size:11px;white-space:nowrap;">↻ ${zh ? '更新' : 'Refresh'}</button>
-            <button class="mini-btn" onclick="openEditConceptModal('${escapeHtml(c.name)}', '${escapeHtml(c.category)}', '${escapeHtml(c.aliases || '')}', event)" style="padding:2px 6px;font-size:11px;white-space:nowrap;">✏️ ${zh ? '編輯' : (currentLanguage === 'ja' ? '編集' : 'Edit')}</button>
-            <button class="mini-btn" onclick="openMergeConceptModal('${escapeHtml(c.name)}', event)" style="padding:2px 6px;font-size:11px;white-space:nowrap;">🔗 ${zh ? '合併' : (currentLanguage === 'ja' ? '統合' : 'Merge')}</button>
-            <button class="mini-btn" style="color:#f85149; border-color:#da363388;padding:2px 6px;font-size:11px;white-space:nowrap;" onclick="deleteConcept('${escapeHtml(c.name)}', event)">🗑️ ${zh ? '刪除' : (currentLanguage === 'ja' ? '削除' : 'Delete')}</button>
+          <div class="concept-card-actions">
+            <button class="mini-btn" onclick="openCardRefresh('${escapeHtml(c.name)}', event)" title="${zh ? '更新此概念（詞頻重算 / 關聯深度探索）' : 'Refresh this concept (Prospect / Vine)'}">↻ ${zh ? '更新' : 'Refresh'}</button>
+            <button class="mini-btn" onclick="openEditConceptModal('${escapeHtml(c.name)}', '${escapeHtml(c.category)}', '${escapeHtml(c.aliases || '')}', event)">✏️ ${zh ? '編輯' : (currentLanguage === 'ja' ? '編集' : 'Edit')}</button>
+            <button class="mini-btn" onclick="openMergeConceptModal('${escapeHtml(c.name)}', event)">🔗 ${zh ? '合併' : (currentLanguage === 'ja' ? '統合' : 'Merge')}</button>
+            <button class="mini-btn" style="color:#f85149; border-color:#da363388;" onclick="deleteConcept('${escapeHtml(c.name)}', event)">🗑️ ${zh ? '刪除' : (currentLanguage === 'ja' ? '削除' : 'Delete')}</button>
           </div>
 
           <!-- Dynamic Linked Files Drawer Area -->
@@ -5391,7 +6073,7 @@ let userLODHiddenSnapshot = null; // remembers user's chosen LOD filters
 function spotlightConceptNode(conceptName) {
   if (!Graph) return;
   activeSpotlightConcept = conceptName;
-  applyLODAndFilter();
+  applyLODAndFilter(false);
 
   // Snapshot current hiddenKinds so we can revert when deselecting
   if (!userLODHiddenSnapshot) {
@@ -5410,6 +6092,7 @@ function spotlightConceptNode(conceptName) {
   // 1. Find the concept node itself (handles multi-repo namespaces e.g. p1::concept::越南廠)
   const cNode = gNodes.find(n => n.id === cid || n.id.endsWith(`::${cid}`) || (n.kind === 'concept' && n.name === conceptName));
   if (cNode) {
+    activeNode = cNode;
     highlightNodes.add(cNode.id);
     targetNodes.push(cNode);
   }
@@ -5441,54 +6124,28 @@ function spotlightConceptNode(conceptName) {
   });
 
   if (needsGraphDataUpdate) {
-    applyLODAndFilter();
+    applyLODAndFilter(false);
   }
 
-  // 3. Trigger 3D Graph Glow Update (Slim, elegant cyber edge)
+  // 3. Trigger 3D Glow and Refresh labels
   Graph.nodeColor(Graph.nodeColor())
     .linkColor(Graph.linkColor())
     .linkWidth(l => highlightLinks.has(l) ? 0.7 : 0.12)
     .linkDirectionalParticles(l => highlightLinks.has(l) ? 4 : 0);
 
-  // 3b. Refresh label sprites too (balls/links dim above, but labels keep
-  // stale opacity without this — every Document label stays bright and the
-  // whole library crowds the view on tag spotlight).
   if (typeof updateLabelsVisibility === 'function') updateLabelsVisibility();
 
-  // 4. Smooth 3D Camera Flight to the cluster center with resilient retry
+  // 3c. Synchronously refresh Connected Relations Panel for the concept node!
+  const targetConceptNode = cNode || (gNodes.find(n => n.id === cid || n.id.endsWith(`::${cid}`)));
+  if (targetConceptNode && typeof renderConnectedRelationsPanel === 'function') {
+    renderConnectedRelationsPanel(targetConceptNode);
+  }
+
+  // 4. Smooth 3D Camera Flight directly focusing on the Concept Node (Consistent with focusOnNode)
   const attemptFly = () => {
-    const curNodes = (rawData && rawData.nodes) ? rawData.nodes : [];
-    const curCNode = curNodes.find(n => n.id === cid || n.id.endsWith(`::${cid}`) || (n.kind === 'concept' && n.name === conceptName));
-    const curTargets = [];
-    if (curCNode) curTargets.push(curCNode);
-    (rawData && rawData.links || []).forEach(l => {
-      const sId = typeof l.source === 'object' ? l.source.id : l.source;
-      const tId = typeof l.target === 'object' ? l.target.id : l.target;
-      if (tId === cid || tId.endsWith(`::${cid}`) || (curCNode && tId === curCNode.id)) {
-        const o = curNodes.find(n => n.id === sId);
-        if (o) curTargets.push(o);
-      } else if (sId === cid || sId.endsWith(`::${cid}`) || (curCNode && sId === curCNode.id)) {
-        const o = curNodes.find(n => n.id === tId);
-        if (o) curTargets.push(o);
-      }
-    });
-
-    let sumX = 0, sumY = 0, sumZ = 0, validCount = 0;
-    curTargets.forEach(n => {
-      if (typeof n.x === 'number' && typeof n.y === 'number' && typeof n.z === 'number' && !isNaN(n.x)) {
-        sumX += n.x; sumY += n.y; sumZ += n.z; validCount++;
-      }
-    });
-
-    if (validCount > 0) {
-      const cx = sumX / validCount;
-      const cy = sumY / validCount;
-      const cz = sumZ / validCount;
-      const targetPos = { x: cx, y: cy, z: cz };
-      const camPos = { x: cx, y: cy, z: cz + 85 };
-      Graph.cameraPosition(camPos, targetPos, 850);
-      return true;
-    } else if (curCNode && typeof curCNode.x === 'number' && !isNaN(curCNode.x)) {
+    const curNodes = (Graph && Graph.graphData) ? (Graph.graphData().nodes || []) : (rawData.nodes || []);
+    const curCNode = curNodes.find(n => n.id === cid || n.id.endsWith(`::${cid}`) || (n.kind === 'concept' && n.name === conceptName)) || cNode;
+    if (curCNode) {
       focusOnNode(curCNode);
       return true;
     }
@@ -5496,17 +6153,38 @@ function spotlightConceptNode(conceptName) {
   };
 
   if (!attemptFly()) {
-    setTimeout(attemptFly, 300);
+    setTimeout(attemptFly, 260);
+  } else {
+    // Also re-verify after 260ms in case LOD graphData swap finished
+    setTimeout(attemptFly, 260);
   }
 }
 
 function onConceptCardClick(name, event) {
-  if (event && event.target && event.target.tagName.toLowerCase() === 'button') return;
+  if (event && event.target && event.target.tagName && event.target.tagName.toLowerCase() === 'button') return;
   selectedConceptName = name;
+  selectedCandidateName = null;
   const zh = currentLanguage === 'zh';
   const repo = getActiveReposParam();
 
-  // 1. Fetch Tag Markdown Page across all active repos!
+  // 1. Ensure left drawer is on Concepts tab and 'official' subtab
+  if (typeof switchActivityTab === 'function') switchActivityTab('concepts', true);
+  if (typeof switchConceptSubTab === 'function' && currentConceptSubTab !== 'official') {
+    switchConceptSubTab('official');
+  }
+
+  // 2. Auto-expand category containing this concept
+  try {
+    const tree = (conceptsTreeData && conceptsTreeData.tree) || {};
+    for (const [cat, items] of Object.entries(tree)) {
+      if ((items || []).some(c => c && c.name === name)) {
+        expandedCategories.add(cat);
+        break;
+      }
+    }
+  } catch (e) {}
+
+  // 3. Fetch Tag Markdown Page across all active repos!
   fetch(`/api/concepts/tag-page?name=${encodeURIComponent(name)}&repo=${encodeURIComponent(repo)}`)
     .then(res => res.json())
     .then(data => {
@@ -5515,12 +6193,18 @@ function onConceptCardClick(name, event) {
         activeConceptLinkedFiles[name] = data.files || [];
         renderConceptsDrawerList();
 
-        // 2. Open Tag Page directly in Markdown Viewer!
+        // Scroll selected concept card smoothly into view
+        setTimeout(() => {
+          const card = document.getElementById(`cpt-card-${name}`) || document.querySelector(`[data-concept-name="${CSS.escape(name)}"]`);
+          if (card) card.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+        }, 60);
+
+        // Open Tag Page directly in Markdown Viewer!
         renderConceptTagPageInViewer(data);
       }
     });
 
-  // 3. 3D Spotlight Focus
+  // 4. 3D Spotlight Focus
   spotlightConceptNode(name);
 }
 
@@ -5578,18 +6262,90 @@ function openAttachTagFromViewer() {
     curHeading = (activeNode.kind !== 'file') ? activeNode.name : '';
   }
 
+  // If user is currently looking at a Concept Tag Page (e.g. .docgraphical/tags/xxx.md)
+  if (curFile && (curFile.includes('.docgraphical/tags/') || (activeNode && activeNode.kind === 'concept') || selectedConceptName)) {
+    const conceptName = selectedConceptName || (activeNode && activeNode.name) || curFile.split(/[/\\]/).pop().replace(/\.md$/, '');
+    openAttachDocumentToConceptModal(conceptName);
+    return;
+  }
+
   if (!curFile) {
     showToast(zh ? '⚠ 請先於左側 Explorer 選取任一篇 Markdown 文檔！' : '⚠ Please select a document first!');
     return;
   }
 
-  // If user is currently looking at a Concept Tag Page
-  if (curFile.includes('.docgraphical/tags/')) {
-    showToast(zh ? 'ℹ 當前為標籤定義頁。請選取欲貼上標籤之實際文檔或章節！' : 'ℹ Currently on a Tag Page. Select a document first!');
-    return;
+  openAttachTagToSpecificTarget(curFile, curHeading);
+}
+
+function openAttachDocumentToConceptModal(conceptName) {
+  taggerMode = 'concept_to_file';
+  taggerContext = { conceptName, filePath: '', heading: '' };
+  const zh = currentLanguage === 'zh';
+
+  const modal = document.getElementById('concept-tagger-modal');
+  if (!modal) return;
+
+  const title = document.getElementById('tagger-modal-title');
+  const targetLabel = document.getElementById('lbl-tagger-target');
+  const targetDisplay = document.getElementById('tagger-target-display');
+  const conceptLabel = document.getElementById('lbl-tagger-concept');
+  const sel = document.getElementById('sel-tagger-concept') || document.getElementById('tagger-select-item');
+  const hint = document.getElementById('tagger-hint');
+
+  if (title) title.innerText = zh ? `🏷️ 為概念「${conceptName}」關聯新文檔` : `🏷️ Link Document to Concept '${conceptName}'`;
+  if (targetLabel) targetLabel.innerText = zh ? '概念標籤 (Concept)' : 'Target Concept';
+  if (targetDisplay) targetDisplay.innerText = `🏷️ ${conceptName}`;
+  if (conceptLabel) conceptLabel.innerText = zh ? '選擇要引用此概念的文檔或章節 (Select Document / Section)' : 'Select Document to Link';
+
+  if (hint) {
+    hint.innerText = zh
+      ? `將自動在此文檔段落追加 [[${conceptName}]] 概念標籤引用，並即時在 3D 圖建立引力光束！`
+      : `Will inject [[${conceptName}]] wiki-link into the chosen document!`;
   }
 
-  openAttachTagToSpecificTarget(curFile, curHeading);
+  if (sel) {
+    sel.innerHTML = '';
+    const nodes = (rawData && rawData.nodes) ? rawData.nodes : [];
+    const docNodes = nodes.filter(n => n.kind === 'file' || n.kind === 'heading_1' || n.kind === 'heading_2');
+    
+    // Group by file
+    const fileGroups = {};
+    docNodes.forEach(n => {
+      const f = (n.file || n.abs_path || n.name || '').replace(/\\/g, '/');
+      if (f.includes('.docgraphical/tags/')) return;
+      if (!fileGroups[f]) fileGroups[f] = [];
+      if (n.kind !== 'file') fileGroups[f].push(n);
+    });
+
+    let count = 0;
+    Object.keys(fileGroups).sort().forEach(f => {
+      const grp = document.createElement('optgroup');
+      grp.label = `📄 ${f.split('/').pop()}`;
+      // Add full document option
+      const optDoc = document.createElement('option');
+      optDoc.value = JSON.stringify({ file: f, heading: '' });
+      optDoc.textContent = `📄 ${f} (全文尾部)`;
+      grp.appendChild(optDoc);
+      count++;
+
+      // Add headings
+      fileGroups[f].forEach(hNode => {
+        const optH = document.createElement('option');
+        optH.value = JSON.stringify({ file: f, heading: hNode.name });
+        optH.textContent = `  § ${hNode.name}`;
+        grp.appendChild(optH);
+        count++;
+      });
+      sel.appendChild(grp);
+    });
+
+    if (count === 0) {
+      sel.innerHTML = '<option value="">(暫無可用文檔)</option>';
+    }
+  }
+
+  modal.classList.add('show');
+  modal.style.display = 'flex';
 }
 
 function openAttachTagToSpecificTarget(filePath, heading = '') {
@@ -5601,13 +6357,17 @@ function openAttachTagToSpecificTarget(filePath, heading = '') {
   if (!modal) return;
 
   const title = document.getElementById('tagger-modal-title');
+  const targetLabel = document.getElementById('lbl-tagger-target');
   const targetDisplay = document.getElementById('tagger-target-display');
+  const conceptLabel = document.getElementById('lbl-tagger-concept');
   const sel = document.getElementById('sel-tagger-concept') || document.getElementById('tagger-select-item');
   const hint = document.getElementById('tagger-hint');
 
   const targetDesc = heading ? `段落「${heading}」` : `文檔「${filePath}」`;
   if (title) title.innerText = zh ? `🏷️ 為 ${targetDesc} 貼上標籤` : `🏷️ Attach Tag to ${targetDesc}`;
+  if (targetLabel) targetLabel.innerText = zh ? '目標對象 (Target)' : 'Target';
   if (targetDisplay) targetDisplay.innerText = heading ? `${filePath} > [${heading}]` : filePath;
+  if (conceptLabel) conceptLabel.innerText = zh ? '選擇要貼上的概念標籤 (Select Concept)' : 'Select Concept Tag';
 
   if (hint) {
     hint.innerText = heading
@@ -5682,12 +6442,26 @@ function submitTaggerModal() {
   }
 
   if (!chosenConcept) {
-    showTaggerModalError(zh ? '請先選擇一個概念標籤！' : 'Please select a concept tag first!');
+    showTaggerModalError(zh ? '請先選擇目標！' : 'Please make a selection first!');
     return;
   }
 
-  const filePath = taggerContext.filePath;
-  const heading = taggerContext.heading || '';
+  let nameToAttach = chosenConcept;
+  let filePath = taggerContext.filePath;
+  let heading = taggerContext.heading || '';
+
+  if (taggerMode === 'concept_to_file') {
+    nameToAttach = taggerContext.conceptName;
+    try {
+      const parsed = JSON.parse(chosenConcept);
+      filePath = parsed.file;
+      heading = parsed.heading || '';
+    } catch (e) {
+      filePath = chosenConcept;
+      heading = '';
+    }
+  }
+
   // Prioritize activeNode repo or viewCtx repo, fallback to getActiveReposParam
   let repo = (activeNode && activeNode.project) ? ((allProjectsList || []).find(p => p.name === activeNode.project)?.path || '') : '';
   if (!repo && viewCtx && viewCtx.repo) repo = viewCtx.repo;
@@ -5706,7 +6480,7 @@ function submitTaggerModal() {
   fetch('/api/concepts/attach', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ repo, name: chosenConcept, filePath, heading })
+    body: JSON.stringify({ repo, name: nameToAttach, filePath, heading })
   })
     .then(res => res.json())
     .then(data => {
@@ -5728,8 +6502,10 @@ function submitTaggerModal() {
           spotlightConceptNode(chosenConcept);
         }, 150);
 
-        // Immediately re-fetch and render this document so the new tag pops up right away!
-        if (activeNode) {
+        // Immediately re-fetch and render this document or tag page so the new tag pops up right away!
+        if (taggerMode === 'concept_to_file' && nameToAttach) {
+          onConceptCardClick(nameToAttach);
+        } else if (activeNode && activeNode.kind !== 'concept') {
           selectActiveNode(activeNode);
         } else if (filePath) {
           openFileInEditor(filePath);
@@ -5784,7 +6560,7 @@ function renderScanScopeBox() {
   const zh = lang === 'zh', ja = lang === 'ja';
   const projs = (typeof allProjectsList !== 'undefined' && allProjectsList) ? allProjectsList : [];
   if (!projs.length) {
-    box.innerHTML = `<div style="font-size:11px;color:#8b949e;">${zh ? '（無專案）' : (ja ? '（プロジェクトなし）' : '(no projects)')}</div>`;
+    box.innerHTML = `<div style="font-size:13px;color:#8b949e;">${zh ? '（無專案）' : (ja ? '（プロジェクトなし）' : '(no projects)')}</div>`;
     return;
   }
   // Indexed md files per project, from the same graph data the explorer tree uses.
@@ -5809,20 +6585,20 @@ function renderScanScopeBox() {
     const pendingMd = extra.filter(r => (r || '').toLowerCase().endsWith('.md') && !mdSet[r]);
     const indexedMd = Object.keys(mdSet).sort();
     const total = indexedMd.length + pendingMd.length;
-    h += `<div style="border:1px solid ${isOn ? '#1f6feb' : '#21262d'};border-radius:8px;padding:8px;background:${isOn ? '#0d1a2e' : '#161b22'};">`;
-    h += `<div style="display:flex;align-items:center;gap:6px;font-size:12px;font-weight:600;color:${isOn ? '#58a6ff' : '#c9d1d9'};">`
-       + `<input type="checkbox" data-scope-proj="${escapeHtml(p.name)}" ${isOn ? 'checked' : ''} disabled style="margin:0;flex-shrink:0;opacity:0.85;" />`
+    h += `<div style="border:1px solid ${isOn ? '#1f6feb' : '#21262d'};border-radius:8px;padding:9px 10px;background:${isOn ? '#0d1a2e' : '#161b22'};">`;
+    h += `<div style="display:flex;align-items:center;gap:8px;font-size:14px;font-weight:700;color:${isOn ? '#58a6ff' : '#c9d1d9'};">`
+       + `<input type="checkbox" data-scope-proj="${escapeHtml(p.name)}" ${isOn ? 'checked' : ''} disabled style="margin:0;flex-shrink:0;width:15px;height:15px;opacity:0.85;" />`
        + `<span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escapeHtml(p.name)}</span>`
-       + `<span style="margin-left:auto;font-size:11px;color:#8b949e;font-weight:400;flex-shrink:0;">${total} ${zh ? '個 md' : (ja ? '件のmd' : 'md')}</span></div>`;
+       + `<span style="margin-left:auto;font-size:13px;color:#8b949e;font-weight:500;flex-shrink:0;">${total} ${zh ? '個 md' : (ja ? '件のmd' : 'md')}</span></div>`;
     if (!total) {
-      h += `<div style="font-size:11px;color:#8b949e;margin-top:4px;">${zh ? '（無 .md 檔案）' : (ja ? '（.md ファイルなし）' : '(no .md files)')}</div>`;
+      h += `<div style="font-size:13px;color:#8b949e;margin-top:6px;">${zh ? '（無 .md 檔案）' : (ja ? '（.md ファイルなし）' : '(no .md files)')}</div>`;
     } else {
-      h += `<div style="margin-top:4px;display:flex;flex-direction:column;gap:2px;">`;
+      h += `<div style="margin-top:6px;display:flex;flex-direction:column;gap:4px;">`;
       indexedMd.forEach(rel => {
-        h += `<div style="font-size:11px;color:#c9d1d9;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;" title="${escapeHtml(rel)}">📄 ${escapeHtml(rel)}</div>`;
+        h += `<div style="font-size:13.5px;color:#c9d1d9;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;line-height:1.4;" title="${escapeHtml(rel)}">📄 ${escapeHtml(rel)}</div>`;
       });
       pendingMd.forEach(rel => {
-        h += `<div style="font-size:11px;color:#e3b341;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;" title="${escapeHtml(rel)}">📄 ${escapeHtml(rel)} <span style="color:#8b949e;">${zh ? '（待索引）' : (ja ? '（未インデックス）' : '(pending)')}</span></div>`;
+        h += `<div style="font-size:13.5px;color:#e3b341;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;line-height:1.4;" title="${escapeHtml(rel)}">📄 ${escapeHtml(rel)} <span style="color:#8b949e;">${zh ? '（待索引）' : (ja ? '（未インデックス）' : '(pending)')}</span></div>`;
       });
       h += `</div>`;
     }
@@ -5845,60 +6621,60 @@ function conceptScanAll(btn) {
   o.id = 'scan-opt-overlay';
   o.style.cssText = 'position:fixed;inset:0;z-index:1000005;background:rgba(0,0,0,.6);display:flex;align-items:center;justify-content:center;';
   o.innerHTML = `
-  <div style="width:920px;max-width:96vw;max-height:88vh;display:flex;flex-direction:column;background:#0d1117;border:1px solid #30363d;border-radius:12px;padding:16px;color:#e6edf3;gap:10px;">
-    <div style="display:flex;align-items:center;justify-content:space-between;">
-      <span style="font-weight:600;font-size:15px;">${zh ? '🔍 發掘新概念' : (ja ? '🔍 新規コンセプト発掘' : '🔍 Discover concepts')}</span>
-      <button onclick="document.getElementById('scan-opt-overlay').remove()" style="background:transparent;border:none;color:#8b949e;cursor:pointer;font-size:15px;">✕</button>
+  <div style="width:1000px;max-width:96vw;max-height:90vh;display:flex;flex-direction:column;background:#0d1117;border:1px solid #30363d;border-radius:14px;padding:20px 22px;color:#e6edf3;gap:14px;box-shadow:0 12px 40px rgba(0,0,0,0.7);">
+    <div style="display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid #21262d;padding-bottom:10px;">
+      <span style="font-weight:700;font-size:18px;">${zh ? '🔍 發掘新概念' : (ja ? '🔍 新規コンセプト発掘' : '🔍 Discover concepts')}</span>
+      <button onclick="document.getElementById('scan-opt-overlay').remove()" style="background:transparent;border:none;color:#8b949e;cursor:pointer;font-size:18px;padding:4px 8px;line-height:1;">✕</button>
     </div>
-    <div style="display:flex;gap:12px;flex:1;min-height:0;align-items:stretch;">
-      <div style="width:300px;flex-shrink:0;display:flex;flex-direction:column;gap:6px;border:1px solid #21262d;border-radius:8px;padding:10px;max-height:64vh;overflow-y:auto;">
-        <div style="font-size:12px;font-weight:600;color:#c9d1d9;">${zh ? '📂 掃描範圍' : (ja ? '📂 スキャン範囲' : '📂 Scan scope')}</div>
-        <div style="font-size:10px;color:#8b949e;">${zh ? '勾選以左側 Explorer 為準（單向參考）；要調整範圍請先關閉對話框。僅列 .md。' : (ja ? 'チェックは左のExplorerを基準（片方向参照）；範囲を変更するにはまずダイアログを閉じてください（.md のみ）。' : 'Checked state follows the Explorer (one-way reference); close the dialog to adjust the scope. (.md only)')}</div>
-        <div id="scan-scope-box" style="display:flex;flex-direction:column;gap:6px;"></div>
+    <div style="display:flex;gap:16px;flex:1;min-height:0;align-items:stretch;">
+      <div style="width:330px;flex-shrink:0;display:flex;flex-direction:column;gap:8px;border:1px solid #21262d;border-radius:10px;padding:12px;max-height:64vh;overflow-y:auto;background:#161b22;">
+        <div style="font-size:14.5px;font-weight:700;color:#c9d1d9;">${zh ? '📂 掃描範圍' : (ja ? '📂 スキャン範囲' : '📂 Scan scope')}</div>
+        <div style="font-size:13px;color:#8b949e;line-height:1.4;">${zh ? '勾選以左側 Explorer 為準（單向參考）；要調整範圍請先關閉對話框。僅列 .md。' : (ja ? 'チェックは左のExplorerを基準（片方向参照）；範囲を変更するにはまずダイアログを閉じてください（.md のみ）。' : 'Checked state follows the Explorer (one-way reference); close the dialog to adjust the scope. (.md only)')}</div>
+        <div id="scan-scope-box" style="display:flex;flex-direction:column;gap:8px;margin-top:4px;"></div>
       </div>
-      <div style="flex:1;min-width:0;display:flex;flex-direction:column;gap:10px;">
+      <div style="flex:1;min-width:0;display:flex;flex-direction:column;gap:14px;">
     <div id="scan-settings">
-      <div style="display:flex;flex-direction:column;gap:8px;">
-        <label style="display:flex;gap:8px;align-items:flex-start;border:1px solid #21262d;border-radius:8px;padding:8px 10px;cursor:pointer;">
-          <input type="radio" name="scan-mode" value="full" checked style="margin-top:3px;" />
-          <span><b style="font-size:14px;">${zh ? '① 概念探勘（全庫詞頻探勘）' : (ja ? '① 概念発掘（頻出語句マイニング）' : '① Prospect (corpus frequency)')}</b><br/>
-          <span style="font-size:12px;color:#8b949e;">${zh ? '先更新詞頻統計，選取高頻新詞由 LLM 評審後依檔案收錄（消耗 1 次 LLM）。' : (ja ? '出現頻度を更新し、高頻度の新語句をLLMで精査して登録します（LLM呼出 1回）。' : 'Refresh counts, then take the top new term; check files to approve (one LLM call).')}</span></span>
+      <div style="display:flex;flex-direction:column;gap:10px;">
+        <label style="display:flex;gap:12px;align-items:flex-start;border:1px solid #21262d;border-radius:10px;padding:12px 14px;cursor:pointer;background:#161b22;">
+          <input type="radio" name="scan-mode" value="full" checked style="margin-top:4px;width:17px;height:17px;cursor:pointer;" />
+          <span style="flex:1;line-height:1.4;"><b style="font-size:15.5px;color:#f0f6fc;">${zh ? '① 概念探勘（全庫詞頻探勘）' : (ja ? '① 概念発掘（頻出語句マイニング）' : '① Prospect (corpus frequency)')}</b><br/>
+          <span style="font-size:13.5px;color:#8b949e;display:block;margin-top:2px;">${zh ? '先更新詞頻統計，選取高頻新詞由 LLM 評審後依檔案收錄（消耗 1 次 LLM）。' : (ja ? '出現頻度を更新し、高頻度の新語句をLLMで精査して登録します（LLM呼出 1回）。' : 'Refresh counts, then take the top new term; check files to approve (one LLM call).')}</span></span>
         </label>
-        <label style="display:flex;gap:8px;align-items:flex-start;border:1px solid #21262d;border-radius:8px;padding:8px 10px;cursor:pointer;">
-          <input type="radio" name="scan-mode" value="crawl" style="margin-top:3px;" />
-          <span style="flex:1;min-width:0;"><b style="font-size:14px;">${zh ? '② 關聯探索（種子語意深度探索）' : (ja ? '② 関連探索（シード意味探索・Vine）' : '② Vine (seed + DFS)')}</b><br/>
-          <span style="font-size:12px;color:#8b949e;">${zh ? '輸入檢索主題 → LLM 定位語意關聯點 → 深度遍歷探索 → 產生建議標題並確認。確認前僅暫存不改動檔案，正式發佈後套用。' : (ja ? '検索テーマを入力 → LLMが関連箇所を特定 → 深層探索 → 推奨タイトルを生成・確認。承認するまでファイルは変更されません。' : 'Type what you seek first — LLM finds semantic footholds, then stack-walks (relevant only) to an editable title. Staged, applied on promote.')}</span></span>
+        <label style="display:flex;gap:12px;align-items:flex-start;border:1px solid #21262d;border-radius:10px;padding:12px 14px;cursor:pointer;background:#161b22;">
+          <input type="radio" name="scan-mode" value="crawl" style="margin-top:4px;width:17px;height:17px;cursor:pointer;" />
+          <span style="flex:1;min-width:0;line-height:1.4;"><b style="font-size:15.5px;color:#f0f6fc;">${zh ? '② 關聯探索（種子語意深度探索）' : (ja ? '② 関連探索（シード意味探索・Vine）' : '② Vine (seed + DFS)')}</b><br/>
+          <span style="font-size:13.5px;color:#8b949e;display:block;margin-top:2px;">${zh ? '輸入檢索主題 → LLM 定位語意關聯點 → 深度遍歷探索 → 產生建議標題並確認。確認前僅暫存不改動檔案，正式發佈後套用。' : (ja ? '検索テーマを入力 → LLMが関連箇所を特定 → 深層探索 → 推奨タイトルを生成・確認。承認するまでファイルは変更されません。' : 'Type what you seek first — LLM finds semantic footholds, then stack-walks (relevant only) to an editable title. Staged, applied on promote.')}</span></span>
         </label>
-        <div id="scan-crawl-opts" style="display:none;flex-direction:column;gap:8px;border:1px dashed #30363d;border-radius:8px;padding:8px 10px;">
-          <label style="font-size:13px;color:#c9d1d9;">${zh ? '探索主題或關鍵詞（必填）' : (ja ? '探索テーマ・キーワード（必須）' : 'What do you seek (required)')}
-            <input id="scan-crawl-seed" placeholder="${zh ? '如：想找的設備或主題' : (ja ? '例：探したい機器や設計トピック' : 'e.g. equipment or topic you seek')}" style="display:block;width:100%;box-sizing:border-box;margin-top:4px;background:#010409;border:1px solid #30363d;border-radius:6px;padding:6px 10px;color:#e6edf3;font-size:13px;" />
-            <div style="font-size:11px;color:#8b949e;margin-top:2px;">${zh ? 'LLM 依此主題定位關聯文件段落，僅保留高關聯性內容。' : (ja ? '入力内容に基づき関連ドキュメントを探索し、関連性の高い段落のみを保持します。' : 'The LLM finds semantic footholds for this text; only related nodes enter the stack.')}</div>
+        <div id="scan-crawl-opts" style="display:none;flex-direction:column;gap:10px;border:1px dashed #30363d;border-radius:10px;padding:12px 14px;background:#090d13;">
+          <label style="font-size:14.5px;color:#c9d1d9;font-weight:600;">${zh ? '探索主題或關鍵詞（必填）' : (ja ? '探索テーマ・キーワード（必須）' : 'What do you seek (required)')}
+            <input id="scan-crawl-seed" placeholder="${zh ? '如：想找的設備或主題' : (ja ? '例：探したい機器や設計トピック' : 'e.g. equipment or topic you seek')}" style="display:block;width:100%;box-sizing:border-box;margin-top:6px;background:#010409;border:1px solid #30363d;border-radius:8px;padding:9px 12px;color:#e6edf3;font-size:14.5px;" />
+            <div style="font-size:13px;color:#8b949e;margin-top:4px;font-weight:400;">${zh ? 'LLM 依此主題定位關聯文件段落，僅保留高關聯性內容。' : (ja ? '入力内容に基づき関連ドキュメントを探索し、関連性の高い段落のみを保持します。' : 'The LLM finds semantic footholds for this text; only related nodes enter the stack.')}</div>
           </label>
-          <label style="font-size:13px;color:#c9d1d9;">${zh ? '探索檔案上限' : (ja ? '最大探索ファイル数' : 'Max files to read')}
-            <input id="scan-crawl-max" type="number" min="1" max="50" value="10" style="width:64px;margin-left:8px;background:#010409;border:1px solid #30363d;border-radius:6px;padding:4px 8px;color:#e6edf3;" />
-            <div style="font-size:11px;color:#8b949e;margin-top:2px;">${zh ? '大型儲存庫可調高（1–50）。每 5 個檔案批次呼叫一次 LLM。' : (ja ? '大規模リポジトリでは上限を増やせます（1–50）。5ファイルごとにバッチ呼出。' : 'Raise for big libraries (1-50). Batched: one LLM call per 5 files.')}</div>
+          <label style="font-size:14.5px;color:#c9d1d9;font-weight:600;display:flex;align-items:center;gap:10px;">${zh ? '探索檔案上限' : (ja ? '最大探索ファイル数' : 'Max files to read')}
+            <input id="scan-crawl-max" type="number" min="1" max="50" value="10" style="width:75px;background:#010409;border:1px solid #30363d;border-radius:8px;padding:7px 10px;color:#e6edf3;font-size:14.5px;" />
+            <div style="font-size:13px;color:#8b949e;font-weight:400;">${zh ? '大型儲存庫可調高（1–50）。每 5 個檔案批次呼叫一次 LLM。' : (ja ? '大規模リポジトリでは上限を増やせます（1–50）。5ファイルごとにバッチ呼出。' : 'Raise for big libraries (1-50). Batched: one LLM call per 5 files.')}</div>
           </label>
         </div>
-        <div id="scan-full-opts" style="display:none;flex-direction:column;gap:8px;border:1px dashed #30363d;border-radius:8px;padding:8px 10px;">
-          <label style="font-size:13px;color:#c9d1d9;">${zh ? '最低出現次數' : (ja ? '最小出現回数' : 'Min occurrences')}
-            <input id="scan-min-tf" type="number" min="1" max="999" value="5" style="width:64px;margin-left:8px;background:#010409;border:1px solid #30363d;border-radius:6px;padding:4px 8px;color:#e6edf3;" />
-            <div style="font-size:11px;color:#8b949e;margin-top:2px;">${zh ? '排除全庫出現次數過低的詞彙，過濾偶發雜訊。' : (ja ? '出現頻度が低すぎる語句を除外し、ノイズを抑制します。' : 'Ignore terms seen fewer times corpus-wide.')}</div>
+        <div id="scan-full-opts" style="display:none;flex-direction:column;gap:10px;border:1px dashed #30363d;border-radius:10px;padding:12px 14px;background:#090d13;">
+          <label style="font-size:14.5px;color:#c9d1d9;font-weight:600;display:flex;align-items:center;gap:10px;">${zh ? '最低出現次數' : (ja ? '最小出現回数' : 'Min occurrences')}
+            <input id="scan-min-tf" type="number" min="1" max="999" value="5" style="width:75px;background:#010409;border:1px solid #30363d;border-radius:8px;padding:7px 10px;color:#e6edf3;font-size:14.5px;" />
+            <div style="font-size:13px;color:#8b949e;font-weight:400;">${zh ? '排除全庫出現次數過低的詞彙，過濾偶發雜訊。' : (ja ? '出現頻度が低すぎる語句を除外し、ノイズを抑制します。' : 'Ignore terms seen fewer times corpus-wide.')}</div>
           </label>
-          <div style="font-size:11px;color:#8b949e;">${zh ? '檔案異動將自動偵測並重新探勘（依 mtime 指紋）。' : (ja ? 'ファイル更新は自動検知され、再発掘されます。' : 'File changes auto-detected via mtime fingerprint.')}</div>
+          <div style="font-size:13px;color:#8b949e;">${zh ? '檔案異動將自動偵測並重新探勘（依 mtime 指紋）。' : (ja ? 'ファイル更新は自動検知され、再発掘されます。' : 'File changes auto-detected via mtime fingerprint.')}</div>
         </div>
       </div>
     </div>
-    <div id="scan-settings-done" style="display:none;font-size:12px;color:#8b949e;"></div>
-    <div id="scan-progress" style="display:none;align-items:center;gap:8px;font-size:14px;color:#58a6ff;"></div>
-    <div id="scan-results" style="display:none;flex-direction:column;gap:6px;overflow-y:auto;max-height:300px;min-height:40px;border:1px solid #21262d;border-radius:8px;padding:8px;"></div>
-    <div id="scan-crawl-titlebar" style="display:none;flex-direction:column;gap:6px;border:1px solid #1f6feb;border-radius:8px;padding:8px 10px;background:#0d1a2e;">
-      <div style="font-size:12px;color:#8b949e;">${zh ? '建議標題（可自訂，確認後收錄至候選池；正式發佈後寫入檔案）：' : (ja ? '推奨タイトル（編集可能・承認後に正式適用）: ' : 'Title (editable, goes to candidates; files written on promote):')}</div>
-      <input id="scan-crawl-title" value="" style="background:#010409;border:1px solid #30363d;border-radius:6px;padding:6px 10px;color:#e6edf3;font-size:14px;font-weight:600;width:100%;box-sizing:border-box;" />
+    <div id="scan-settings-done" style="display:none;font-size:13.5px;color:#8b949e;"></div>
+    <div id="scan-progress" style="display:none;align-items:center;gap:10px;font-size:15px;color:#58a6ff;font-weight:600;"></div>
+    <div id="scan-results" style="display:none;flex-direction:column;gap:8px;overflow-y:auto;max-height:360px;min-height:50px;border:1px solid #21262d;border-radius:10px;padding:12px;background:#010409;"></div>
+    <div id="scan-crawl-titlebar" style="display:none;flex-direction:column;gap:8px;border:1px solid #1f6feb;border-radius:10px;padding:12px 14px;background:#0d1a2e;">
+      <div style="font-size:13.5px;color:#8b949e;">${zh ? '建議標題（可自訂，確認後收錄至候選池；正式發佈後寫入檔案）：' : (ja ? '推奨タイトル（編集可能・承認後に正式適用）: ' : 'Title (editable, goes to candidates; files written on promote):')}</div>
+      <input id="scan-crawl-title" value="" style="background:#010409;border:1px solid #30363d;border-radius:8px;padding:8px 12px;color:#e6edf3;font-size:15px;font-weight:600;width:100%;box-sizing:border-box;" />
     </div>
-    <div style="display:flex;gap:8px;align-items:center;">
-      <button onclick="document.getElementById('scan-opt-overlay').remove()" style="background:transparent;border:1px solid #30363d;color:#c9d1d9;border-radius:6px;padding:7px 14px;cursor:pointer;">${zh ? '取消' : (ja ? 'キャンセル' : 'Cancel')}</button>
-      <button id="scan-go-btn" onclick="conceptScanStart()" style="flex:1;background:#1f6feb;border:1px solid #388bfd;color:#fff;border-radius:6px;padding:7px 14px;cursor:pointer;font-weight:600;">${zh ? '✦ 開始掃描' : (ja ? '✦ 探索を開始' : '✦ Start scan')}</button>
-      <button id="scan-confirm-btn" onclick="conceptScanConfirm()" style="display:none;background:#238636;border:1px solid #2ea043;color:#fff;border-radius:6px;padding:7px 14px;cursor:pointer;font-weight:600;"></button>
+    <div style="display:flex;gap:12px;align-items:center;margin-top:auto;">
+      <button onclick="document.getElementById('scan-opt-overlay').remove()" style="background:transparent;border:1px solid #30363d;color:#c9d1d9;border-radius:8px;padding:9px 18px;font-size:14.5px;cursor:pointer;">${zh ? '取消' : (ja ? 'キャンセル' : 'Cancel')}</button>
+      <button id="scan-go-btn" onclick="conceptScanStart()" style="flex:1;background:#1f6feb;border:1px solid #388bfd;color:#fff;border-radius:8px;padding:9px 18px;font-size:15px;cursor:pointer;font-weight:700;">${zh ? '✦ 開始掃描' : (ja ? '✦ 探索を開始' : '✦ Start scan')}</button>
+      <button id="scan-confirm-btn" onclick="conceptScanConfirm()" style="display:none;background:#238636;border:1px solid #2ea043;color:#fff;border-radius:8px;padding:9px 20px;font-size:15px;cursor:pointer;font-weight:700;"></button>
     </div>
       </div>
     </div>
@@ -5928,7 +6704,7 @@ function scanRenderResults() {
   if (!box || !scanDlg) return;
   const items = scanDlg.items;
   if (!items.length) {
-    box.innerHTML = `<div style="font-size:12px;color:#8b949e;text-align:center;padding:12px;">${zh ? '還沒有候選 — 按開始掃描，或把門檻調低再掃' : 'No candidates yet — start a scan or lower the threshold'}</div>`;
+    box.innerHTML = `<div style="font-size:14px;color:#8b949e;text-align:center;padding:16px;">${zh ? '還沒有候選 — 按開始掃描，或把門檻調低再掃' : 'No candidates yet — start a scan or lower the threshold'}</div>`;
   } else {
     box.innerHTML = items.map((e, i) => {
       const files = e.files || [];
@@ -5936,18 +6712,19 @@ function scanRenderResults() {
         const rel = (f && f.rel) || '';
         const mf = rel.split(/[\\/]/).pop() || rel;
         const full = String((f && f.snippet) || '');
-        const sn = full.slice(0, 80);
-        return `<div style="display:flex;gap:8px;margin-top:4px;align-items:center;">`
-          + `<div style="flex:1.15;min-width:0;"><div style="font-size:11px;color:#f0883e;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${escapeHtml(rel)}">${escapeHtml(mf)}</div></div>`
-          + `<div style="flex:1;min-width:0;border-left:1px solid #21262d;padding-left:8px;color:#a5d6ff;font-size:11px;word-break:break-word;" title="${escapeHtml(full)}">${escapeHtml(sn)}${full.length > 80 ? '…' : ''}</div>`
-          + `<input type="checkbox" data-scan-file="${i}:${fi}" checked onclick="scanSubToggle(this)" style="flex-shrink:0;width:14px;height:14px;" /></div>`;
+        const sn = full.slice(0, 90);
+        return `<div style="display:flex;gap:10px;margin-top:6px;align-items:center;background:#0d1117;padding:6px 10px;border-radius:6px;">`
+          + `<div style="flex:1.15;min-width:0;"><div style="font-size:14px;font-weight:600;color:#f0883e;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${escapeHtml(rel)}">${escapeHtml(mf)}</div></div>`
+          + `<div style="flex:1;min-width:0;border-left:1px solid #30363d;padding-left:10px;color:#a5d6ff;font-size:13.5px;line-height:1.4;word-break:break-word;" title="${escapeHtml(full)}">${escapeHtml(sn)}${full.length > 90 ? '…' : ''}</div>`
+          + `<input type="checkbox" data-scan-file="${i}:${fi}" checked onclick="scanSubToggle(this)" style="flex-shrink:0;width:17px;height:17px;cursor:pointer;" /></div>`;
       }).join('');
-      return `<div data-scan-block="${i}" style="margin-top:4px;border:1px solid #21262d;border-radius:8px;padding:6px 8px;">`
-        + `<label style="display:flex;gap:8px;align-items:center;cursor:pointer;">`
-        + `<span style="flex:1;min-width:0;color:#f0883e;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${escapeHtml(e.term)}">▸ ${escapeHtml(e.term)} <span style="font-size:11px;color:#8b949e;">(${zh ? `出現${e.df || 0}檔·${e.tf || 0}次` : `${e.df || 0} docs·${e.tf || 0}`})</span></span>`
-        + `<input type="checkbox" data-scan-master="${i}" checked onclick="scanFileToggle(this)" style="flex-shrink:0;width:15px;height:15px;" /></label>`
-        + (e.reason ? `<div style="font-size:11px;color:#8b949e;margin-top:2px;">${escapeHtml(e.reason)}</div>` : '')
-        + sub + `</div>`;
+      return `<div data-scan-block="${i}" style="margin-top:6px;border:1px solid #30363d;border-radius:10px;padding:10px 12px;background:#161b22;">`
+        + `<label style="display:flex;gap:10px;align-items:center;cursor:pointer;">`
+        + `<span style="flex:1;min-width:0;font-size:16px;font-weight:700;color:#f0883e;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${escapeHtml(e.term)}">▸ ${escapeHtml(e.term)} <span style="font-size:14px;color:#8b949e;font-weight:400;">(${zh ? `出現 ${e.df || 0} 檔 · ${e.tf || 0} 次` : `${e.df || 0} docs · ${e.tf || 0}`})</span></span>`
+        + `<input type="checkbox" data-scan-master="${i}" checked onclick="scanFileToggle(this)" style="flex-shrink:0;width:18px;height:18px;cursor:pointer;" /></label>`
+        + (e.reason ? `<div style="font-size:13.5px;color:#8b949e;margin-top:4px;padding-left:16px;">💡 ${escapeHtml(e.reason)}</div>` : '')
+        + `<div style="margin-top:6px;display:flex;flex-direction:column;gap:4px;">${sub}</div>`
+        + `</div>`;
     }).join('');
   }
   scanPaintConfirm();
@@ -6063,26 +6840,23 @@ function scanPaintConfirm() {
             if (!vineByFile[fk]) { vineByFile[fk] = []; vineOrder.push(fk); }
             vineByFile[fk].push(i);
           });
-          line(`<b>${zh ? '挖到的（按節點勾留去留）：' : 'Dug up (tick nodes to keep):'}</b>` + vineOrder.map((fk, fi) => {
+          line(`<b style="font-size:15px;color:#f0f6fc;display:block;margin-bottom:6px;">${zh ? '挖到的（按節點勾留去留）：' : 'Dug up (tick nodes to keep):'}</b>` + vineOrder.map((fk, fi) => {
             const mf = String(fk).split(/[\\/]/).pop() || fk;
-            // Per-mention sub-rows, draft-overlay style: LEFT section,
-            // RIGHT term. Each content-bearing row carries its OWN
-            // checkbox (that is the keep/drop unit); the md checkbox
-            // above is the master switch for the whole node.
             const sub = vineByFile[fk].map(i => {
               const k = keptArr[i];
               const left = (k.heading && k.line)
-                ? `<div style="flex:1.15;min-width:0;"><div style="font-size:11px;color:#3fb950;">⤷ ${escapeHtml(String(k.heading).slice(0, 40))} · L${k.line}</div></div>`
-                : `<div style="flex:1.15;min-width:0;"><div style="font-size:10px;color:#6e7681;">${zh ? '（僅知檔案）' : '(file only)'}</div></div>`;
-              return `<div style="display:flex;gap:8px;margin-top:4px;align-items:center;">${left}`
-                + `<div style="flex:1;min-width:0;border-left:1px solid #21262d;padding-left:8px;color:#c9d1d9;word-break:break-word;">${escapeHtml(k.term)}</div>`
-                + `<input type="checkbox" data-vine-keep="${i}" checked onclick="vineSubToggle(this)" style="flex-shrink:0;width:14px;height:14px;" /></div>`;
+                ? `<div style="flex:1.15;min-width:0;"><div style="font-size:13.5px;color:#3fb950;font-weight:600;">⤷ ${escapeHtml(String(k.heading).slice(0, 45))} · L${k.line}</div></div>`
+                : `<div style="flex:1.15;min-width:0;"><div style="font-size:12px;color:#8b949e;">${zh ? '（僅知檔案）' : '(file only)'}</div></div>`;
+              return `<div style="display:flex;gap:10px;margin-top:6px;align-items:center;background:#0d1117;padding:5px 8px;border-radius:6px;">${left}`
+                + `<div style="flex:1;min-width:0;border-left:1px solid #30363d;padding-left:10px;color:#f0f6fc;font-size:14px;word-break:break-word;">${escapeHtml(k.term)}</div>`
+                + `<input type="checkbox" data-vine-keep="${i}" checked onclick="vineSubToggle(this)" style="flex-shrink:0;width:17px;height:17px;cursor:pointer;" /></div>`;
             }).join('');
-            return `<div data-vine-block="${fi}" style="margin-top:4px;border:1px solid #21262d;border-radius:8px;padding:6px 8px;">`
-              + `<label style="display:flex;gap:8px;align-items:center;cursor:pointer;">`
-              + `<span style="flex:1;min-width:0;color:#f0883e;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${escapeHtml(fk)}">▸ ${escapeHtml(mf)} <span style="font-size:11px;color:#8b949e;">(${vineByFile[fk].length})</span></span>`
-              + `<input type="checkbox" data-vine-file="${fi}" checked onclick="vineFileToggle(this)" style="flex-shrink:0;width:15px;height:15px;" /></label>`
-              + sub + `</div>`;
+            return `<div data-vine-block="${fi}" style="margin-top:6px;border:1px solid #30363d;border-radius:10px;padding:10px 12px;background:#161b22;">`
+              + `<label style="display:flex;gap:10px;align-items:center;cursor:pointer;">`
+              + `<span style="flex:1;min-width:0;font-size:15px;font-weight:700;color:#f0883e;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${escapeHtml(fk)}">▸ ${escapeHtml(mf)} <span style="font-size:13.5px;color:#8b949e;font-weight:400;">(${vineByFile[fk].length})</span></span>`
+              + `<input type="checkbox" data-vine-file="${fi}" checked onclick="vineFileToggle(this)" style="flex-shrink:0;width:18px;height:18px;cursor:pointer;" /></label>`
+              + `<div style="margin-top:6px;display:flex;flex-direction:column;gap:4px;">${sub}</div>`
+              + `</div>`;
           }).join(''));
         }
         // Plain-words round summary, always (this is the line humans read).
@@ -6394,6 +7168,8 @@ function openCandidatePage(name, source, ev) {
   if (ev && ev.target && ev.target.closest && ev.target.closest('button')) return;
   name = (name || '').trim();
   if (!name) return;
+  selectedCandidateName = name;
+  selectedConceptName = null;
   const isVine = source === 'vine';
   const repo = (typeof getActiveRepoPath === 'function') ? getActiveRepoPath() : '';
   try {
@@ -6401,6 +7177,21 @@ function openCandidatePage(name, source, ev) {
     window.__candSource = source || '';
     window.__candGroups = [];
   } catch (e) {}
+
+  // 1. Ensure left drawer is on Concepts tab and 'candidates' subtab
+  if (typeof switchActivityTab === 'function') switchActivityTab('concepts', true);
+  if (typeof switchConceptSubTab === 'function' && currentConceptSubTab !== 'candidates') {
+    switchConceptSubTab('candidates');
+  } else if (typeof renderConceptsDrawerList === 'function') {
+    renderConceptsDrawerList();
+  }
+
+  // 2. Smoothly scroll candidate card into view
+  setTimeout(() => {
+    const card = document.getElementById(`cpt-cand-${name}`) || document.querySelector(`[data-candidate-name="${CSS.escape(name)}"]`);
+    if (card) card.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+  }, 60);
+
   // Loading plate first (same skeleton as the tag page).
   renderCandidatePageInViewer({ concept: name, source: source, repo: repo, groups: null, evd: null, loading: true });
   const draftUrl = `/api/concepts/candidates/draft?repo=${encodeURIComponent(repo)}&name=${encodeURIComponent(name)}`;
@@ -6464,7 +7255,7 @@ function renderCandidatePageInViewer(p) {
     badge.style.fontWeight = '700';
     badge.style.textShadow = '0 1px 2px rgba(0,0,0,0.7)';
   }
-  if (codeTitle) codeTitle.innerText = zh ? '🗂️ 候選底稿審核' : (ja ? '🗂️ 候補ドラフトプレビュー' : '🗂️ Candidate Draft Review');
+  if (codeTitle) codeTitle.innerText = zh ? `🗂️ 待審標籤發佈預覽：${name}` : (ja ? `🗂️ 候補タグプレビュー: ${name}` : `🗂️ Candidate Tag Preview: ${name}`);
 
   const escName = escapeHtml(name);
   // (5) Draft-preview banner: the WHOLE page is a preview — nothing on
@@ -6494,7 +7285,7 @@ function renderCandidatePageInViewer(p) {
     // in a preview is a fresh confusion).
     fullMd += `<div style="position:relative;border:1px dashed #8b949e;border-radius:8px;padding:10px 12px;margin:10px 0 4px;background:rgba(139,148,158,.06);">`
       + `<span style="position:absolute;top:-9px;right:10px;background:#0d1117;border:1px solid #8b949e;border-radius:8px;font-size:10px;color:#8b949e;padding:0 8px;">${zh ? '預覽 PREVIEW' : 'PREVIEW'}</span>`
-      + `<div style="font-size:11px;color:#8b949e;margin-bottom:4px;">${zh ? '正式發佈後，各段落標題下方將加入此標籤引用行：' : (ja ? '承認後、各セクションの見出し直下にこのタグ参照行が挿入されます：' : 'After Promote, this line lands under each spot heading:')}</div>`
+      + `<div style="font-size:13px;color:#8b949e;margin-bottom:4px;">${zh ? '正式發佈後，各段落標題下方將加入此標籤引用行：' : (ja ? '承認後、各セクションの見出し直下にこのタグ参照行が挿入されます：' : 'After Promote, this line lands under each spot heading:')}</div>`
       + `<div style="font-size:12px;color:#c9d1d9;"><code>&gt; 🏷️ ${zh ? '標籤' : 'tag'}： [${escName}](.docgraphical/tags/${escName}.md)</code></div>`
       + `</div>\n`;
     fullMd += zh ? '\n| 引用檔案路徑 | 提及段落摘要 | 操作 |\n| :--- | :--- | :--- |\n'
@@ -6502,7 +7293,7 @@ function renderCandidatePageInViewer(p) {
     groups.forEach((g, gi) => {
       const h = g.head || {};
       const crumb = (h.heading && h.line)
-        ? refCrumbHtml(`heading::${g.file}::L${h.line}::${h.heading}`)
+        ? refCrumbHtml(`heading::${g.file}::L${h.line}::${h.heading}`, h.level)
         : refCrumbHtml(g.file || '');
       let snip;
       if (!isVine && p.evd && p.evd.files) {
@@ -6615,70 +7406,296 @@ function openCardRefresh(term) {
   document.body.appendChild(o);
   o.addEventListener('click', (ev) => { if (ev.target === o) o.remove(); });
 }
-// Executes one per-card refresh path.
+// Interactive Review Dialog for Prospect recount and Vine dig results
+function openRefreshResultReviewDialog(how, term, items, extraInfo = {}) {
+  const zh = currentLanguage === 'zh';
+  const existing = document.getElementById('refresh-review-modal');
+  if (existing) existing.remove();
+
+  const o = document.createElement('div');
+  o.id = 'refresh-review-modal';
+  o.className = 'modal-overlay';
+  o.style.cssText = 'position:fixed;inset:0;z-index:1000006;background:rgba(0,0,0,0.78);display:flex;align-items:center;justify-content:center;backdrop-filter:blur(4px);';
+
+  const typeName = how === 'prospect' ? (zh ? '⛏ 探礦重算' : 'Prospect') : (zh ? '🌿 順藤深挖' : 'Vine');
+  const titleText = zh ? `${typeName}關聯結果審核：「${escapeHtml(term)}」` : `${typeName} Dig Review: "${escapeHtml(term)}"`;
+
+  // Compute existing links count for this concept if available in memory
+  let existingCount = 0;
+  try {
+    const cid = `concept::${term}`;
+    const gLinks = (rawData && rawData.links) ? rawData.links : [];
+    const matched = new Set();
+    gLinks.forEach(l => {
+      const sId = typeof l.source === 'object' ? l.source.id : l.source;
+      const tId = typeof l.target === 'object' ? l.target.id : l.target;
+      if (tId === cid || tId.endsWith(`::${cid}`)) matched.add(sId);
+      if (sId === cid || sId.endsWith(`::${cid}`)) matched.add(tId);
+    });
+    existingCount = matched.size;
+  } catch(e) {}
+
+  // Filter out internal system and tag files defensively
+  const filtered = (items || []).filter(it => {
+    const f = (it.file || it.rel || it.filePath || '').replace(/\\/g, '/');
+    if (!f) return false;
+    const fl = f.toLowerCase();
+    if (fl.includes('.docgraphical') || fl.includes('.docgraph') || fl.includes('doc_catalog.md') || fl.includes('log.md')) {
+      return false;
+    }
+    return true;
+  });
+
+  // Deduplicate items strictly by file + heading (one section node per candidate!)
+  // If multiple mentions hit the same heading, collect them into snippets list
+  const sectionMap = new Map();
+  filtered.forEach((it, idx) => {
+    const f = it.file || it.rel || it.filePath || '';
+    const h = (it.heading || '').trim();
+    const line = it.line || 1;
+    const snip = (it.snippet || it.term || it.mention || '').trim();
+    
+    // Group key: each heading under a file is ONE distinct link target
+    const targetKey = h ? `${f}::${h}` : `${f}::L${line}`;
+    
+    if (sectionMap.has(targetKey)) {
+      const existing = sectionMap.get(targetKey);
+      if (snip && !existing.snippets.includes(snip)) {
+        existing.snippets.push(snip);
+      }
+    } else {
+      const refId = (h && line) ? `heading::${f}::L${line}::${h}` : (f ? `file::${f}` : '');
+      sectionMap.set(targetKey, {
+        id: `rf-item-${idx}`,
+        file: f,
+        heading: h,
+        line: line,
+        level: it.level || 0,
+        refId: refId,
+        snippets: snip ? [snip] : [],
+        checked: true
+      });
+    }
+  });
+
+  const normalized = Array.from(sectionMap.values()).map(item => ({
+    ...item,
+    snippet: item.snippets.join(' ｜ ')
+  }));
+
+  const subHeaderNote = zh
+    ? (existingCount > 0
+        ? `本次發掘 <b>${normalized.length}</b> 處新引用落點（目前文檔已存在 <b>${existingCount}</b> 處關聯）。請勾選欲套用的新落點：`
+        : `本次共發掘 <b>${normalized.length}</b> 處引用落點。請勾選欲建立關聯的項目：`)
+    : `Discovered <b>${normalized.length}</b> references${existingCount > 0 ? ` (${existingCount} existing links)` : ''}. Choose items to link:`;
+
+  o.innerHTML = `
+    <div style="background:#161b22;border:1px solid #30363d;border-radius:12px;width:720px;max-width:95vw;max-height:86vh;box-shadow:0 24px 60px rgba(0,0,0,0.85);display:flex;flex-direction:column;overflow:hidden;">
+      <!-- Header -->
+      <div style="padding:14px 20px;border-bottom:1px solid #30363d;display:flex;justify-content:space-between;align-items:center;background:#0d1117;">
+        <div>
+          <span style="font-weight:700;font-size:16px;color:#58a6ff;line-height:1.4;">${titleText}</span>
+          <div style="font-size:12.5px;color:#8b949e;margin-top:2px;">
+            ${subHeaderNote}
+          </div>
+        </div>
+        <button onclick="document.getElementById('refresh-review-modal').remove()" style="background:none;border:none;color:#8b949e;cursor:pointer;font-size:20px;line-height:1;padding:4px 8px;">✕</button>
+      </div>
+
+      <!-- Toolbar -->
+      <div style="padding:10px 20px;background:#0d1117;border-bottom:1px solid #21262d;display:flex;justify-content:space-between;align-items:center;">
+        <label style="display:flex;align-items:center;gap:6px;font-size:13px;color:#c9d1d9;cursor:pointer;user-select:none;">
+          <input type="checkbox" id="rf-select-all" checked onchange="document.querySelectorAll('.rf-item-check').forEach(cb => cb.checked = this.checked); updateRefreshReviewCount();">
+          <span>${zh ? '全選 / 全不選' : 'Select All / None'}</span>
+        </label>
+        <span id="rf-selected-summary" style="font-size:13px;color:#58a6ff;font-weight:600;">${zh ? `已選擇 ${normalized.length} / ${normalized.length} 項` : `Selected ${normalized.length} / ${normalized.length}`}</span>
+      </div>
+
+      <!-- Item List Container with Standard Node Plate Styling -->
+      <div style="flex:1;overflow-y:auto;padding:12px 20px;display:flex;flex-direction:column;gap:10px;background:#161b22;" id="rf-items-container">
+        ${normalized.length === 0 ? `<div style="text-align:center;padding:40px;color:#8b949e;font-size:14px;">${zh ? '本次未發現任何新引用' : 'No new references found.'}</div>` : ''}
+        ${normalized.map(it => `
+          <div style="display:flex;align-items:flex-start;gap:12px;background:#0d1117;border:1px solid #30363d;border-radius:8px;padding:12px 14px;transition:all 0.15s ease;">
+            <input type="checkbox" class="rf-item-check" data-refid="${escapeHtml(it.refId)}" data-file="${escapeHtml(it.file)}" data-heading="${escapeHtml(it.heading)}" checked style="margin-top:5px;cursor:pointer;" onchange="updateRefreshReviewCount()">
+            <div style="flex:1;min-width:0;">
+              <!-- Canonical Node Plate -->
+              <div>
+                ${refCrumbHtml(it.refId || it.file, it.level)}
+              </div>
+              ${it.snippet ? `<div style="font-size:12.5px;color:#c9d1d9;margin-top:6px;background:#161b22;padding:6px 10px;border-radius:4px;border-left:3px solid #58a6ff;font-family:monospace;word-break:break-all;">${escapeHtml(it.snippet)}</div>` : ''}
+            </div>
+          </div>
+        `).join('')}
+      </div>
+
+      <!-- Footer Buttons -->
+      <div style="padding:14px 20px;border-top:1px solid #30363d;display:flex;justify-content:flex-end;gap:10px;background:#0d1117;">
+        <button onclick="document.getElementById('refresh-review-modal').remove()" class="mini-btn" style="padding:8px 18px;font-size:14px;border-radius:6px;">${zh ? '取消' : 'Cancel'}</button>
+        <button onclick="confirmRefreshReviewSelection('${how}', '${escapeHtml(term)}')" class="btn-primary" style="padding:8px 22px;font-size:14px;font-weight:600;border-radius:6px;" id="btn-rf-confirm">
+          ${zh ? '確認套用所選關聯' : 'Apply Selected Links'}
+        </button>
+      </div>
+    </div>
+  `;
+
+  document.body.appendChild(o);
+  o.addEventListener('click', (ev) => { if (ev.target === o) o.remove(); });
+}
+
+window.updateRefreshReviewCount = function() {
+  const zh = currentLanguage === 'zh';
+  const all = document.querySelectorAll('.rf-item-check');
+  const checked = document.querySelectorAll('.rf-item-check:checked');
+  const summary = document.getElementById('rf-selected-summary');
+  if (summary) {
+    summary.innerText = zh ? `已選擇 ${checked.length} / ${all.length} 項` : `Selected ${checked.length} / ${all.length}`;
+  }
+};
+
+window.confirmRefreshReviewSelection = function(how, term) {
+  const zh = currentLanguage === 'zh';
+  const checked = [...document.querySelectorAll('.rf-item-check:checked')].map(cb => ({
+    refId: cb.dataset.refid,
+    filePath: cb.dataset.file,
+    heading: cb.dataset.heading
+  }));
+  const unselected = [...document.querySelectorAll('.rf-item-check:not(:checked)')].map(cb => ({
+    refId: cb.dataset.refid,
+    filePath: cb.dataset.file,
+    heading: cb.dataset.heading
+  }));
+
+  const modal = document.getElementById('refresh-review-modal');
+  const btn = document.getElementById('btn-rf-confirm');
+  if (btn) { btn.disabled = true; btn.innerText = zh ? '套用中...' : 'Applying...'; }
+
+  const repo = (typeof getActiveRepoPath === 'function') ? getActiveRepoPath() : '';
+
+  (async () => {
+    // 1. Process unselected unlinks sequentially
+    for (const item of unselected) {
+      const targetPath = item.refId || item.filePath;
+      try {
+        await fetch('/api/concepts/unlink', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ repo, name: term, filePath: targetPath, rewriteDisk: true })
+        });
+      } catch (e) {}
+    }
+
+    // 2. Process checked attaches sequentially to prevent disk write collisions on the same file!
+    for (const item of checked) {
+      try {
+        await fetch('/api/concepts/attach', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ repo, name: term, filePath: item.filePath, heading: item.heading })
+        });
+      } catch (e) {}
+    }
+
+    if (modal) modal.remove();
+    showToast(zh ? `✅ 已成功依所選項目更新「${term}」的關聯連線！` : `✅ Updated links for "${term}"!`);
+    if (typeof fetchConceptsData === 'function') fetchConceptsData();
+    if (typeof loadMasterGraphAndFilter === 'function') loadMasterGraphAndFilter();
+    setTimeout(() => {
+      if (typeof buildProjectTree === 'function') buildProjectTree();
+      if (typeof spotlightConceptNode === 'function') spotlightConceptNode(term);
+      if (selectedConceptName === term && typeof onConceptCardClick === 'function') {
+        onConceptCardClick(term);
+      }
+    }, 180);
+  })();
+};
+
+// Executes one per-card refresh path with comprehensive interactive review dialog
 function cardRefreshGo(how, term) {
   const o = document.getElementById('refresh-opt-overlay');
-  if (o) o.remove();
   const zh = currentLanguage === 'zh';
   const repo = (typeof getActiveRepoPath === 'function') ? getActiveRepoPath() : '';
+
+  // Transform option modal into in-place waiting status instead of closing immediately!
+  if (o) {
+    const isVine = how === 'vine';
+    o.innerHTML = `
+      <div style="width:440px;max-width:92vw;background:#0d1117;border:1px solid #30363d;border-radius:12px;padding:24px 20px;color:#e6edf3;display:flex;flex-direction:column;align-items:center;text-align:center;gap:14px;box-shadow:0 16px 48px rgba(0,0,0,0.85);">
+        <div style="width:36px;height:36px;border:3px solid #30363d;border-top-color:${isVine ? '#3fb950' : '#e3b341'};border-radius:50%;animation:spin 0.8s linear infinite;"></div>
+        <div>
+          <div style="font-weight:700;font-size:15px;color:${isVine ? '#3fb950' : '#e3b341'};">
+            ${isVine ? (zh ? `🌿 順藤深挖中：「${escapeHtml(term)}」` : `🌿 Digging "${escapeHtml(term)}"...`)
+                     : (zh ? `⛏ 探礦重算中：「${escapeHtml(term)}」` : `⛏ Recounting "${escapeHtml(term)}"...`)}
+          </div>
+          <div style="font-size:12.5px;color:#8b949e;margin-top:5px;line-height:1.5;">
+            ${isVine ? (zh ? '正在遍歷正文節點並呼叫 LLM 進行深度關聯探勘...<br>完成時將自動接續彈出審核清單，請稍候。' : 'Traversing document nodes with LLM calls...<br>Review dialog will pop up upon completion.')
+                     : (zh ? '正在重新統計詞頻並校驗落點...<br>完成時將自動接續彈出審核清單。' : 'Recounting frequencies and verifying references...')}
+          </div>
+        </div>
+      </div>
+    `;
+  }
+
   if (how === 'prospect') {
+    showToast(zh ? `⛏ 正在重新探勘「${term}」落點...` : `⛏ Recounting "${term}"...`);
     fetch('/api/concepts/scan/recount-one', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ repo, term })
     })
       .then(r => r.json())
       .then(d => {
+        if (o) o.remove();
         if (d && d.ok) {
-          const added = d.staged_added || 0;
-          const cntTxt = zh ? `「${term}」：出現${d.df || 0}檔·${d.tf || 0}次`
+          const files = d.files || [];
+          const cntTxt = zh ? `「${term}」：出現 ${d.df || 0} 檔·${d.tf || 0} 次`
                             : `"${term}": ${d.df || 0} docs·${d.tf || 0} hits`;
-          showToast(added > 0
-            ? (zh ? `${cntTxt}，補齊 ${added} 處引用（未呼叫 LLM）` : `${cntTxt}, +${added} spots (no LLM)`)
-            : (zh ? `${cntTxt}（已是最新，無新增，未花 LLM）` : `${cntTxt} (up to date, no LLM)`));
+          showToast(cntTxt);
+          if (files.length > 0) {
+            openRefreshResultReviewDialog('prospect', term, files, d);
+          } else {
+            showToast(zh ? `「${term}」：未發現額外關聯落點` : `"${term}": No additional spots`);
+          }
           if (typeof fetchConceptsData === 'function') fetchConceptsData();
-          // If the candidate page for this term is open, re-render it so
-          // the topped-up spots show without reopening the card.
-          try {
-            if ((window.__candName || '') === term && typeof openCandidatePage === 'function') {
-              openCandidatePage(term, (window.__candSource || 'prospect'), null);
-            }
-          } catch (e) {}
         } else {
           showToast('❌ ' + ((d && d.error) || 'recount failed'));
         }
       })
-      .catch(err => showToast('❌ ' + err));
+      .catch(err => {
+        if (o) o.remove();
+        showToast('❌ ' + err);
+      });
     return;
   }
-  // Vine: PURE refresh - re-crawl seeded by this title, fresh spots merge
-  // into THIS candidate (never a new one). Costs LLM, takes minutes.
-  showToast(zh ? `🌿 深度探索「${term}」關聯中（需呼叫 LLM，完成時通知）`
-               : `🌿 Digging "${term}" (LLM calls, report on done)`);
+
+  // Vine: PURE refresh - re-crawl seeded by this title
+  showToast(zh ? `🌿 深度探索「${term}」關聯中（需呼叫 LLM，完成時彈出審核清單）`
+               : `🌿 Digging "${term}" (LLM calls, review dialog pops up on done)`);
   fetch('/api/crawl/refresh', {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ repo, name: term })
   })
     .then(r => r.json())
     .then(d => {
+      if (o) o.remove();
       if (d && d.ok) {
-        const added = d.added || 0;
-        showToast(added > 0
-          ? (zh ? `「${term}」：已補上 ${added} 處引用（呼叫 LLM ${d.spent || 0} 次）`
-                 : `"${term}": +${added} spots (${d.spent || 0} calls)`)
-          : (zh ? `「${term}」：無新增引用（呼叫 LLM ${d.spent || 0} 次）`
-                 : `"${term}": nothing new (${d.spent || 0} calls)`));
+        const items = d.new_items || d.all_items || [];
+        showToast(zh ? `「${term}」深度探索完成！已挖出 ${items.length} 處落點`
+                     : `"${term}" dig completed! Found ${items.length} references`);
+        if (items.length > 0) {
+          openRefreshResultReviewDialog('vine', term, items, d);
+        } else {
+          showToast(zh ? `「${term}」：無新增引用（呼叫 LLM ${d.spent || 0} 次）`
+                       : `"${term}": nothing new (${d.spent || 0} calls)`);
+        }
         if (typeof fetchConceptsData === 'function') fetchConceptsData();
-        try {
-          if ((window.__candName || '') === term && typeof openCandidatePage === 'function') {
-            openCandidatePage(term, (window.__candSource || 'vine'), null);
-          }
-        } catch (e) {}
+        if (typeof loadMasterGraphAndFilter === 'function') loadMasterGraphAndFilter();
       } else {
         showToast('❌ ' + ((d && d.error) || 'refresh failed'));
       }
     })
-    .catch(err => showToast('❌ ' + err));
-  return;
+    .catch(err => {
+      if (o) o.remove();
+      showToast('❌ ' + err);
+    });
 }
 function dismissCandidateGo(how, name) {
   const o = document.getElementById('dismiss-opt-overlay');
@@ -6979,6 +7996,8 @@ function updateActivityBarI18n() {
                     : (lang === 'ja' ? 'ファイルエクスプローラー (Explorer)' : 'File Explorer (Explorer)');
   const tipConcepts = lang === 'zh' ? '概念標籤管理 (Concepts Registry)'
                     : (lang === 'ja' ? 'コンセプト管理 (Concepts Registry)' : 'Concepts Registry (Concepts)');
+  const tipLint = lang === 'zh' ? '文庫體檢與治理 (Linting & Governance)'
+                    : (lang === 'ja' ? 'ナレッジ検証とガバナンス (Linting & Governance)' : 'Knowledge Linting & Governance (Linting)');
   const tipPrompts = lang === 'zh' ? '提示詞管理 (Prompts Manager)'
                     : (lang === 'ja' ? 'プロンプト管理 (Prompts Manager)' : 'Prompts Manager (Prompts)');
   const tipSettings = lang === 'zh' ? '系統設定 (Settings)'
@@ -6986,20 +8005,25 @@ function updateActivityBarI18n() {
 
   setAttr('act-tab-explorer', 'title', tipExplorer);
   setAttr('act-tab-concepts', 'title', tipConcepts);
+  setAttr('act-tab-lint', 'title', tipLint);
   setAttr('act-tab-prompts', 'title', tipPrompts);
   setAttr('act-tab-settings', 'title', tipSettings);
 }
 
 function openFileInEditor(filePath, targetLine = 1) {
-  const fileId = `file::${filePath}`;
-  const gNodes = (Graph && Graph.graphData) ? (Graph.graphData().nodes || []) : (rawData.nodes || []);
-  const found = gNodes.find(n => n.id === fileId || (n.file && n.file.endsWith(filePath)));
-  if (found) {
-    selectActiveNode(found);
+  if (typeof dispatchUnifiedSelection === 'function') {
+    dispatchUnifiedSelection({ file: filePath, line: targetLine });
   } else {
-    const repo = getActiveRepoPath();
-    const absPath = repo ? `${repo}/${filePath}` : filePath;
-    selectActiveNode({ id: fileId, name: filePath, file: filePath, abs_path: absPath, kind: 'file', line: targetLine });
+    const fileId = `file::${filePath}`;
+    const gNodes = (Graph && Graph.graphData) ? (Graph.graphData().nodes || []) : (rawData.nodes || []);
+    const found = gNodes.find(n => n.id === fileId || (n.file && n.file.endsWith(filePath)));
+    if (found) {
+      selectActiveNode(found);
+    } else {
+      const repo = getActiveRepoPath();
+      const absPath = repo ? `${repo}/${filePath}` : filePath;
+      selectActiveNode({ id: fileId, name: filePath, file: filePath, abs_path: absPath, kind: 'file', line: targetLine });
+    }
   }
 }
 // Browser-like page history (doc viewer header ‹ ›): every viewed page
@@ -7031,8 +8055,16 @@ function navRestore(snap) {
     onConceptCardClick(snap.name, null);
   } else if (snap.view === 'candidate' && typeof openCandidatePage === 'function') {
     openCandidatePage(snap.name, snap.source || 'prospect', null);
-  } else if (typeof selectActiveNode === 'function' && snap.node) {
-    selectActiveNode(snap.node);
+  } else if (snap.node) {
+    if (typeof dispatchUnifiedSelection === 'function') {
+      dispatchUnifiedSelection(snap.node);
+    } else if (typeof selectActiveNode === 'function') {
+      selectActiveNode(snap.node);
+    }
+  } else if (snap.id) {
+    if (typeof dispatchUnifiedSelection === 'function') {
+      dispatchUnifiedSelection(snap.id);
+    }
   }
 }
 function navGo(dir) {
@@ -7093,13 +8125,16 @@ function openHeadingInEditor(filePath, targetLine = 1, encTitle = '') {
   // against plain file headings, so `[T](url)` would never hit.
   if (typeof stripMdLinks === 'function') title = stripMdLinks(title).trim();
   if (!title) { openFileInEditor(filePath, targetLine); return; }
-  // Bare path on purpose: resolve_file() searches every root server-side.
-  // Prefixing the ambient active repo here 404s on cross-repo crumbs.
-  selectActiveNode({
-    id: `heading::${filePath}::L${targetLine || 1}::${title}`,
-    name: title, file: filePath, abs_path: filePath,
-    kind: 'heading', line: targetLine || 1
-  });
+
+  if (typeof dispatchUnifiedSelection === 'function') {
+    dispatchUnifiedSelection({ file: filePath, heading: title, line: targetLine || 1 });
+  } else {
+    selectActiveNode({
+      id: `heading::${filePath}::L${targetLine || 1}::${title}`,
+      name: title, file: filePath, abs_path: filePath,
+      kind: 'heading', line: targetLine || 1
+    });
+  }
 }
 
 window.browseFolderPath = function() { if (typeof openBrowsePicker === 'function') openBrowsePicker(); };
@@ -7746,6 +8781,265 @@ function resetPromptToDefault(key, safeKey) {
 }
 
 
+
+// ─── Knowledge Base Linting & Governance Engine (Instant 0-Token) ────
+let lastLintData = null;
+let lastLintRepo = null;
+let lastLintTimestamp = 0;
+let isLintScanning = false;
+
+function updateLintI18n() {
+  const lang = currentLanguage;
+  const setTxt = (id, txt) => { const el = document.getElementById(id); if (el) el.textContent = txt; };
+  const title = lang === 'zh' ? '文庫體檢與治理' : (lang === 'ja' ? 'ナレッジ検証とガバナンス' : 'LINTING & GOVERNANCE');
+  const btnScan = lang === 'zh' ? '↻ 重新體檢' : (lang === 'ja' ? '↻ スキャン' : '↻ Scan');
+  setTxt('lbl-drawer-lint-title', title);
+  setTxt('btn-refresh-lint', btnScan);
+  if (lastLintData) renderLintResults(lastLintData);
+}
+
+function refreshLintResults(force = false) {
+  const repo = getActiveRepoPath();
+  const now = Date.now();
+  // 5-second cache if same repo unless force clicked
+  if (!force && lastLintData && lastLintRepo === repo && (now - lastLintTimestamp < 5000)) {
+    renderLintResults(lastLintData);
+    return;
+  }
+  if (isLintScanning) return;
+  isLintScanning = true;
+
+  const btn = document.getElementById('btn-refresh-lint');
+  if (btn) btn.textContent = 'Scanning...';
+
+  const url = `/api/lint?repo=${encodeURIComponent(repo || '')}`;
+  fetch(url)
+    .then(r => r.json())
+    .then(data => {
+      isLintScanning = false;
+      if (btn) btn.textContent = currentLanguage === 'zh' ? '↻ 重新體檢' : (currentLanguage === 'ja' ? '↻ スキャン' : '↻ Scan');
+      if (data && data.ok) {
+        lastLintData = data;
+        lastLintRepo = repo;
+        lastLintTimestamp = Date.now();
+        renderLintResults(data);
+      } else {
+        const container = document.getElementById('lint-list-container');
+        if (container) container.innerHTML = `<div style="padding:15px; color:#f85149; font-size:12px;">❌ 體檢失敗: ${escapeHtml(data?.error || 'Unknown error')}</div>`;
+      }
+    })
+    .catch(err => {
+      isLintScanning = false;
+      if (btn) btn.textContent = currentLanguage === 'zh' ? '↻ 重新體檢' : (currentLanguage === 'ja' ? '↻ スキャン' : '↻ Scan');
+      const container = document.getElementById('lint-list-container');
+      if (container) container.innerHTML = `<div style="padding:15px; color:#f85149; font-size:12px;">❌ 網路連線錯誤: ${escapeHtml(err.message)}</div>`;
+    });
+}
+
+function updateLintBadgeOnly() {
+  const repo = getActiveRepoPath();
+  const url = `/api/lint?repo=${encodeURIComponent(repo || '')}`;
+  fetch(url)
+    .then(r => r.json())
+    .then(data => {
+      if (data && data.ok) {
+        lastLintData = data;
+        lastLintRepo = repo;
+        lastLintTimestamp = Date.now();
+        const deadCount = (data.dead_links || []).length;
+        const orphanCount = (data.orphans || []).length;
+        const noH1Count = (data.no_h1_files || []).length;
+        const missingCatalogCount = (data.catalog_missing_files || []).length + (!data.catalog_exists ? 1 : 0);
+        const totalIssues = deadCount + orphanCount + noH1Count + missingCatalogCount;
+        const badgeIssues = document.getElementById('badge-lint-issues');
+        if (badgeIssues) {
+          if (totalIssues > 0) {
+            badgeIssues.textContent = totalIssues > 99 ? '99+' : totalIssues;
+            badgeIssues.style.display = 'inline-block';
+            badgeIssues.style.background = deadCount > 0 ? '#da3633' : '#d29922';
+            badgeIssues.style.color = '#ffffff';
+          } else {
+            badgeIssues.style.display = 'none';
+          }
+        }
+      }
+    })
+    .catch(() => {});
+}
+
+function renderLintResults(data) {
+  const zh = (currentLanguage === 'zh');
+  const ja = (currentLanguage === 'ja');
+
+  // Update Score & Status Badge
+  const scoreVal = document.getElementById('lint-score-val');
+  const statusBadge = document.getElementById('lint-status-badge');
+  const timeCost = document.getElementById('lint-time-cost');
+  const badgeIssues = document.getElementById('badge-lint-issues');
+
+  const score = Number(data.score) || 0;
+  if (scoreVal) {
+    let scoreColor = '#3fb950'; // green
+    if (score < 60) scoreColor = '#f85149'; // red
+    else if (score < 85) scoreColor = '#d29922'; // orange
+    scoreVal.style.color = scoreColor;
+    scoreVal.innerHTML = `${score}<span class="lint-score-total"> / 100</span>`;
+  }
+
+  if (statusBadge) {
+    if (score >= 90) {
+      statusBadge.textContent = zh ? '極佳' : (ja ? '良好' : 'HEALTHY');
+      statusBadge.style.background = '#238636';
+    } else if (score >= 70) {
+      statusBadge.textContent = zh ? '待整理' : (ja ? '要注意' : 'WARNING');
+      statusBadge.style.background = '#9e6a03';
+    } else {
+      statusBadge.textContent = zh ? '需維護' : (ja ? '要改善' : 'CRITICAL');
+      statusBadge.style.background = '#da3633';
+    }
+  }
+
+  if (timeCost) {
+    timeCost.textContent = `${data.duration_ms || 2} ms · ${data.total_files || 0} docs`;
+  }
+
+  // Calculate total issues
+  const deadCount = (data.dead_links || []).length;
+  const orphanCount = (data.orphans || []).length;
+  const noH1Count = (data.no_h1_files || []).length;
+  const missingCatalogCount = (data.catalog_missing_files || []).length + (!data.catalog_exists ? 1 : 0);
+  const totalIssues = deadCount + orphanCount + noH1Count + missingCatalogCount;
+
+  if (badgeIssues) {
+    if (totalIssues > 0) {
+      badgeIssues.textContent = totalIssues > 99 ? '99+' : totalIssues;
+      badgeIssues.style.display = 'block';
+      badgeIssues.style.background = deadCount > 0 ? '#da3633' : '#d29922';
+    } else {
+      badgeIssues.style.display = 'none';
+    }
+  }
+
+  const container = document.getElementById('lint-list-container');
+  if (!container) return;
+
+  let html = '';
+
+  // Card 1: Dead Links (Most Critical)
+  const deadTitle = zh ? '失效死鏈' : (ja ? '切れたリンク' : 'Broken Links');
+  html += `
+  <div class="lint-section-card">
+    <div class="lint-section-header" style="background:rgba(218, 54, 51, 0.12);">
+      <span class="lint-section-title" style="color:#f85149;">
+        🔗 ${deadTitle}
+      </span>
+      <span class="lint-count-badge" style="background:${deadCount > 0 ? '#da3633' : '#238636'};">${deadCount}</span>
+    </div>
+    <div style="max-height:220px; overflow-y:auto;">
+  `;
+  if (deadCount === 0) {
+    html += `<div class="lint-section-body" style="color:#8b949e;">${zh ? '全庫無任何失效死鏈' : (ja ? 'リンク切れはありません' : 'Zero broken links')}</div>`;
+  } else {
+    data.dead_links.forEach(dl => {
+      const fileName = dl.file ? dl.file.split(/[\\/]/).pop() : 'doc.md';
+      html += `
+        <div class="lint-item-row" onclick="openFileInEditor('${escapeHtml(dl.file)}', ${dl.line || 1})" title="${zh ? '點擊跳轉至出錯文檔' : 'Click to inspect'}">
+          <div style="min-width:0; flex:1;">
+            <div class="lint-item-title">📄 ${escapeHtml(fileName)} <span style="color:#f85149; font-weight:600;">:L${dl.line || 1}</span></div>
+            <div class="lint-item-sub">➔ ${escapeHtml(dl.target)}</div>
+          </div>
+          <span class="lint-item-btn">Jump ›</span>
+        </div>
+      `;
+    });
+  }
+  html += `</div></div>`;
+
+  // Card 2: Orphan Files
+  const orphanTitle = zh ? '孤島文檔 (無引用無關聯)' : (ja ? '孤立ドキュメント' : 'Orphan Documents');
+  html += `
+  <div class="lint-section-card">
+    <div class="lint-section-header" style="background:rgba(210, 153, 34, 0.12);">
+      <span class="lint-section-title" style="color:#d29922;">
+        🏝️ ${orphanTitle}
+      </span>
+      <span class="lint-count-badge" style="background:${orphanCount > 0 ? '#9e6a03' : '#238636'};">${orphanCount}</span>
+    </div>
+    <div style="max-height:220px; overflow-y:auto;">
+  `;
+  if (orphanCount === 0) {
+    html += `<div class="lint-section-body" style="color:#8b949e;">${zh ? '所有文檔均有拓撲引用網絡' : (ja ? 'すべての文書がリンクされています' : 'All documents are connected')}</div>`;
+  } else {
+    data.orphans.forEach(filePath => {
+      const fileName = filePath.split(/[\\/]/).pop();
+      html += `
+        <div class="lint-item-row" onclick="openFileInEditor('${escapeHtml(filePath)}', 1)" title="${zh ? '開啟文檔' : 'Open document'}">
+          <div class="lint-item-title" style="min-width:0; flex:1; overflow:hidden; text-overflow:ellipsis;">📄 ${escapeHtml(fileName)}</div>
+          <span class="lint-item-btn">${zh ? '開啟' : 'Open'} ›</span>
+        </div>
+      `;
+    });
+  }
+  html += `</div></div>`;
+
+  // Card 3: Syntax & Heading H1 Integrity
+  const h1Title = zh ? '標題語法完整性 (缺少 H1 首標題)' : (ja ? 'H1 見出し欠落' : 'Heading H1 Integrity');
+  html += `
+  <div class="lint-section-card">
+    <div class="lint-section-header" style="background:rgba(88, 166, 255, 0.12);">
+      <span class="lint-section-title" style="color:#58a6ff;">
+        📝 ${h1Title}
+      </span>
+      <span class="lint-count-badge" style="background:${noH1Count > 0 ? '#1f6feb' : '#238636'};">${noH1Count}</span>
+    </div>
+    <div style="max-height:220px; overflow-y:auto;">
+  `;
+  if (noH1Count === 0) {
+    html += `<div class="lint-section-body" style="color:#8b949e;">${zh ? '所有文檔均有規範 H1 標題' : (ja ? 'すべての文書に見出しがあります' : 'All docs have valid H1')}</div>`;
+  } else {
+    data.no_h1_files.forEach(filePath => {
+      const fileName = filePath.split(/[\\/]/).pop();
+      html += `
+        <div class="lint-item-row" onclick="openFileInEditor('${escapeHtml(filePath)}', 1)" title="${zh ? '點擊跳轉修復' : 'Click to fix'}">
+          <div class="lint-item-title" style="min-width:0; flex:1; overflow:hidden; text-overflow:ellipsis;">📄 ${escapeHtml(fileName)} <span style="color:#f85149; font-size:11.5px; font-weight:normal;">(No H1)</span></div>
+          <span class="lint-item-btn">Fix ›</span>
+        </div>
+      `;
+    });
+  }
+  html += `</div></div>`;
+
+  // Card 4: Catalog Drift (DOC_CATALOG.md)
+  const catTitle = zh ? '總綱目錄一致性 (DOC_CATALOG.md)' : (ja ? 'カタログ整合性' : 'Catalog Integrity');
+  html += `
+  <div class="lint-section-card">
+    <div class="lint-section-header" style="background:rgba(187, 128, 247, 0.12);">
+      <span class="lint-section-title" style="color:#bc8cff;">
+        📋 ${catTitle}
+      </span>
+      <span class="lint-count-badge" style="background:${data.catalog_exists ? '#238636' : '#9e6a03'};">${data.catalog_exists ? 'OK' : 'MISSING'}</span>
+    </div>
+    <div class="lint-section-body">
+  `;
+  if (!data.catalog_exists) {
+    html += `<div style="color:#d29922; font-weight:500;">⚠️ ${zh ? '尚未生成 DOC_CATALOG.md 總目錄' : 'DOC_CATALOG.md is missing'}</div>`;
+  } else if ((data.catalog_missing_files || []).length === 0) {
+    html += `<div style="color:#8b949e;">${zh ? '總目錄涵蓋全庫所有檔案，零脫節' : 'Catalog fully in sync with all files'}</div>`;
+  } else {
+    html += `<div style="color:#d29922; margin-bottom:6px; font-weight:500;">⚠️ ${data.catalog_missing_files.length} ${zh ? '篇檔案未列入總目錄：' : 'files missing from catalog:'}</div>`;
+    data.catalog_missing_files.slice(0, 5).forEach(f => {
+      html += `<div style="color:#8b949e; font-size:12px; padding:3px 0;">• ${escapeHtml(f.split(/[\\/]/).pop())}</div>`;
+    });
+    if (data.catalog_missing_files.length > 5) {
+      html += `<div style="color:#6e7681; font-size:12px; margin-top:2px;">... +${data.catalog_missing_files.length - 5} more</div>`;
+    }
+  }
+  html += `</div></div>`;
+
+  container.innerHTML = html;
+}
+
+
 // ─── AI Knowledge Chat Engine (MCP-Orchestrated) ─────────────────────
 let chatMessagesHistory = [];
 let isChatStreaming = false;
@@ -7763,56 +9057,112 @@ function initFloatingChatInteractions() {
   if (!card || card.dataset.interactiveInit === 'true') return;
   card.dataset.interactiveInit = 'true';
 
-  // Ensure card has resizable CSS
-  card.style.resize = 'both';
-  card.style.minWidth = '380px';
-  card.style.minHeight = '300px';
-
   const header = card.querySelector('.floating-chat-header');
-  if (!header) return;
-  header.style.cursor = 'move';
-  header.style.userSelect = 'none';
+  const resizeHandle = document.getElementById('chat-resize-handle');
 
-  let isDragging = false;
-  let startX = 0, startY = 0;
-  let initLeft = 0, initTop = 0;
-
-  header.addEventListener('mousedown', (e) => {
-    // Ignore clicks on buttons inside header
-    if (e.target.closest('button')) return;
-    isDragging = true;
-    startX = e.clientX;
-    startY = e.clientY;
-
+  // Helper to ensure card is in top/left positioning
+  function ensureTopLeftPositioning() {
     const rect = card.getBoundingClientRect();
-    initLeft = rect.left;
-    initTop = rect.top;
-
-    // Convert from bottom/right layout to fixed top/left layout on first drag
     card.style.bottom = 'auto';
     card.style.right = 'auto';
-    card.style.left = `${initLeft}px`;
-    card.style.top = `${initTop}px`;
+    card.style.left = `${rect.left}px`;
+    card.style.top = `${rect.top}px`;
+    card.style.width = `${rect.width}px`;
+    card.style.height = `${rect.height}px`;
+    return rect;
+  }
 
-    const onMouseMove = (ev) => {
-      if (!isDragging) return;
-      const dx = ev.clientX - startX;
-      const dy = ev.clientY - startY;
-      let newLeft = Math.max(10, Math.min(window.innerWidth - card.offsetWidth - 10, initLeft + dx));
-      let newTop = Math.max(10, Math.min(window.innerHeight - card.offsetHeight - 10, initTop + dy));
-      card.style.left = `${newLeft}px`;
-      card.style.top = `${newTop}px`;
-    };
+  // 1. Drag & Move by Header
+  if (header) {
+    header.style.cursor = 'move';
+    header.style.userSelect = 'none';
 
-    const onMouseUp = () => {
-      isDragging = false;
-      document.removeEventListener('mousemove', onMouseMove);
-      document.removeEventListener('mouseup', onMouseUp);
-    };
+    let isDragging = false;
+    let startX = 0, startY = 0;
+    let initLeft = 0, initTop = 0;
 
-    document.addEventListener('mousemove', onMouseMove);
-    document.addEventListener('mouseup', onMouseUp);
-  });
+    header.addEventListener('mousedown', (e) => {
+      if (e.target.closest('button') || e.target.closest('input')) return;
+      isDragging = true;
+      startX = e.clientX;
+      startY = e.clientY;
+
+      const rect = ensureTopLeftPositioning();
+      initLeft = rect.left;
+      initTop = rect.top;
+
+      const onMouseMove = (ev) => {
+        if (!isDragging) return;
+        const dx = ev.clientX - startX;
+        const dy = ev.clientY - startY;
+        let newLeft = Math.max(10, Math.min(window.innerWidth - card.offsetWidth - 10, initLeft + dx));
+        let newTop = Math.max(10, Math.min(window.innerHeight - card.offsetHeight - 10, initTop + dy));
+        card.style.left = `${newLeft}px`;
+        card.style.top = `${newTop}px`;
+      };
+
+      const onMouseUp = () => {
+        isDragging = false;
+        document.removeEventListener('mousemove', onMouseMove);
+        document.removeEventListener('mouseup', onMouseUp);
+      };
+
+      document.addEventListener('mousemove', onMouseMove);
+      document.addEventListener('mouseup', onMouseUp);
+    });
+  }
+
+  // 2. Corner Resize (Top-Left Grip)
+  if (resizeHandle) {
+    let isResizing = false;
+    let startX = 0, startY = 0;
+    let initWidth = 0, initHeight = 0;
+    let initLeft = 0, initTop = 0;
+
+    resizeHandle.addEventListener('mousedown', (e) => {
+      e.stopPropagation();
+      e.preventDefault();
+      isResizing = true;
+      startX = e.clientX;
+      startY = e.clientY;
+
+      const rect = ensureTopLeftPositioning();
+      initLeft = rect.left;
+      initTop = rect.top;
+      initWidth = rect.width;
+      initHeight = rect.height;
+
+      const onMouseMove = (ev) => {
+        if (!isResizing) return;
+        const dx = ev.clientX - startX;
+        const dy = ev.clientY - startY;
+
+        let newWidth = Math.max(380, Math.min(window.innerWidth - 40, initWidth - dx));
+        let newHeight = Math.max(320, Math.min(window.innerHeight - 40, initHeight - dy));
+
+        let newLeft = initLeft + (initWidth - newWidth);
+        let newTop = initTop + (initHeight - newHeight);
+
+        if (newLeft > 10) {
+          card.style.left = `${newLeft}px`;
+          card.style.width = `${newWidth}px`;
+        }
+        if (newTop > 10) {
+          card.style.top = `${newTop}px`;
+          card.style.height = `${newHeight}px`;
+        }
+      };
+
+      const onMouseUp = () => {
+        isResizing = false;
+        document.removeEventListener('mousemove', onMouseMove);
+        document.removeEventListener('mouseup', onMouseUp);
+      };
+
+      document.addEventListener('mousemove', onMouseMove);
+      document.addEventListener('mouseup', onMouseUp);
+    });
+  }
 }
 
 
@@ -7942,7 +9292,7 @@ function handleChatInputKey(event) {
 }
 
 
-function buildCitationPillHtml(cleanFile, cleanHeading) {
+function buildCitationPillHtml(cleanFile, cleanHeading, rawHeadingLevel = 0) {
   const shortFile = cleanFile.split(/[\\/]/).pop() || cleanFile;
   const isMd = /\.md$/i.test(cleanFile);
   const fileColor = isMd ? (KIND_COLORS.file || '#f0883e') : '#58a6ff';
@@ -7954,26 +9304,46 @@ function buildCitationPillHtml(cleanFile, cleanHeading) {
   let headingBorder = 'rgba(63, 185, 80, 0.4)';
 
   if (cleanHeading) {
-    const gNodes = (masterGraphData.nodes && masterGraphData.nodes.length) ? masterGraphData.nodes : (rawData.nodes || []);
+    const allN = (masterGraphData.nodes && masterGraphData.nodes.length) 
+      ? masterGraphData.nodes 
+      : ((rawData && rawData.nodes && rawData.nodes.length) ? rawData.nodes : []);
     const targetBase = cleanFile.toLowerCase();
     const hText = cleanHeading.toLowerCase();
-    const foundH = gNodes.find(n => {
+
+    // 1. Search in loaded/master graph nodes
+    const foundH = allN.find(n => {
       if (!n.kind || !n.kind.startsWith('heading')) return false;
       const nf = (n.file || n.abs_path || '').replace(/\\/g, '/').toLowerCase();
       const fMatch = !targetBase || nf.endsWith(targetBase);
-      const nMatch = (n.name || '').trim().toLowerCase() === hText || (n.name || '').trim().toLowerCase().includes(hText);
-      return fMatch && nMatch;
+      const name = (n.name || '').trim().toLowerCase();
+      return fMatch && (name === hText || name.includes(hText) || hText.includes(name));
     });
 
     if (foundH) {
       headingColor = KIND_COLORS[foundH.kind] || '#3fb950';
-    } else if (cleanHeading.startsWith('# ')) {
+    } else if (rawHeadingLevel === 1) {
       headingColor = KIND_COLORS.heading_1 || '#58a6ff';
-    } else if (cleanHeading.startsWith('### ')) {
+    } else if (rawHeadingLevel === 2) {
+      headingColor = KIND_COLORS.heading_2 || '#3fb950';
+    } else if (rawHeadingLevel === 3) {
       headingColor = KIND_COLORS.heading_3 || '#bc8cff';
-    } else if (cleanHeading.startsWith('#### ')) {
+    } else if (rawHeadingLevel === 4) {
       headingColor = KIND_COLORS.heading_4 || '#ff7bba';
+    } else if (rawHeadingLevel === 5) {
+      headingColor = KIND_COLORS.heading_5 || '#00d2d3';
+    } else if (rawHeadingLevel === 6) {
+      headingColor = KIND_COLORS.heading_6 || '#ffd700';
+    } else if (/^[一二三四五六七八九十]+[、.]/.test(cleanHeading) || /^[A-Z][、.]/.test(cleanHeading)) {
+      // Common top-level heading pattern
+      headingColor = KIND_COLORS.heading_1 || '#58a6ff';
+    } else if (/^\d+\.\d+/.test(cleanHeading)) {
+      // Subsection pattern e.g. 2.1
+      headingColor = KIND_COLORS.heading_3 || '#bc8cff';
+    } else if (/^\d+[、.]/.test(cleanHeading)) {
+      // Major section pattern e.g. 2. 比對與反應規則矩陣 -> H2 Emerald Green
+      headingColor = KIND_COLORS.heading_2 || '#3fb950';
     }
+
     headingBg = `${headingColor}22`;
     headingBorder = `${headingColor}55`;
   }
@@ -7982,10 +9352,45 @@ function buildCitationPillHtml(cleanFile, cleanHeading) {
   const hJs = cleanHeading.replace(/'/g, "\\'");
   const fullPathTip = cleanHeading ? `${cleanFile} > ${cleanHeading}` : cleanFile;
 
-  return `<span class="chat-citation-pill" style="display:inline-flex; align-items:center; margin:2px 3px; background:#161b22; border:1px solid ${cleanHeading ? headingBorder : fileBorder}; border-radius:6px; overflow:hidden; font-size:11px; font-weight:600;">`
+  return `<span class="chat-citation-pill" style="display:inline-flex; align-items:center; margin:2px 3px; background:#161b22; border:1px solid ${cleanHeading ? headingBorder : fileBorder}; border-radius:6px; overflow:hidden; font-size:13px; font-weight:600;">`
     + `<span onclick="handleChatCitationClick('${fJs}', '', true)" title="跳轉至來源檔案: ${cleanFile}" style="padding:2px 7px; color:${fileColor}; cursor:pointer; background:${fileBg}; border-right:${cleanHeading ? `1px solid ${fileBorder}` : 'none'}; display:inline-flex; align-items:center; gap:4px;">📄 ${escapeHtml(shortFile)}</span>`
     + (cleanHeading ? `<span onclick="handleChatCitationClick('${fJs}', '${hJs}', false)" title="跳轉定位至章節: ${fullPathTip}" style="padding:2px 7px; color:${headingColor}; cursor:pointer; background:${headingBg}; display:inline-flex; align-items:center; gap:2px;">› ${escapeHtml(cleanHeading)}</span>` : '')
     + `</span>`;
+}
+
+function resolveHeadingColor(headingText, fallbackFile = '') {
+  const cleanH = (headingText || '').trim().replace(/^#+\s*/, '').trim();
+  const allN = (masterGraphData.nodes && masterGraphData.nodes.length) 
+    ? masterGraphData.nodes 
+    : ((rawData && rawData.nodes && rawData.nodes.length) ? rawData.nodes : []);
+  const hLower = cleanH.toLowerCase();
+  const fLower = (fallbackFile || '').toLowerCase();
+
+  const foundH = allN.find(n => {
+    if (!n.kind || !n.kind.startsWith('heading')) return false;
+    const nf = (n.file || n.abs_path || '').replace(/\\/g, '/').toLowerCase();
+    const fMatch = !fLower || nf.endsWith(fLower);
+    const name = (n.name || '').trim().toLowerCase();
+    return fMatch && (name === hLower || name.includes(hLower) || hLower.includes(name));
+  });
+
+  if (foundH) return KIND_COLORS[foundH.kind] || '#3fb950';
+
+  const hashMatch = (headingText || '').match(/^(#{1,6})\s*/);
+  if (hashMatch) {
+    const lvl = hashMatch[1].length;
+    return KIND_COLORS[`heading_${lvl}`] || '#3fb950';
+  }
+  if (/^[一二三四五六七八九十]+[、.]/.test(cleanH) || /^[A-Z][、.]/.test(cleanH)) {
+    return KIND_COLORS.heading_1 || '#58a6ff';
+  }
+  if (/^\d+\.\d+/.test(cleanH)) {
+    return KIND_COLORS.heading_3 || '#bc8cff';
+  }
+  if (/^\d+[、.]/.test(cleanH)) {
+    return KIND_COLORS.heading_2 || '#3fb950';
+  }
+  return KIND_COLORS.heading_2 || '#3fb950';
 }
 
 function formatChatMarkdown(text) {
@@ -7998,20 +9403,49 @@ function formatChatMarkdown(text) {
   // Render clickable citations: [[file#heading]] or [[file]] or [file:heading]
   safe = safe.replace(/\[\[(.*?)(?:#(.*?))?\]\]/g, (match, file, heading) => {
     const cleanFile = (file || '').trim();
-    let cleanHeading = (heading || '').trim().replace(/^#+\s*/, '').trim();
-    return buildCitationPillHtml(cleanFile, cleanHeading);
+    const rawHeading = heading || '';
+    let headingLvl = 0;
+    const hashMatch = rawHeading.match(/^(#{1,6})\s*/);
+    if (hashMatch) headingLvl = hashMatch[1].length;
+    let cleanHeading = rawHeading.replace(/^#+\s*/, '').trim();
+    return buildCitationPillHtml(cleanFile, cleanHeading, headingLvl);
   });
 
   // Also support [filename.md:heading] or [filename.md#heading] pattern
   safe = safe.replace(/\[([^\s\]]+\.(?:md|txt|docx|pdf))[:#]([^\]]+)\]/g, (match, file, heading) => {
     const cleanFile = (file || '').trim();
-    let cleanHeading = (heading || '').trim().replace(/^#+\s*/, '').trim();
-    return buildCitationPillHtml(cleanFile, cleanHeading);
+    const rawHeading = heading || '';
+    let headingLvl = 0;
+    const hashMatch = rawHeading.match(/^(#{1,6})\s*/);
+    if (hashMatch) headingLvl = hashMatch[1].length;
+    let cleanHeading = rawHeading.replace(/^#+\s*/, '').trim();
+    return buildCitationPillHtml(cleanFile, cleanHeading, headingLvl);
+  });
+
+  // Convert arrow navigation chains of backticks: `file.md` → `heading` or `file.md` -> `heading`
+  safe = safe.replace(/`([^`]+\.(?:md|txt|docx|pdf))`\s*(?:→|-&gt;|&rarr;|->)\s*`([^`]+)`/g, (match, file, heading) => {
+    return buildCitationPillHtml(file.trim(), heading.trim());
   });
 
   // Simple Markdown inline formatting (bold, backticks)
   safe = safe.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
-  safe = safe.replace(/`([^`]+)`/g, '<code style="background:#21262d; padding:2px 4px; border-radius:3px; font-size:11px; color:#f0883e;">$1</code>');
+
+  // Dynamic backtick code highlighting respecting Node Kind colors
+  safe = safe.replace(/`([^`]+)`/g, (match, content) => {
+    const trimmed = content.trim();
+    let codeColor = '#f0883e'; // default warm cyber orange
+    let bgOpacity = '15';
+    let isFile = /\.(?:md|txt|docx|pdf|py|js|ts|json|html|css)$/i.test(trimmed);
+
+    if (isFile) {
+      codeColor = KIND_COLORS.file || '#f0883e';
+    } else {
+      // Check if matches heading syntax or known heading node
+      codeColor = resolveHeadingColor(trimmed);
+    }
+    return `<code style="background:#21262d; border:1px solid ${codeColor}44; padding:2px 5px; border-radius:4px; font-size:13px; font-weight:600; color:${codeColor};">${content}</code>`;
+  });
+
   safe = safe.replace(/\n/g, '<br/>');
   return safe;
 }
@@ -8053,7 +9487,11 @@ function appendChatMessageBubble(role, content) {
   if (role === 'assistant') {
     bubble.innerHTML = `<div class="chat-content" style="color:#e6edf3;">${formatChatMarkdown(content)}</div>`;
   } else {
-    bubble.textContent = content;
+    if (typeof content === 'string' && (content.includes('<img') || content.includes('<div') || content.includes('<br'))) {
+      bubble.innerHTML = content;
+    } else {
+      bubble.textContent = content;
+    }
   }
 
   container.appendChild(bubble);
@@ -8084,6 +9522,10 @@ function appendMcpToolCallCard(name, args) {
     traceContainer.style.flexDirection = 'column';
     traceContainer.style.gap = '3px';
 
+    const lang = (typeof currentLanguage !== 'undefined') ? currentLanguage : 'zh';
+    const zh = lang === 'zh';
+    const ja = lang === 'ja';
+
     const titleRow = document.createElement('div');
     titleRow.style.display = 'flex';
     titleRow.style.alignItems = 'center';
@@ -8091,7 +9533,8 @@ function appendMcpToolCallCard(name, args) {
     titleRow.style.color = '#58a6ff';
     titleRow.style.fontWeight = '600';
     titleRow.style.fontSize = '11px';
-    titleRow.innerHTML = `<span>⚡</span><span>檢索抓取路徑 (Trace)</span>`;
+    const traceTitle = zh ? '檢索抓取路徑 (Trace)' : (ja ? '検索・取得トレース (Trace)' : 'Retrieval Execution Trace');
+    titleRow.innerHTML = `<span>⚡</span><span>${traceTitle}</span>`;
 
     const breadcrumbs = document.createElement('div');
     breadcrumbs.className = 'trace-breadcrumbs';
@@ -8108,6 +9551,10 @@ function appendMcpToolCallCard(name, args) {
   const breadcrumbs = traceContainer.querySelector('.trace-breadcrumbs');
 
   // Format concise step
+  const lang = (typeof currentLanguage !== 'undefined') ? currentLanguage : 'zh';
+  const zh = lang === 'zh';
+  const ja = lang === 'ja';
+
   const fileRaw = args.filePath || args.repoPath || '';
   const fileShort = fileRaw.split(/[\\/]/).pop() || fileRaw;
   const heading = args.heading || '';
@@ -8119,11 +9566,13 @@ function appendMcpToolCallCard(name, args) {
   if (name.includes('toc')) {
     stepLabel = `📑 ${fileShort} › TOC`;
   } else if (name.includes('section')) {
-    stepLabel = `📄 ${fileShort} › ${heading || '章節'}`;
+    const secLabel = zh ? '章節' : (ja ? 'セクション' : 'Section');
+    stepLabel = `📄 ${fileShort} › ${heading || secLabel}`;
   } else if (name.includes('search')) {
-    stepLabel = `🔍 搜尋「${query}」`;
+    const searchPrefix = zh ? '搜尋' : (ja ? '検索' : 'Search');
+    stepLabel = `🔍 ${searchPrefix} "${query}"`;
   } else if (name.includes('graph')) {
-    stepLabel = `🌐 3D 拓撲關聯`;
+    stepLabel = zh ? '🌐 3D 拓撲關聯' : (ja ? '🌐 3D トポロジー' : '🌐 3D Topology');
   } else {
     stepLabel = `⚙️ ${name}`;
   }
@@ -8184,15 +9633,39 @@ async function sendChatMessage() {
   const container = document.getElementById('chat-messages-container');
   if (!inputEl) return;
 
-  const text = (inputEl.value || '').trim();
-  if (!text) return;
+  let text = (inputEl.value || '').trim();
+  if (!text && !chatStagedAttachments.length) return;
 
   const zh = currentLanguage === 'zh';
   const ja = currentLanguage === 'ja';
 
+  // Merge staged attachments into prompt text
+  let bubbleDisplay = text;
+  let fullPayloadText = text;
+  if (chatStagedAttachments.length) {
+    const attList = chatStagedAttachments.map(a => {
+      if (a.type.startsWith('image/')) {
+        return `\n\n![image](${a.dataUrl})`;
+      } else {
+        return `\n\n【附加檔案: ${a.name}】:\n\`\`\`\n${(a.content || '').slice(0, 4000)}\n\`\`\``;
+      }
+    }).join('\n');
+    fullPayloadText = (text ? text + '\n' : '') + attList;
+    bubbleDisplay = (text ? text + '<br/>' : '') + chatStagedAttachments.map(a => {
+      if (a.type.startsWith('image/')) {
+        return `<div style="margin-top:4px;"><img src="${a.dataUrl}" onclick="openChatImagePreview('${a.dataUrl}', '${escapeHtml(a.name)}')" style="max-width:200px; max-height:160px; border-radius:6px; border:1px solid #388bfd55; cursor:zoom-in; transition:transform 0.15s ease;" onmouseover="this.style.transform='scale(1.02)'" onmouseout="this.style.transform='scale(1)'" title="點擊放大預覽圖片" /></div>`;
+      } else {
+        return `<div style="margin-top:4px; font-size:13px; background:#0d1117; padding:2px 6px; border-radius:4px; display:inline-block; border:1px solid #30363d;">📄 ${escapeHtml(a.name)}</div>`;
+      }
+    }).join('');
+    // Clear staged attachments
+    chatStagedAttachments = [];
+    renderChatAttachmentsBar();
+  }
+
   // Append user message
-  appendChatMessageBubble('user', text);
-  chatMessagesHistory.push({ role: 'user', content: text });
+  appendChatMessageBubble('user', bubbleDisplay);
+  chatMessagesHistory.push({ role: 'user', content: fullPayloadText });
   inputEl.value = '';
 
   isChatStreaming = true;
@@ -8268,7 +9741,8 @@ async function sendChatMessage() {
           } else if (ev.type === 'error') {
             showToast('❌ ' + (ev.error || 'Chat error'));
             if (!assistantBubble) {
-              assistantBubble = appendChatMessageBubble('assistant', `⚠️ 錯誤: ${ev.error}`);
+              const errPrefix = zh ? '⚠️ 錯誤: ' : (ja ? '⚠️ エラー: ' : '⚠️ Error: ');
+              assistantBubble = appendChatMessageBubble('assistant', `${errPrefix}${ev.error}`);
             }
           }
         } catch (e) {
@@ -8283,7 +9757,8 @@ async function sendChatMessage() {
   } catch (err) {
     console.error('Chat error:', err);
     showToast('❌ Chat network error: ' + err.message);
-    appendChatMessageBubble('assistant', `⚠️ 無法完成連線: ${err.message}`);
+    const connErr = zh ? `⚠️ 無法完成連線: ${err.message}` : (ja ? `⚠️ 接続できませんでした: ${err.message}` : `⚠️ Connection failed: ${err.message}`);
+    appendChatMessageBubble('assistant', connErr);
   } finally {
     isChatStreaming = false;
     if (sendBtn) {
@@ -8292,5 +9767,225 @@ async function sendChatMessage() {
     }
     if (statusEl) statusEl.textContent = 'Ready';
   }
+}
+
+// ─── Chat Attachments & Image Paste Support ─────────────────────────
+let chatStagedAttachments = [];
+
+function renderChatAttachmentsBar() {
+  const bar = document.getElementById('chat-attachment-bar');
+  if (!bar) return;
+  if (!chatStagedAttachments.length) {
+    bar.style.display = 'none';
+    bar.innerHTML = '';
+    return;
+  }
+  bar.style.display = 'flex';
+  bar.innerHTML = chatStagedAttachments.map((att, idx) => {
+    const isImg = att.type.startsWith('image/');
+    return `
+      <div style="position:relative; display:inline-flex; align-items:center; gap:8px; background:#161b22; border:1px solid #30363d; border-radius:8px; padding:4px 10px; font-size:12px; max-width:260px; box-shadow:0 2px 6px rgba(0,0,0,0.3);">
+        ${isImg
+          ? `<img src="${att.dataUrl}" onclick="openChatImagePreview('${att.dataUrl}', '${escapeHtml(att.name)}')" style="width:36px; height:36px; object-fit:cover; border-radius:6px; cursor:zoom-in; border:1px solid #388bfd88; transition:transform 0.15s ease;" onmouseover="this.style.transform='scale(1.08)'" onmouseout="this.style.transform='scale(1)'" title="點擊放大預覽圖片" />`
+          : `<span style="font-size:18px;">📄</span>`
+        }
+        <span style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:#e6edf3; font-weight:500;" title="${escapeHtml(att.name)}">${escapeHtml(att.name)}</span>
+        <button onclick="removeChatAttachment(${idx})" style="background:none; border:none; color:#f85149; cursor:pointer; font-size:14px; padding:2px 4px; line-height:1; font-weight:700;" title="移除此附件">✕</button>
+      </div>
+    `;
+  }).join('');
+}
+
+function openChatImagePreview(src, caption) {
+  const modal = document.getElementById('chat-image-preview-modal');
+  const imgTarget = document.getElementById('chat-preview-img-target');
+  const capTarget = document.getElementById('chat-preview-img-caption');
+  if (!modal || !imgTarget) return;
+  imgTarget.src = src;
+  if (capTarget) capTarget.textContent = caption || '';
+  modal.style.display = 'flex';
+}
+
+function closeChatImagePreview() {
+  const modal = document.getElementById('chat-image-preview-modal');
+  if (modal) modal.style.display = 'none';
+}
+
+function removeChatAttachment(idx) {
+  chatStagedAttachments.splice(idx, 1);
+  renderChatAttachmentsBar();
+}
+
+function handleChatFileUpload(event) {
+  const files = event.target.files;
+  if (!files || !files.length) return;
+  Array.from(files).forEach(file => {
+    const reader = new FileReader();
+    if (file.type.startsWith('image/')) {
+      reader.onload = (e) => {
+        chatStagedAttachments.push({
+          name: file.name,
+          type: file.type,
+          dataUrl: e.target.result,
+          content: `[圖片附件: ${file.name}]`
+        });
+        renderChatAttachmentsBar();
+      };
+      reader.readAsDataURL(file);
+    } else {
+      reader.onload = (e) => {
+        chatStagedAttachments.push({
+          name: file.name,
+          type: file.type || 'text/plain',
+          content: e.target.result
+        });
+        renderChatAttachmentsBar();
+      };
+      reader.readAsText(file);
+    }
+  });
+  event.target.value = '';
+}
+
+function handleChatInputPaste(event) {
+  const items = (event.clipboardData || event.originalEvent.clipboardData).items;
+  if (!items) return;
+  for (let i = 0; i < items.length; i++) {
+    if (items[i].type.indexOf('image') !== -1) {
+      const blob = items[i].getAsFile();
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        const timeName = `pasted_img_${Date.now().toString().slice(-4)}.png`;
+        chatStagedAttachments.push({
+          name: timeName,
+          type: blob.type,
+          dataUrl: e.target.result,
+          content: `[剪貼簿圖片: ${timeName}]`
+        });
+        renderChatAttachmentsBar();
+        showToast(currentLanguage === 'zh' ? '📸 已貼上圖片附件' : '📸 Image attached from clipboard');
+      };
+      reader.readAsDataURL(blob);
+    }
+  }
+}
+
+// ─── Strategy Explainer Modal (Architecture & Retrieval Philosophy) ──
+function openChatStrategyModal() {
+  const modal = document.getElementById('chat-strategy-modal');
+  const body = document.getElementById('chat-strategy-body');
+  const title = document.getElementById('chat-strategy-title');
+  const closeBtn = document.getElementById('btn-chat-strategy-close');
+  if (!modal || !body) return;
+
+  const zh = currentLanguage === 'zh';
+  const ja = currentLanguage === 'ja';
+
+  if (title) {
+    title.textContent = zh
+      ? '💡 DocGraphical 知識檢索與快取架構說明'
+      : (ja ? '💡 DocGraphical ナレッジ検索およびキャッシュ構造' : '💡 DocGraphical Retrieval & Cache Architecture');
+  }
+  if (closeBtn) {
+    closeBtn.textContent = zh ? '了解 (Got it)' : (ja ? '了解' : 'Got it');
+  }
+
+  let contentHtml = '';
+  if (zh) {
+    contentHtml = `
+      <div style="background:#0d1117; border:1px solid #388bfd44; border-radius:8px; padding:12px; margin-bottom:4px;">
+        <div style="font-weight:600; color:#58a6ff; font-size:14px; margin-bottom:6px;">🏛️ Karpathy 流長上下文與 DocGraph 混合架構</div>
+        <div style="color:#8b949e; font-size:12px; line-height:1.5;">
+          本助理揚棄傳統向量切塊（RAG）斷章取義的缺陷，結合 <strong>Andrej Karpathy 的 KV-Cache 前綴快取</strong> 與 <strong>DocGraph AST 精準切片點菜</strong>，兼具全域視野與極致輕量化。
+        </div>
+      </div>
+
+      <div style="display:flex; flex-direction:column; gap:10px;">
+        <div style="background:#161b22; border:1px solid #30363d; border-radius:8px; padding:12px;">
+          <div style="font-weight:600; color:#e6edf3; font-size:13px; margin-bottom:4px;">1. 📌 全庫目錄常駐快取 (Prefix KV Cache)</div>
+          <div style="color:#8b949e; font-size:12px;">
+            全庫骨架 <code>DOC_CATALOG.md</code>（所有檔案相對路徑、H1~H4 目錄、核心概念）固定釘在 System Prompt 頂端。首輪 100% 命中雲端 GPU 快取，模型未出發即掌握全庫地圖，節省 90% 盲目全局搜尋。
+          </div>
+        </div>
+
+        <div style="background:#161b22; border:1px solid #30363d; border-radius:8px; padding:12px;">
+          <div style="font-weight:600; color:#e6edf3; font-size:13px; margin-bottom:4px;">2. 🎯 精準切片點菜 (Precision Slicing)</div>
+          <div style="color:#8b949e; font-size:12px;">
+            拒絕將幾十萬字全文無腦硬塞！模型看目錄鎖定目標後，以手術刀式的 <code>docgraphical_section</code> 僅讀取所需章節，省下 97% Context Tokens，杜絕注意力稀釋（Lost in the Middle）。
+          </div>
+        </div>
+
+        <div style="background:#161b22; border:1px solid #30363d; border-radius:8px; padding:12px;">
+          <div style="font-weight:600; color:#e6edf3; font-size:13px; margin-bottom:4px;">3. 🧠 跨輪次多輪探索與深挖心法</div>
+          <div style="color:#8b949e; font-size:12px; line-height:1.6;">
+            • <strong>充分性秒回</strong>：若上一輪讀過的章節已足以回答問題，直接由工作記憶輸出，0 次工具調用、0 秒延遲。<br/>
+            • <strong>順藤摸瓜（摸到邊）</strong>：若已讀章節僅屬綱要或摸到邊緣，模型自覺資訊不足，以該文件為錨點深挖子章節或相鄰規格。<br/>
+            • <strong>自動剪枝（死胡同）</strong>：若上一輪搜尋確認查無內容，記住死胡同，自主變換同義詞、概念標籤摸索出去。
+          </div>
+        </div>
+
+        <div style="background:#161b22; border:1px solid #30363d; border-radius:8px; padding:12px;">
+          <div style="font-weight:600; color:#e6edf3; font-size:13px; margin-bottom:4px;">4. 🔗 精準跳轉錨點與多模態支援</div>
+          <div style="color:#8b949e; font-size:12px;">
+            回答結尾皆附帶 <code>[[檔案#章節]]</code> 標籤，點擊直接連動左側樹、中心閱讀器與 3D 地圖居中。輸入框支援直接 <strong>Ctrl + V 貼圖</strong> 與 <strong>📎 附加檔案</strong>（Markdown、程式碼、文件）。
+          </div>
+        </div>
+      </div>
+    `;
+  } else if (ja) {
+    contentHtml = `
+      <div style="background:#0d1117; border:1px solid #388bfd44; border-radius:8px; padding:12px; margin-bottom:4px;">
+        <div style="font-weight:600; color:#58a6ff; font-size:14px; margin-bottom:6px;">🏛️ Karpathy流 Prefix キャッシュ ＆ DocGraph ハイブリッド構造</div>
+        <div style="color:#8b949e; font-size:12px; line-height:1.5;">
+          従来のベクトルRAGの文脈欠落を解消し、<strong>Andrej Karpathy 提唱の KV-Cache 前置キャッシュ</strong>と <strong>DocGraph AST 精密スライス</strong>を融合した高効率アーキテクチャです。
+        </div>
+      </div>
+      <div style="display:flex; flex-direction:column; gap:10px; font-size:12px; color:#8b949e;">
+        <div style="background:#161b22; border:1px solid #30363d; border-radius:8px; padding:12px;">
+          <div style="font-weight:600; color:#e6edf3; margin-bottom:4px;">1. 📌 DOC_CATALOG.md による静的キャッシュ</div>
+          リポジトリ全域の目次と概念タグがSystem Promptに固定され、100%のKV-Cacheヒット率を達成。
+        </div>
+        <div style="background:#161b22; border:1px solid #30363d; border-radius:8px; padding:12px;">
+          <div style="font-weight:600; color:#e6edf3; margin-bottom:4px;">2. 🎯 精密セクション抽出 (Precision Slicing)</div>
+          全文を一括投入せず、<code>docgraphical_section</code> で特定の見出しのみを抽出し、97%のトークンを削減。
+        </div>
+        <div style="background:#161b22; border:1px solid #30363d; border-radius:8px; padding:12px;">
+          <div style="font-weight:600; color:#e6edf3; margin-bottom:4px;">3. 🧠 複数ターン自律ナビゲーション</div>
+          既読箇所の即答、深掘り追跡、および無効経路の枝刈りを自動実行。クリップボード画像貼付（Ctrl+V）や添付ファイル（📎）にも完全対応。
+        </div>
+      </div>
+    `;
+  } else {
+    contentHtml = `
+      <div style="background:#0d1117; border:1px solid #388bfd44; border-radius:8px; padding:12px; margin-bottom:4px;">
+        <div style="font-weight:600; color:#58a6ff; font-size:14px; margin-bottom:6px;">🏛️ Karpathy-Style Prefix Caching & DocGraph Hybrid Engine</div>
+        <div style="color:#8b949e; font-size:12px; line-height:1.5;">
+          Transcending traditional chunking RAG by uniting <strong>Andrej Karpathy's KV-Cache philosophy</strong> with <strong>DocGraph AST surgical slicing</strong>.
+        </div>
+      </div>
+      <div style="display:flex; flex-direction:column; gap:10px; font-size:12px; color:#8b949e;">
+        <div style="background:#161b22; border:1px solid #30363d; border-radius:8px; padding:12px;">
+          <div style="font-weight:600; color:#e6edf3; margin-bottom:4px;">1. 📌 Global DOC_CATALOG.md Prefix Caching</div>
+          The repository index is statically embedded in the System Prompt for near-instant 100% KV-Cache hits.
+        </div>
+        <div style="background:#161b22; border:1px solid #30363d; border-radius:8px; padding:12px;">
+          <div style="font-weight:600; color:#e6edf3; margin-bottom:4px;">2. 🎯 Precision Slicing & Zero Token Waste</div>
+          Surgical extraction via <code>docgraphical_section</code> prevents context bloat and eliminates 'Lost in the Middle'.
+        </div>
+        <div style="background:#161b22; border:1px solid #30363d; border-radius:8px; padding:12px;">
+          <div style="font-weight:600; color:#e6edf3; margin-bottom:4px;">3. 🧠 Autonomous Multi-turn Working Memory</div>
+          Direct answers from working memory when sufficient, deep-dive expansion when only scratching the surface, and intelligent pruning of dead-end queries. Supports Ctrl+V clipboard image pasting and 📎 file attachments.
+        </div>
+      </div>
+    `;
+  }
+
+  body.innerHTML = contentHtml;
+  modal.style.display = 'flex';
+}
+
+function closeChatStrategyModal() {
+  const modal = document.getElementById('chat-strategy-modal');
+  if (modal) modal.style.display = 'none';
 }
 

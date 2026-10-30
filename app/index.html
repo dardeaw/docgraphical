@@ -34,7 +34,7 @@ if (window.THREE && !window.THREE.Timer) {
 </script>
 <script src="/static/three-spritetext.min.js"></script>
 <script src="/static/3d-force-graph.min.js"></script>
-<link rel="stylesheet" href="/static/galaxy.css?v=5.9.16">
+<link rel="stylesheet" href="/static/galaxy.css?v=5.9.24">
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark-dimmed.min.css">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
@@ -82,6 +82,13 @@ if (window.THREE && !window.THREE.Timer) {
           <line x1="7" y1="7" x2="7.01" y2="7"></line>
         </svg>
         <span class="activity-badge" id="badge-concept-candidates" style="display:none;">0</span>
+      </button>
+      <button class="activity-tab" id="act-tab-lint" onclick="switchActivityTab('lint')" title="文庫體檢與治理 (Linting &amp; Governance)">
+        <svg class="act-icon" viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path>
+          <path d="m9 12 2 2 4-4"></path>
+        </svg>
+        <span class="activity-badge" id="badge-lint-issues" style="display:none;">0</span>
       </button>
       <button class="activity-tab" id="act-tab-prompts" onclick="switchActivityTab('prompts')" title="提示詞管理 (Prompts Manager)">
         <svg class="act-icon" viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
@@ -148,7 +155,32 @@ if (window.THREE && !window.THREE.Timer) {
       </div>
     </div>
 
-    <!-- Drawer Panel 3: Prompts Manager -->
+    <!-- Drawer Panel 3: Linting & Governance -->
+    <div id="lint-panel" class="drawer-panel" style="display:none;">
+      <div class="tree-header">
+        <span class="drawer-title" id="lbl-drawer-lint-title">LINTING &amp; GOVERNANCE</span>
+        <div style="display:flex; gap:4px; align-items:center;">
+          <button onclick="refreshLintResults(true)" class="mini-btn" id="btn-refresh-lint" title="重新體檢">↻ Scan</button>
+        </div>
+      </div>
+      <div class="lint-score-card" id="lint-score-card">
+        <div>
+          <div class="lint-score-label">Knowledge Health</div>
+          <div class="lint-score-num" id="lint-score-val">
+            --<span class="lint-score-total">/ 100</span>
+          </div>
+        </div>
+        <div style="text-align:right;">
+          <span class="lint-status-pill" id="lint-status-badge" style="background:#238636;">HEALTHY</span>
+          <div class="lint-time-text" id="lint-time-cost">0 ms</div>
+        </div>
+      </div>
+      <div class="lint-list-container" id="lint-list-container" style="flex:1; overflow-y:auto; padding:0 10px 10px;">
+        <!-- Rendered dynamically -->
+      </div>
+    </div>
+
+    <!-- Drawer Panel 4: Prompts Manager -->
     <div id="prompts-panel" class="drawer-panel" style="display:none;">
       <div class="tree-header">
         <span class="drawer-title" id="lbl-drawer-prompts-title">PROMPTS MANAGER</span>
@@ -156,11 +188,11 @@ if (window.THREE && !window.THREE.Timer) {
           <button onclick="refreshPromptsList()" class="mini-btn" id="btn-refresh-prompts" title="重新整理">↻ Refresh</button>
         </div>
       </div>
-      <div class="concepts-tabs-bar" id="prompts-tabs-bar" style="display:flex; overflow-x:auto; padding:4px 8px; gap:4px; border-bottom:1px solid #21262d;">
-        <button class="concept-tab-btn active" id="btn-pmt-cat-all" onclick="switchPromptCategory('all')" style="font-size:12px; padding:4px 10px;">全部 (<span id="count-pmt-all">0</span>)</button>
-        <button class="concept-tab-btn" id="btn-pmt-cat-concept" onclick="switchPromptCategory('concept')" style="font-size:12px; padding:4px 10px;">概念發掘 (<span id="count-pmt-concept">0</span>)</button>
-        <button class="concept-tab-btn" id="btn-pmt-cat-crawl" onclick="switchPromptCategory('crawl')" style="font-size:12px; padding:4px 10px;">順藤摸瓜 (<span id="count-pmt-crawl">0</span>)</button>
-        <button class="concept-tab-btn" id="btn-pmt-cat-ingest" onclick="switchPromptCategory('ingest')" style="font-size:12px; padding:4px 10px;">文件攝入 (<span id="count-pmt-ingest">0</span>)</button>
+      <div class="concepts-tabs-bar" id="prompts-tabs-bar" style="display:flex; overflow-x:auto; padding:3px 6px 0; gap:4px; border-bottom:1px solid #21262d;">
+        <button class="concept-tab-btn active" id="btn-pmt-cat-all" onclick="switchPromptCategory('all')">全部 (<span id="count-pmt-all">0</span>)</button>
+        <button class="concept-tab-btn" id="btn-pmt-cat-concept" onclick="switchPromptCategory('concept')">概念發掘 (<span id="count-pmt-concept">0</span>)</button>
+        <button class="concept-tab-btn" id="btn-pmt-cat-crawl" onclick="switchPromptCategory('crawl')">順藤摸瓜 (<span id="count-pmt-crawl">0</span>)</button>
+        <button class="concept-tab-btn" id="btn-pmt-cat-ingest" onclick="switchPromptCategory('ingest')">文件攝入 (<span id="count-pmt-ingest">0</span>)</button>
       </div>
       <div class="tree-search-box" style="display:flex; align-items:center; gap:6px; padding:6px 10px;">
         <input type="text" id="prompt-search" class="tree-input" style="flex:1; min-width:0; margin:0;" placeholder="搜尋提示詞..." oninput="filterPrompts(this.value)" />
@@ -182,15 +214,18 @@ if (window.THREE && !window.THREE.Timer) {
     <div id="doc-panel">
       <!-- Doc Header -->
       <div class="doc-panel-header">
-        <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:4px;">
-          <div style="display:flex; align-items:center; gap:8px; flex:1; min-width:0;">
-            <button class="mini-btn" id="btn-prev-node" onclick="navGo(-1)" title="Previous section" style="padding:2px 8px;font-size:11px;white-space:nowrap;flex-shrink:0;">&#8249; Prev</button>
-            <button class="mini-btn" id="btn-next-node" onclick="navGo(1)" title="Next section" style="padding:2px 8px;font-size:11px;white-space:nowrap;flex-shrink:0;">Next &#8250;</button>
-            <span class="node-kind-tag" id="d-kind-badge" style="background:#f0883e;">DOC</span>
-            <span class="doc-title-text" id="d-name">Select a document or section</span>
-          </div>
+        <!-- Top Nav Row: History Prev/Next -->
+        <div style="display:flex; align-items:center; gap:8px; margin-bottom:6px;">
+          <button class="mini-btn" id="btn-prev-node" onclick="navGo(-1)" title="Previous section" style="padding:3px 10px;font-size:11.5px;white-space:nowrap;flex-shrink:0;">&#8249; Prev</button>
+          <button class="mini-btn" id="btn-next-node" onclick="navGo(1)" title="Next section" style="padding:3px 10px;font-size:11.5px;white-space:nowrap;flex-shrink:0;">Next &#8250;</button>
         </div>
-        <div class="doc-sub-text" id="d-sub">Select an item from the left Explorer or the 3D topology</div>
+
+        <!-- Main Title Row: Badge + File/Heading Title (placed below Prev/Next) -->
+        <div style="display:flex; align-items:center; gap:8px; margin-bottom:6px; min-width:0;">
+          <span class="node-kind-tag" id="d-kind-badge" style="background:#f0883e; flex-shrink:0;">DOC</span>
+          <span class="doc-title-text" id="d-name" style="font-size:15px; font-weight:600; color:#f0f6fc; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; flex:1;">Select a document or section</span>
+        </div>
+        <div class="doc-sub-text" id="d-sub" style="display:none;"></div>
 
         <!-- Action Bar -->
         <div class="doc-action-bar">
@@ -343,6 +378,7 @@ if (window.THREE && !window.THREE.Timer) {
       <span style="font-weight:600; font-size:13px; color:#e6edf3;" id="lbl-floating-chat-title">MCP Knowledge Copilot</span>
     </div>
     <div style="display:flex; align-items:center; gap:6px;">
+      <button onclick="openChatStrategyModal()" class="mini-btn" id="btn-chat-strategy-help" title="檢索機制與架構說明 (Strategy Explainer)" style="padding:2px 8px; font-size:11px; background:#1f6feb22; border-color:#388bfd55; color:#58a6ff;">💡 說明</button>
       <button onclick="clearChatHistory()" class="mini-btn" id="btn-clear-chat-widget" title="清空對話" style="padding:2px 8px; font-size:11px;">🗑️ Clear</button>
       <button class="controls-modal-close" onclick="toggleFloatingChat(false)" style="font-size:16px; padding:2px 6px;">✕</button>
     </div>
@@ -368,17 +404,26 @@ if (window.THREE && !window.THREE.Timer) {
     </div>
   </div>
 
+  <!-- Attachment Staging Area (Previews for pasted images or uploaded files) -->
+  <div id="chat-attachment-bar" style="display:none; padding:6px 12px; background:#0d1117; border-top:1px dashed #30363d; gap:8px; flex-wrap:wrap; align-items:center;">
+    <!-- Rendered dynamically -->
+  </div>
+
   <!-- Chat Input Box -->
   <div id="chat-input-panel" style="padding:10px 12px; background:#161b22; border-top:1px solid #30363d; display:flex; flex-direction:column; gap:6px;">
+    <input type="file" id="chat-file-input" style="display:none;" multiple accept="image/*,.txt,.md,.pdf,.docx,.pptx,.json,.csv,.py" onchange="handleChatFileUpload(event)" />
     <div style="display:flex; gap:6px; align-items:flex-end;">
-      <textarea id="chat-input-box" class="tree-input" rows="2" style="flex:1; resize:none; padding:8px 10px; font-size:12px; line-height:1.4; border-radius:6px; border:1px solid #30363d; background:#0d1117; color:#c9d1d9;" placeholder="輸入問題... (Enter 送出，Shift+Enter 換行)" onkeydown="handleChatInputKey(event)"></textarea>
+      <button onclick="document.getElementById('chat-file-input').click()" class="mini-btn" id="btn-chat-attach" style="height:42px; padding:0 10px; font-size:15px;" title="附加檔案或圖片 (Attach file or image)">📎</button>
+      <textarea id="chat-input-box" class="tree-input" rows="2" style="flex:1; resize:none; padding:8px 10px; font-size:12px; line-height:1.4; border-radius:6px; border:1px solid #30363d; background:#0d1117; color:#c9d1d9;" placeholder="輸入問題、Ctrl+V 貼圖... (Enter 送出，Shift+Enter 換行)" onkeydown="handleChatInputKey(event)" onpaste="handleChatInputPaste(event)"></textarea>
       <button id="btn-chat-send" onclick="sendChatMessage()" class="mini-btn" style="background:#238636; color:#fff; border-color:#2ea043; height:42px; padding:0 14px; font-weight:600;" title="送出提問">送出</button>
     </div>
     <div style="display:flex; justify-content:space-between; align-items:center; font-size:10px; color:#6e7681;">
       <span id="chat-status-indicator">Ready</span>
-      <span>Shift+Enter for newline</span>
+      <span id="lbl-chat-paste-hint">支援貼圖 Ctrl+V / 附加檔案 📎</span>
     </div>
   </div>
+  <!-- Interactive Corner Resize Grip -->
+  <div id="chat-resize-handle" style="position:absolute; top:0; left:0; width:16px; height:16px; cursor:nwse-resize; z-index:1000; border-top:2px solid #58a6ff88; border-left:2px solid #58a6ff88; border-top-left-radius:8px;" title="拖曳縮放視窗大小"></div>
 </div>
 
 
@@ -809,32 +854,32 @@ function confirmBrowsePick() {
   closeBrowsePicker();
 }
 </script>
-<script src="/static/docgraph.js?v=3.0.0"></script>
+<script src="/static/docgraph.js?v=3.4.7"></script>
 
 <!-- Sleek In-App Concepts Action Modal (No ugly browser prompts!) -->
 <div id="concept-action-modal" class="modal-overlay" style="display:none; position:fixed; top:0; left:0; width:100vw; height:100vh; background:rgba(0,0,0,0.75); z-index:9999; align-items:center; justify-content:center; backdrop-filter:blur(3px);">
-  <div style="background:#161b22; border:1px solid #30363d; border-radius:10px; width:460px; max-width:92vw; box-shadow:0 20px 50px rgba(0,0,0,0.8); display:flex; flex-direction:column; overflow:hidden;">
+  <div style="background:#161b22; border:1px solid #30363d; border-radius:12px; width:560px; max-width:94vw; box-shadow:0 24px 60px rgba(0,0,0,0.85); display:flex; flex-direction:column; overflow:hidden;">
     
     <!-- Modal Header -->
-    <div style="padding:12px 16px; border-bottom:1px solid #30363d; display:flex; justify-content:space-between; align-items:center; background:#0d1117;">
-      <span id="cpt-modal-title" style="font-weight:600; font-size:14px; color:#58a6ff;">定義正式概念</span>
-      <button onclick="closeConceptActionModal()" style="background:none; border:none; color:#8b949e; cursor:pointer; font-size:16px; line-height:1; padding:2px 6px;">✕</button>
+    <div style="padding:14px 20px; border-bottom:1px solid #30363d; display:flex; justify-content:space-between; align-items:center; background:#0d1117;">
+      <span id="cpt-modal-title" style="font-weight:700; font-size:16px; color:#58a6ff; line-height:1.4;">定義正式概念</span>
+      <button onclick="closeConceptActionModal()" style="background:none; border:none; color:#8b949e; cursor:pointer; font-size:20px; line-height:1; padding:4px 8px;">✕</button>
     </div>
 
     <!-- Modal Body -->
-    <div style="padding:16px; display:flex; flex-direction:column; gap:12px; background:#161b22;">
+    <div style="padding:20px; display:flex; flex-direction:column; gap:16px; background:#161b22;">
       
       <!-- Action Hint / Description -->
-      <div id="cpt-modal-desc" style="font-size:12px; color:#8b949e; line-height:1.4;">
+      <div id="cpt-modal-desc" style="font-size:13px; color:#8b949e; line-height:1.5;">
         定義知識庫核心概念詞彙，並可設定其分類與多重別名。
       </div>
 
       <!-- Category Select / Input -->
       <div id="cpt-field-category">
-        <label id="lbl-cpt-modal-cat" style="display:block; font-size:11px; color:#8b949e; margin-bottom:4px; font-weight:600;">概念分類 (Category)</label>
-        <div style="display:flex; gap:6px;">
-          <input type="text" id="txt-cpt-category" class="modal-input" placeholder="例如：Architecture, Hardware, Business..." style="flex:1;" />
-          <select id="sel-cpt-category" class="modal-input" style="width:130px;" onchange="if(this.value) document.getElementById('txt-cpt-category').value = this.value;">
+        <label id="lbl-cpt-modal-cat" style="display:block; font-size:13px; color:#8b949e; margin-bottom:6px; font-weight:600;">概念分類 (Category)</label>
+        <div style="display:flex; gap:8px;">
+          <input type="text" id="txt-cpt-category" class="modal-input" placeholder="例如：Architecture, Hardware, Business..." style="flex:1; font-size:14px; padding:10px 12px; height:auto; line-height:1.4;" />
+          <select id="sel-cpt-category" class="modal-input" style="width:160px; font-size:14px; padding:10px 12px; height:auto; line-height:1.4;" onchange="if(this.value) document.getElementById('txt-cpt-category').value = this.value;">
             <option value="">選擇現有分類...</option>
           </select>
         </div>
@@ -842,32 +887,32 @@ function confirmBrowsePick() {
 
       <!-- Concept Name Field -->
       <div id="cpt-field-name">
-        <label id="lbl-cpt-modal-name" style="display:block; font-size:11px; color:#8b949e; margin-bottom:4px; font-weight:600;">概念標準名稱 (Concept Name)</label>
-        <input type="text" id="txt-cpt-name" class="modal-input" placeholder="例如：Microservices, LOO, Serverless..." />
+        <label id="lbl-cpt-modal-name" style="display:block; font-size:13px; color:#8b949e; margin-bottom:6px; font-weight:600;">概念標準名稱 (Concept Name)</label>
+        <input type="text" id="txt-cpt-name" class="modal-input" placeholder="例如：Microservices, LOO, Serverless..." style="font-size:14px; padding:10px 12px; height:auto; line-height:1.4;" />
       </div>
 
       <!-- Aliases / Synonyms Field -->
       <div id="cpt-field-aliases">
-        <label id="lbl-cpt-modal-aliases" style="display:block; font-size:11px; color:#8b949e; margin-bottom:4px; font-weight:600;">別名與同義詞 (Aliases / Comma separated)</label>
-        <input type="text" id="txt-cpt-aliases" class="modal-input" placeholder="例如：微服務架構, SOA, 分散式..." />
-        <span id="lbl-cpt-modal-aliases-tip" style="font-size:10px; color:#6e7681; margin-top:2px; display:block;">多個別名請以逗號分隔，系統將自動比對。</span>
+        <label id="lbl-cpt-modal-aliases" style="display:block; font-size:13px; color:#8b949e; margin-bottom:6px; font-weight:600;">別名與同義詞 (Aliases / 以逗號分隔)</label>
+        <input type="text" id="txt-cpt-aliases" class="modal-input" placeholder="例如：微服務架構, SOA, 分散式..." style="font-size:14px; padding:10px 12px; height:auto; line-height:1.4;" />
+        <span id="lbl-cpt-modal-aliases-tip" style="font-size:12px; color:#6e7681; margin-top:4px; display:block;">多個別名請以逗號分隔，系統將自動比對知識圖譜。</span>
       </div>
 
       <!-- Merge Target Field (Visible only in Merge mode) -->
       <div id="cpt-field-target" style="display:none;">
-        <label id="lbl-cpt-modal-target" style="display:block; font-size:11px; color:#8b949e; margin-bottom:4px; font-weight:600;">合併匯入之目標概念 (Target Concept)</label>
-        <select id="sel-cpt-target" class="modal-input">
+        <label id="lbl-cpt-modal-target" style="display:block; font-size:13px; color:#8b949e; margin-bottom:6px; font-weight:600;">合併匯入之目標概念 (Target Concept)</label>
+        <select id="sel-cpt-target" class="modal-input" style="font-size:14px; padding:10px 12px; height:auto; line-height:1.4;">
           <!-- Populated dynamically -->
         </select>
-        <span id="lbl-cpt-modal-target-warn" style="font-size:10px; color:#e3b341; margin-top:4px; display:block;">⚠ 合併後來源概念將被刪除，其引用文件將全部重定向至目標概念。</span>
+        <span id="lbl-cpt-modal-target-warn" style="font-size:12px; color:#e3b341; margin-top:6px; display:block;">⚠ 合併後來源概念將被刪除，其引用文件將全部重定向至目標概念。</span>
       </div>
 
     </div>
 
     <!-- Modal Footer -->
-    <div style="padding:10px 16px; border-top:1px solid #30363d; display:flex; justify-content:flex-end; gap:8px; background:#0d1117;">
-      <button onclick="closeConceptActionModal()" class="mini-btn" style="padding:6px 14px; font-size:12px;" id="btn-cpt-modal-cancel">取消</button>
-      <button onclick="submitConceptActionModal()" class="btn-primary" style="padding:6px 18px; font-size:12px; font-weight:600;" id="btn-cpt-modal-submit">確定</button>
+    <div style="padding:14px 20px; border-top:1px solid #30363d; display:flex; justify-content:flex-end; gap:10px; background:#0d1117;">
+      <button onclick="closeConceptActionModal()" class="mini-btn" style="padding:8px 18px; font-size:14px; border-radius:6px;" id="btn-cpt-modal-cancel">取消</button>
+      <button onclick="submitConceptActionModal()" class="btn-primary" style="padding:8px 22px; font-size:14px; font-weight:600; border-radius:6px;" id="btn-cpt-modal-submit">確定</button>
     </div>
 
   </div>
@@ -875,34 +920,34 @@ function confirmBrowsePick() {
 
 <!-- In-App Quick Tagger Modal -->
 <div id="concept-tagger-modal" class="modal-overlay" style="display:none; position:fixed; top:0; left:0; width:100vw; height:100vh; background:rgba(0,0,0,0.75); z-index:10000; align-items:center; justify-content:center; backdrop-filter:blur(3px);">
-  <div style="background:#161b22; border:1px solid #30363d; border-radius:10px; width:460px; max-width:92vw; box-shadow:0 20px 50px rgba(0,0,0,0.8); display:flex; flex-direction:column; overflow:hidden;">
-    <div style="padding:12px 16px; border-bottom:1px solid #30363d; display:flex; justify-content:space-between; align-items:center; background:#0d1117;">
-      <span id="tagger-modal-title" style="font-weight:600; font-size:14px; color:#58a6ff;">🏷️ 貼標籤 (Attach Concept Tag)</span>
-      <button onclick="closeTaggerModal()" style="background:none; border:none; color:#8b949e; cursor:pointer; font-size:16px; line-height:1; padding:2px 6px;">✕</button>
+  <div style="background:#161b22; border:1px solid #30363d; border-radius:12px; width:560px; max-width:94vw; box-shadow:0 24px 60px rgba(0,0,0,0.85); display:flex; flex-direction:column; overflow:hidden;">
+    <div style="padding:14px 20px; border-bottom:1px solid #30363d; display:flex; justify-content:space-between; align-items:center; background:#0d1117;">
+      <span id="tagger-modal-title" style="font-weight:700; font-size:16px; color:#58a6ff; line-height:1.4;">🏷️ 貼標籤 (Attach Concept Tag)</span>
+      <button onclick="closeTaggerModal()" style="background:none; border:none; color:#8b949e; cursor:pointer; font-size:20px; line-height:1; padding:4px 8px;">✕</button>
     </div>
-    <div style="padding:16px; display:flex; flex-direction:column; gap:12px; background:#161b22;">
-      <div id="tagger-modal-error" style="display:none; color:#f85149; font-size:12px; background:#da36331a; border:1px solid #da363344; padding:6px 10px; border-radius:4px; margin-top:4px;"></div>
-      <div id="tagger-hint" style="font-size:11px; color:#8b949e; line-height:1.4;">
+    <div style="padding:20px; display:flex; flex-direction:column; gap:16px; background:#161b22;">
+      <div id="tagger-modal-error" style="display:none; color:#f85149; font-size:13px; background:#da36331a; border:1px solid #da363344; padding:8px 12px; border-radius:6px;"></div>
+      <div id="tagger-hint" style="font-size:13px; color:#8b949e; line-height:1.5;">
         為當前文件或指定章節貼上正式概念標籤，建立精確知識圖譜關聯。
       </div>
       
       <!-- Target Display (File or Heading) -->
       <div>
-        <label id="lbl-tagger-target" style="display:block; font-size:11px; color:#8b949e; margin-bottom:4px; font-weight:600;">目標對象 (Target)</label>
-        <div id="tagger-target-display" style="font-size:12px; color:#e6edf3; background:#0d1117; padding:8px 10px; border:1px solid #30363d; border-radius:6px; word-break:break-all;"></div>
+        <label id="lbl-tagger-target" style="display:block; font-size:13px; color:#8b949e; margin-bottom:6px; font-weight:600;">目標對象 (Target)</label>
+        <div id="tagger-target-display" style="font-size:14px; font-weight:500; color:#e6edf3; background:#0d1117; padding:10px 14px; border:1px solid #30363d; border-radius:6px; word-break:break-all; line-height:1.4;"></div>
       </div>
 
       <!-- Concept Selector -->
       <div>
-        <label id="lbl-tagger-concept" style="display:block; font-size:11px; color:#8b949e; margin-bottom:4px; font-weight:600;">選擇要貼上的概念標籤 (Select Concept)</label>
-        <select id="sel-tagger-concept" class="modal-input" style="width:100%; font-size:12px;">
+        <label id="lbl-tagger-concept" style="display:block; font-size:13px; color:#8b949e; margin-bottom:6px; font-weight:600;">選擇要貼上的概念標籤 (Select Concept)</label>
+        <select id="sel-tagger-concept" class="modal-input" style="width:100%; font-size:14px; padding:10px 12px; height:auto; line-height:1.4;">
           <!-- Dynamically populated from conceptsTreeData -->
         </select>
       </div>
     </div>
-    <div style="padding:10px 16px; border-top:1px solid #30363d; display:flex; justify-content:flex-end; gap:8px; background:#0d1117;">
-      <button onclick="closeTaggerModal()" class="mini-btn" style="padding:6px 14px; font-size:12px;" id="btn-tagger-cancel">取消</button>
-      <button onclick="submitAttachTagFromModal()" class="btn-primary" style="padding:6px 18px; font-size:12px; font-weight:600;" id="btn-tagger-submit">確定貼上</button>
+    <div style="padding:14px 20px; border-top:1px solid #30363d; display:flex; justify-content:flex-end; gap:10px; background:#0d1117;">
+      <button onclick="closeTaggerModal()" class="mini-btn" style="padding:8px 18px; font-size:14px; border-radius:6px;" id="btn-tagger-cancel">取消</button>
+      <button onclick="submitAttachTagFromModal()" class="btn-primary" style="padding:8px 22px; font-size:14px; font-weight:600; border-radius:6px;" id="btn-tagger-submit">確定貼上</button>
     </div>
   </div>
 </div>
@@ -938,19 +983,47 @@ function confirmBrowsePick() {
 
 <!-- In-App Cyber Confirm Dialog -->
 <div id="cyber-confirm-modal" class="modal-overlay" style="display:none; position:fixed; top:0; left:0; width:100vw; height:100vh; background:rgba(0,0,0,0.75); z-index:10001; align-items:center; justify-content:center; backdrop-filter:blur(4px);">
-  <div style="background:#161b22; border:1px solid #30363d; border-radius:10px; width:440px; max-width:92vw; box-shadow:0 20px 50px rgba(0,0,0,0.85); display:flex; flex-direction:column; overflow:hidden;">
-    <div style="padding:12px 16px; border-bottom:1px solid #30363d; display:flex; justify-content:space-between; align-items:center; background:#0d1117;">
-      <span id="cyber-confirm-title" style="font-weight:600; font-size:13px; color:#f85149;">⚠ 操作確認</span>
-      <button onclick="closeCyberConfirm(false)" style="background:none; border:none; color:#8b949e; cursor:pointer; font-size:16px; line-height:1; padding:2px 6px;">✕</button>
+  <div style="background:#161b22; border:1px solid #30363d; border-radius:12px; width:540px; max-width:94vw; box-shadow:0 20px 50px rgba(0,0,0,0.85); display:flex; flex-direction:column; overflow:hidden;">
+    <div style="padding:14px 20px; border-bottom:1px solid #30363d; display:flex; justify-content:space-between; align-items:center; background:#0d1117;">
+      <span id="cyber-confirm-title" style="font-weight:700; font-size:16.5px; color:#f85149;">⚠ 操作確認</span>
+      <button onclick="closeCyberConfirm(false)" style="background:none; border:none; color:#8b949e; cursor:pointer; font-size:18px; line-height:1; padding:2px 6px;">✕</button>
     </div>
-    <div style="padding:16px; background:#161b22; font-size:13px; color:#e6edf3; line-height:1.5;">
-      <div id="cyber-confirm-msg" style="white-space:pre-wrap; line-height:1.6;">確定要執行此操作嗎？</div>
-      <div id="cyber-confirm-tip" style="font-size:11px; color:#8b949e; margin-top:8px; line-height:1.4;"></div>
+    <div style="padding:20px; background:#161b22; font-size:14.5px; color:#e6edf3; line-height:1.6;">
+      <div id="cyber-confirm-msg" style="white-space:pre-wrap; line-height:1.65; font-size:15px;">確定要執行此操作嗎？</div>
+      <div id="cyber-confirm-tip" style="font-size:13.5px; color:#8b949e; margin-top:12px; line-height:1.5; padding:8px 12px; background:#0d1117; border-radius:6px; border:1px solid #21262d;"></div>
     </div>
-    <div style="padding:10px 16px; border-top:1px solid #30363d; display:flex; justify-content:flex-end; gap:8px; background:#0d1117;">
-      <button onclick="closeCyberConfirm(false)" class="mini-btn" style="padding:6px 14px; font-size:12px;" id="btn-cyber-confirm-cancel">取消</button>
-      <button onclick="closeCyberConfirm(true)" style="background:#da3633; border:1px solid #f85149; color:#fff; border-radius:6px; padding:6px 18px; font-size:12px; font-weight:600; cursor:pointer;" id="btn-cyber-confirm-ok">確定</button>
+    <div style="padding:12px 20px; border-top:1px solid #30363d; display:flex; justify-content:flex-end; gap:10px; background:#0d1117;">
+      <button onclick="closeCyberConfirm(false)" class="mini-btn" style="padding:8px 18px; font-size:14px; border-radius:6px;" id="btn-cyber-confirm-cancel">取消</button>
+      <button onclick="closeCyberConfirm(true)" style="background:#da3633; border:1px solid #f85149; color:#fff; border-radius:6px; padding:8px 22px; font-size:14.5px; font-weight:700; cursor:pointer;" id="btn-cyber-confirm-ok">確定</button>
     </div>
+  </div>
+</div>
+
+<!-- In-App Chat Strategy Explainer Modal -->
+<div id="chat-strategy-modal" class="modal-overlay" style="display:none; position:fixed; top:0; left:0; width:100vw; height:100vh; background:rgba(0,0,0,0.75); z-index:10003; align-items:center; justify-content:center; backdrop-filter:blur(4px);">
+  <div style="background:#161b22; border:1px solid #30363d; border-radius:12px; width:640px; max-width:94vw; max-height:86vh; box-shadow:0 24px 60px rgba(0,0,0,0.9); display:flex; flex-direction:column; overflow:hidden;">
+    <div style="padding:14px 18px; border-bottom:1px solid #30363d; display:flex; justify-content:space-between; align-items:center; background:#0d1117;">
+      <div style="display:flex; align-items:center; gap:8px;">
+        <span style="font-size:16px;">💡</span>
+        <span id="chat-strategy-title" style="font-weight:600; font-size:14px; color:#58a6ff;">檢索與對話架構核心機制 (Retrieval Architecture)</span>
+      </div>
+      <button onclick="closeChatStrategyModal()" style="background:none; border:none; color:#8b949e; cursor:pointer; font-size:18px; line-height:1; padding:2px 6px;">✕</button>
+    </div>
+    <div id="chat-strategy-body" style="padding:18px; overflow-y:auto; font-size:13px; color:#c9d1d9; line-height:1.6; display:flex; flex-direction:column; gap:14px;">
+      <!-- Populated dynamically with full i18n support -->
+    </div>
+    <div style="padding:10px 18px; border-top:1px solid #30363d; display:flex; justify-content:flex-end; background:#0d1117;">
+      <button onclick="closeChatStrategyModal()" class="btn-primary" style="padding:6px 18px; font-size:12px; font-weight:600;" id="btn-chat-strategy-close">了解 (Got it)</button>
+    </div>
+  </div>
+</div>
+
+<!-- In-App Image Lightbox Preview Modal -->
+<div id="chat-image-preview-modal" class="modal-overlay" style="display:none; position:fixed; top:0; left:0; width:100vw; height:100vh; background:rgba(0,0,0,0.85); z-index:10005; align-items:center; justify-content:center; backdrop-filter:blur(6px); cursor:pointer;" onclick="closeChatImagePreview()">
+  <div style="position:relative; max-width:90vw; max-height:90vh; display:flex; flex-direction:column; align-items:center; justify-content:center;" onclick="event.stopPropagation()">
+    <img id="chat-preview-img-target" src="" style="max-width:90vw; max-height:85vh; object-fit:contain; border-radius:8px; box-shadow:0 15px 50px rgba(0,0,0,0.9); border:1px solid #30363d;" />
+    <div id="chat-preview-img-caption" style="margin-top:8px; font-size:12px; color:#c9d1d9; background:rgba(13,17,23,0.8); padding:4px 12px; border-radius:12px; border:1px solid #30363d;"></div>
+    <button onclick="closeChatImagePreview()" style="position:absolute; top:-12px; right:-12px; background:#da3633; border:1px solid #f85149; color:#fff; border-radius:50%; width:28px; height:28px; display:flex; align-items:center; justify-content:center; cursor:pointer; font-size:14px; font-weight:700; box-shadow:0 4px 12px rgba(0,0,0,0.5);">✕</button>
   </div>
 </div>
 

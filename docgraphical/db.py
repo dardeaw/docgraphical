@@ -193,7 +193,11 @@ def _FnInsertFileNodes(cur: sqlite3.Connection, repo_path: str,
         m = re.match(r"^(#{1,6})\s+(.+)$", stripped)
         if m:
             level = len(m.group(1))
-            title = re.sub(r"\s+#+$", "", m.group(2).strip())
+            raw_title = re.sub(r"\s+#+$", "", m.group(2).strip())
+            # Strip markdown links e.g. [text](url) -> text, [[text]] -> text
+            clean_title = re.sub(r"\[([^\]]+)\]\([^)]+\)", r"\1", raw_title)
+            clean_title = re.sub(r"\[\[([^\]]+)\]\]", r"\1", clean_title).strip()
+            title = clean_title if clean_title else raw_title
             node_id = f"heading::{rel_path}::L{idx}::{title[:30]}"
             headings_in_file += 1
             sec_lines = [line]
@@ -525,6 +529,21 @@ def _FnSyncGlobalIndex(cur: sqlite3.Cursor, repo_path: str) -> None:
                 pass
         with open(idx_path, "w", encoding="utf-8") as f:
             f.write(final_content)
+        # Auto-index DOC_CATALOG.md itself into files/nodes so it is never marked as "pending/unindexed"
+        try:
+            rel_cat = "DOC_CATALOG.md"
+            st_cat = os.stat(idx_path)
+            c_hash_cat = compute_hash(final_content)
+            cur.execute("""
+                INSERT INTO files (path, content_hash, size, modified_at, node_count)
+                VALUES (?, ?, ?, ?, 0)
+                ON CONFLICT(path) DO UPDATE SET
+                    content_hash = excluded.content_hash,
+                    size = excluded.size,
+                    modified_at = excluded.modified_at
+            """, (rel_cat, c_hash_cat, st_cat.st_size, st_cat.st_mtime))
+        except Exception:
+            pass
     except Exception:
         pass
 
@@ -1229,65 +1248,130 @@ def unlink_concept_file(repo_path: str, concept_name: str, rel_file_path: str, r
             with open(abs_p, "r", encoding="utf-8", errors="replace") as f:
                 lines = f.readlines()
 
-            tag_pat = re.compile(r'\[\[\s*' + re.escape(concept_name) + r'(\s*\|\s*([^\]]+))?\s*\]\]')
-            
-            def is_pure_tag_line(line_str):
-                s = tag_pat.sub('', line_str)
-                s = re.sub(r'[>\s🏷️#:\-–—\*\`]|概念標籤|標籤|Concepts?', '', s)
-                return len(s) == 0
+            tagline_prefix_pat = re.compile(r'^\s*>\s*🏷️?\s*(?:概念標籤|標籤|Concepts?)\s*[:：]\s*')
+            tag_link_pat = re.compile(
+                r'\[\[\s*' + re.escape(concept_name) + r'(\s*\|\s*([^\]]+))?\s*\]\]|'
+                r'\[([^\]\n]+)\]\([^)\n]*\.docgraphical/tags/' + re.escape(concept_name) + r'\.md[^)\n]*\)'
+            )
+
+            def clean_tag_from_line(line_str):
+                # 1. Check if line is a dedicated tag line (> 🏷️ ...)
+                m_pref = tagline_prefix_pat.match(line_str)
+                if m_pref:
+                    prefix = m_pref.group(0)
+                    body = line_str[len(prefix):].strip()
+                    items = re.findall(r'\[\[[^\]]+\]\]|\[[^\]]+\]\([^)]+\)|[^\s、,，]+', body)
+                    remaining = []
+                    found = False
+                    for it in items:
+                        it_s = it.strip('、,， ')
+                        if not it_s:
+                            continue
+                        bm = re.match(r'\[\[([^\]|]+)', it_s)
+                        im = re.match(r'\[([^\]]+)\]\(([^)]+)\)', it_s)
+                        it_name = ''
+                        if bm:
+                            it_name = bm.group(1).strip()
+                        elif im:
+                            it_name = im.group(1).strip()
+                            target_url = im.group(2).strip()
+                            if f'{concept_name}.md' in target_url:
+                                it_name = concept_name
+                        else:
+                            it_name = it_s
+                        
+                        if it_name.strip().lower() == concept_name.strip().lower():
+                            found = True
+                        else:
+                            remaining.append(it_s)
+                    if not found:
+                        return line_str, False
+                    if not remaining:
+                        return None, True # Drop whole tag line!
+                    return prefix + '、'.join(remaining) + '\n', True
+                else:
+                    # 2. Body text inline concept link
+                    if tag_link_pat.search(line_str):
+                        def _clean_rep(m):
+                            return m.group(2) if m.group(2) else (m.group(3) if m.group(3) else concept_name)
+                        return tag_link_pat.sub(_clean_rep, line_str, count=1), True
+                    return line_str, False
 
             new_lines = []
             removed = False
 
             if is_heading:
                 h_idx = -1
+                h_level = 1
                 if target_line is not None and 1 <= target_line <= len(lines):
                     h_idx = target_line - 1
+                    m_head = re.match(r"^(#{1,6})\s+", lines[h_idx].strip())
+                    if m_head:
+                        h_level = len(m_head.group(1))
                 elif target_heading:
                     h_clean = target_heading.strip().lower()
                     for idx, l in enumerate(lines):
                         if l.strip().startswith('#') and h_clean in l.lower():
                             h_idx = idx
+                            m_head = re.match(r"^(#{1,6})\s+", l.strip())
+                            if m_head:
+                                h_level = len(m_head.group(1))
                             break
                 
+                # Scan entire section between h_idx and the next heading of same or higher level
+                section_active = False
                 for idx, l in enumerate(lines):
-                    if not removed and h_idx >= 0 and h_idx <= idx <= min(len(lines)-1, h_idx + 8):
-                        if idx > h_idx and l.strip().startswith('#'):
-                            new_lines.append(l)
-                            continue
-                        if tag_pat.search(l):
-                            if is_pure_tag_line(l):
+                    if idx == h_idx:
+                        section_active = True
+                        new_lines.append(l)
+                        continue
+                    if section_active:
+                        m_next = re.match(r"^(#{1,6})\s+", l.strip())
+                        if m_next and len(m_next.group(1)) <= h_level:
+                            section_active = False
+                        elif not removed:
+                            res_line, did_remove = clean_tag_from_line(l)
+                            if did_remove:
                                 removed = True
-                                continue
-                            else:
-                                new_lines.append(tag_pat.sub(lambda m: m.group(2) if m.group(2) else concept_name, l, count=1))
-                                removed = True
+                                if res_line is not None:
+                                    new_lines.append(res_line)
                                 continue
                     new_lines.append(l)
+
+                # Fallback: if not found within section, locate by heading title or scan without section boundary
+                if not removed:
+                    fallback_lines = []
+                    for l in new_lines:
+                        if not removed:
+                            res_line, did_remove = clean_tag_from_line(l)
+                            if did_remove:
+                                removed = True
+                                if res_line is not None:
+                                    fallback_lines.append(res_line)
+                                continue
+                        fallback_lines.append(l)
+                    new_lines = fallback_lines
             else:
                 # File-level removal: scan first 40 lines
                 for idx, l in enumerate(lines):
-                    if not removed and idx <= 40 and tag_pat.search(l):
-                        if ('概念標籤' in l or '標籤' in l or 'Concepts' in l) or is_pure_tag_line(l):
-                            if is_pure_tag_line(l):
-                                removed = True
-                                continue
-                            else:
-                                new_lines.append(tag_pat.sub(lambda m: m.group(2) if m.group(2) else concept_name, l, count=1))
-                                removed = True
-                                continue
+                    if not removed and idx <= 40:
+                        res_line, did_remove = clean_tag_from_line(l)
+                        if did_remove:
+                            removed = True
+                            if res_line is not None:
+                                new_lines.append(res_line)
+                            continue
                     new_lines.append(l)
 
                 if not removed:
                     final_lines = []
                     for l in new_lines:
-                        if not removed and tag_pat.search(l):
-                            if is_pure_tag_line(l):
+                        if not removed:
+                            res_line, did_remove = clean_tag_from_line(l)
+                            if did_remove:
                                 removed = True
-                                continue
-                            else:
-                                final_lines.append(tag_pat.sub(lambda m: m.group(2) if m.group(2) else concept_name, l, count=1))
-                                removed = True
+                                if res_line is not None:
+                                    final_lines.append(res_line)
                                 continue
                         final_lines.append(l)
                     new_lines = final_lines
@@ -1402,7 +1486,23 @@ def attach_concept_to_file(repo_path: str, concept_name: str, rel_file_path: str
             if m:
                 htext = re.sub(r"\s+#+$", "", m.group(2).strip()).lower()
                 if htext == h_clean or h_clean in htext:
-                    lines.insert(i + 1, "\n> 🏷️ 標籤: " + tag_str + "\n\n")
+                    # Check if section block already has this tag before the next heading of same/higher level
+                    h_level = len(m.group(1))
+                    already_tagged = False
+                    check_pat = re.compile(
+                        r"\[%s\]\(|\[\[%s(?:\]\]|\|)|(?<![A-Za-z0-9_])%s(?![A-Za-z0-9_])" % (
+                            re.escape(concept_name), re.escape(concept_name), re.escape(concept_name)),
+                        re.IGNORECASE)
+                    for next_idx in range(i + 1, len(lines)):
+                        next_line = lines[next_idx].strip()
+                        nm = re.match(r"^(#{1,6})\s+", next_line)
+                        if nm and len(nm.group(1)) <= h_level:
+                            break
+                        if check_pat.search(next_line):
+                            already_tagged = True
+                            break
+                    if not already_tagged:
+                        lines.insert(i + 1, "\n> 🏷️ 標籤: " + tag_str + "\n\n")
                     injected = True
                     break
 
@@ -1634,3 +1734,127 @@ def delete_concept(repo_path: str, concept_name: str, clean_md_references: bool 
             conn.close()
 
     return {"ok": True, "concept": concept_name, "cleaned_files_count": len(cleaned_files)}
+
+
+def lint_repository(repo_path: str) -> Dict[str, Any]:
+    """Inspect repository knowledge graph health (0-Token instant SQLite inspection).
+    Returns health score (0-100), orphans, dead links, H1 syntax integrity, catalog sync diff, and tag candidates.
+    """
+    t0 = time.perf_counter()
+    p = get_db_path(repo_path)
+    if not os.path.exists(p):
+        return {"ok": False, "error": "Database not found for repository"}
+
+    conn = sqlite3.connect(p)
+    cur = conn.cursor()
+    try:
+        # 1. Total files, nodes, edges
+        cur.execute("SELECT COUNT(*) FROM files")
+        total_files = cur.fetchone()[0]
+        cur.execute("SELECT COUNT(*) FROM nodes")
+        total_nodes = cur.fetchone()[0]
+        cur.execute("SELECT COUNT(*) FROM edges")
+        total_edges = cur.fetchone()[0]
+
+        # 2. Orphan files: files that have 0 incoming and outgoing doc_link or wiki_link
+        cur.execute("""
+            SELECT path FROM files WHERE path NOT IN (
+                SELECT DISTINCT n.file_path FROM edges e
+                JOIN nodes n ON e.source = n.id OR e.target = n.id
+                WHERE e.kind IN ('doc_link', 'wiki_link')
+            )
+            ORDER BY path ASC
+        """)
+        orphans = [r[0] for r in cur.fetchall()]
+
+        # 3. Dead links: doc_link targets that do not exist in nodes or files
+        cur.execute("""
+            SELECT e.source, e.target, e.line, n.file_path, n.name
+            FROM edges e
+            JOIN nodes n ON e.source = n.id
+            WHERE e.kind = 'doc_link'
+              AND e.target NOT IN (SELECT id FROM nodes)
+              AND e.target NOT IN (SELECT path FROM files)
+            ORDER BY n.file_path ASC, e.line ASC
+        """)
+        dead_links = []
+        for r in cur.fetchall():
+            dead_links.append({
+                "source_id": r[0],
+                "target": r[1],
+                "line": r[2],
+                "file": r[3],
+                "node_name": r[4]
+            })
+
+        # 4. Heading syntax / Missing H1 inspection
+        cur.execute("""
+            SELECT f.path FROM files f
+            WHERE f.path NOT IN (
+                SELECT DISTINCT file_path FROM nodes WHERE kind = 'heading_1'
+            )
+            ORDER BY f.path ASC
+        """)
+        no_h1_files = [r[0] for r in cur.fetchall()]
+
+        # 5. Catalog check (DOC_CATALOG.md)
+        catalog_path = os.path.join(repo_path, "DOC_CATALOG.md")
+        catalog_exists = os.path.exists(catalog_path)
+        catalog_missing_files = []
+        if catalog_exists:
+            try:
+                with open(catalog_path, "r", encoding="utf-8") as cf:
+                    cat_content = cf.read()
+                cur.execute("SELECT path FROM files")
+                all_fs = [r[0] for r in cur.fetchall()]
+                for f in all_fs:
+                    base = os.path.basename(f)
+                    if base != "DOC_CATALOG.md" and base not in cat_content:
+                        catalog_missing_files.append(f)
+            except Exception:
+                pass
+
+        # 6. Unregistered / Candidate tags count from concept tree
+        try:
+            concepts_tree = get_concepts_tree(repo_path)
+            candidates = concepts_tree.get("candidates", [])
+        except Exception:
+            candidates = []
+
+        # 7. Overall Health Score Calculation (0-100)
+        # Deductions:
+        # - Dead links: -8 each
+        # - Missing H1 files: -5 each
+        # - Catalog missing: -10, or catalog missing files: -2 each
+        # - Orphan ratio: up to -15 based on proportion
+        deductions = 0
+        deductions += len(dead_links) * 8
+        deductions += len(no_h1_files) * 5
+        if not catalog_exists:
+            deductions += 10
+        else:
+            deductions += len(catalog_missing_files) * 2
+        if total_files > 0:
+            orphan_ratio = len(orphans) / total_files
+            deductions += int(orphan_ratio * 15)
+
+        score = max(0, min(100, 100 - deductions))
+        t1 = time.perf_counter()
+
+        return {
+            "ok": True,
+            "repo": repo_path,
+            "duration_ms": round((t1 - t0) * 1000, 2),
+            "score": score,
+            "total_files": total_files,
+            "total_nodes": total_nodes,
+            "total_edges": total_edges,
+            "orphans": orphans,
+            "dead_links": dead_links,
+            "no_h1_files": no_h1_files,
+            "catalog_exists": catalog_exists,
+            "catalog_missing_files": catalog_missing_files,
+            "candidates_count": len(candidates)
+        }
+    finally:
+        conn.close()
