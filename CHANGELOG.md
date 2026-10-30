@@ -12,6 +12,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [3.0.1] - 2026-10-30
 
 ### Added
+- **Omni-Channel Ingest**: One-click Web Crawling that strips ads/scripts and formats clean Markdown notes; Hybrid Multimodal Summarization combining text/clipboard documents with diagrams and screenshots, embedding relative image links directly into summaries.
 - **Knowledge Topology Compound Ingest**: Secondary pass during document ingestion that extracts matching concepts and mines candidate terms for human review via interactive pills.
 - **Knowledge Library Linting & Governance**: Dedicated governance drawer providing a comprehensive 5-dimension health audit (orphans, broken links, circular references, empty sections, unindexed concepts) and 0–100 score with one-click navigation.
 - **Image & Attachment Alt-Text Indexing**: Full-text `search_doc` penetrates `![Alt](Path)` image tags and filenames; the MCP chat loop automatically inspects active document attachments.

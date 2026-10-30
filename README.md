@@ -69,9 +69,14 @@ In one line: **CPU decides which cuts to read; the LLM only reads those cuts int
 - REST API: `/api/concepts/scan*` (mine/review/confirm/blacklist), `/api/crawl/{start,next,finish,confirm,refresh}` (runs live in server memory), `/api/concepts/candidates/draft` (evidence groups)
 
 ### Document Ingestion & Knowledge Topology Compound — v3.0.1
-- **Automated multi-format ingest**: Full support for PDF, PPT/PPTX, Word/DOCX, and plain text.
-- **Pass-2 Compound Ingest**: During document summarization, DocGraphical automatically runs a secondary concept comparison against the current knowledge graph, surfacing matching official concepts and mined candidate terms for human review via interactive pills.
-- **Embedded image & attachment indexing**: The indexing engine automatically parses `![Alt Text](Path)` tags and filenames in Markdown; the MCP chat engine automatically inspects and surfaces document attachments to prevent blind spots when querying images.
+- **Omni-Channel Multi-Format Ingestion**:
+  - **Full Document Support**: PDF, PowerPoint (`.ppt`, `.pptx`), Word (`.doc`, `.docx`), spreadsheets (`.csv`), HTML web files (`.html`, `.htm`), emails (`.eml`), and plain text (`.txt`, `.md`).
+  - **One-Click Web Crawling Ingest**: Input any HTTP/HTTPS URL to automatically fetch web page contents, strip scripts/ads/navigation, extract pure article bodies and titles, and convert them directly into structured knowledge Markdown.
+  - **Hybrid Multimodal Summarization**: Mix clipboard text or document sections with images/screenshots in a single ingest pass. Powered by vision models, DocGraphical correlates diagram backdrops with technical text and embeds relative image links directly into the resulting Markdown note.
+- **Pass-2 Compound Ingest**:
+  - During document summarization, DocGraphical automatically runs a secondary concept comparison against the current knowledge graph, surfacing matching official concepts and mined candidate terms for human review via interactive pills.
+- **Embedded Image & Attachment Indexing**:
+  - The indexing engine automatically parses `![Alt Text](Path)` tags and filenames in Markdown; the MCP chat engine automatically inspects and surfaces document attachments to prevent blind spots when querying images.
 
 ### Knowledge Library Linting & Governance — v3.0.1
 - **Sub-second deterministic health audit**: Dedicated Linting drawer provides a comprehensive Knowledge Health Score (0–100) on demand.
