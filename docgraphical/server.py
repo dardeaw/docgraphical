@@ -1218,7 +1218,8 @@ def create_app(initial_paths: Optional[List[str]] = None, search_roots: Optional
                     s_ext = os.path.splitext(s_name)[1]
                     if m_fig:
                         # It is an extracted figure
-                        new_s_name = f"{re.sub(r'\\s+', '_', new_stem)}{m_fig.group(1)}"
+                        sanitized_stem = re.sub(r'\s+', '_', new_stem)
+                        new_s_name = f"{sanitized_stem}{m_fig.group(1)}"
                     elif s_name.startswith(old_stem):
                         new_s_name = new_stem + s_name[len(old_stem):]
                     else:

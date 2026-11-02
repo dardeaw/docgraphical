@@ -352,7 +352,8 @@ def stream_chat_turn(
                         curr_content_chunks.append(text_delta)
                         yield f"data: {json.dumps({'type': 'delta', 'content': text_delta}, ensure_ascii=False)}\n\n"
         except Exception as e:
-            yield f"data: {json.dumps({'type': 'delta', 'content': f'\\n\\n(檢索完成，總結時發生錯誤: {e})'}, ensure_ascii=False)}\n\n"
+            err_msg = f"\n\n(檢索完成，總結時發生錯誤: {e})"
+            yield f"data: {json.dumps({'type': 'delta', 'content': err_msg}, ensure_ascii=False)}\n\n"
 
     # End of rounds limit reached
     yield f"data: {json.dumps({'type': 'done', 'ok': True, 'rounds': round_idx, 'truncated': True}, ensure_ascii=False)}\n\n"
