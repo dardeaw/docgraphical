@@ -1,9 +1,11 @@
 """Flask web server application factory and RESTful API routing for DocGraphical."""
 import json
 import os
+import re
 import shutil
 import tempfile
 import time
+import urllib.parse
 import uuid
 from typing import Dict, List, Optional
 from flask import Flask, jsonify, request, Response, render_template, send_file
@@ -131,6 +133,7 @@ def create_app(initial_paths: Optional[List[str]] = None, search_roots: Optional
                 "name": name,
                 "path": p,
                 "files": metrics["files"],
+                "effective_files": metrics.get("effective_files", metrics["files"]),
                 "headings": metrics["headings"],
                 "nodes": stats["nodes"],
                 "links": stats["links"],
@@ -237,8 +240,13 @@ def create_app(initial_paths: Optional[List[str]] = None, search_roots: Optional
         """Serve images referenced inside markdown documents.
         Query: doc=<doc abs or rel path> & img=<image rel path or filename>
         """
-        doc_path = request.args.get("doc", "").strip()
-        img_path = request.args.get("img", "").strip().replace("/", os.sep)
+        import urllib.parse
+        doc_path = urllib.parse.unquote(request.args.get("doc", "")).strip()
+        raw_img = request.args.get("img", "").strip()
+        # Decode possible multiple URL encoding (e.g. marked + encodeURIComponent -> %25E6...)
+        img_path = urllib.parse.unquote(urllib.parse.unquote(raw_img)).strip()
+        # Clean markdown link brackets/angle brackets e.g. <image.png> or "image.png"
+        img_path = img_path.strip("<>\"' ").replace("/", os.sep)
         if not img_path:
             return jsonify({"error": "No image specified"}), 400
         
@@ -247,9 +255,19 @@ def create_app(initial_paths: Optional[List[str]] = None, search_roots: Optional
         real_doc = resolve_file(doc_path) if doc_path else None
         target = None
 
-        # 1. Resolve relative to the document's own folder
+        # 1. Resolve relative to the document's own folder (even if doc is unsaved/preview)
+        doc_dir = None
         if real_doc:
             doc_dir = os.path.dirname(real_doc)
+        elif doc_path:
+            # Maybe doc_path is e.g. "D:\包材資料\preview.md" where D:\包材資料 exists
+            cand_dir = os.path.dirname(doc_path)
+            if cand_dir and os.path.isdir(cand_dir):
+                doc_dir = cand_dir
+            elif os.path.isdir(doc_path):
+                doc_dir = doc_path
+
+        if doc_dir:
             cand = os.path.realpath(os.path.join(doc_dir, img_path))
             if os.path.isfile(cand):
                 target = cand
@@ -275,11 +293,23 @@ def create_app(initial_paths: Optional[List[str]] = None, search_roots: Optional
                 if target:
                     break
 
+        # 4. Fallback search in staged images directory (for Ingest real-time preview before saving)
+        if not target and os.path.isdir(_STAGE_ROOT):
+            base_name = os.path.basename(img_path)
+            for dirpath, _, filenames in os.walk(_STAGE_ROOT):
+                if base_name in filenames:
+                    target = os.path.realpath(os.path.join(dirpath, base_name))
+                    break
+
         if not target or not os.path.isfile(target):
             return jsonify({"error": "Image not found: " + img_path}), 404
 
-        # Validate target is under at least one search root
+        # Validate target is under at least one search root or within _STAGE_ROOT
         is_safe = any(target.startswith(os.path.realpath(r) + os.sep) or target == os.path.realpath(r) for r in roots)
+        if not is_safe and os.path.isdir(_STAGE_ROOT):
+            stage_real = os.path.realpath(_STAGE_ROOT)
+            if target.startswith(stage_real + os.sep) or target == stage_real:
+                is_safe = True
         if not is_safe:
             return jsonify({"error": "Access denied"}), 403
 
@@ -561,8 +591,8 @@ def create_app(initial_paths: Optional[List[str]] = None, search_roots: Optional
         except OSError:
             pass
 
-    def _FnMoveStagedIntoTarget(staged_abs: str, tgt: str) -> str:
-        base = os.path.basename(staged_abs)
+    def _FnMoveStagedIntoTarget(staged_abs: str, tgt: str, desired_name: Optional[str] = None) -> str:
+        base = desired_name if desired_name else os.path.basename(staged_abs)
         stem, ext = os.path.splitext(base)
         dst = os.path.join(tgt, base)
         i = 1
@@ -662,54 +692,100 @@ def create_app(initial_paths: Optional[List[str]] = None, search_roots: Optional
             texts.append(raw_text)
             sources.append({"path": "clipboard_text", "chars": len(raw_text), "truncated": False})
 
+        extracted_images = []
         for p in paths:
             name = os.path.basename(p)
             ext = os.path.splitext(p)[1].lower()
-            # Standalone photos/scans: no text layer, straight to eyes.
+            # Standalone photos/scans: no text layer, straight to vision
             if ext in IMAGE_EXTS:
                 vision_paths.append(p)
                 continue
             try:
                 r = FnExtractText(p)
+                if r.get("ok") and (r.get("text") or "").strip():
+                    texts.append(r["text"])
+                    sources.append({"path": os.path.abspath(p), "chars": r["chars"],
+                                    "truncated": r["truncated"]})
+                    if r["truncated"]:
+                        notes.append("%s 超過 %d 字已截斷" % (name, r["chars"]))
             except Exception as e:
                 notes.append(_FnFriendlyExtractError(name, e))
-                continue
-            if r.get("ok") and (r.get("text") or "").strip():
-                texts.append(r["text"])
-                sources.append({"path": os.path.abspath(p), "chars": r["chars"],
-                                "truncated": r["truncated"]})
-                if r["truncated"]:
-                    notes.append("%s 超過 %d 字已截斷" % (name, r["chars"]))
-                continue
-            # No usable text: pdf/pptx may still carry page images for vision.
+
+            # Also extract embedded figures/diagrams from PDF/PPTX
             if ext in (".pdf", ".pptx"):
-                vision_paths.append(p)
-            else:
-                notes.append("%s：抽不到文字（僅 pdf／pptx／圖片可改走圖片辨識）" % name)
+                from .ingest import FnExtractImages
+                g = FnExtractImages(p)
+                if g.get("ok") and g.get("images"):
+                    base_stem = os.path.splitext(name)[0]
+                    # CommonMark strict URL compliance: replace spaces in image filename with underscores
+                    safe_stem = re.sub(r"\s+", "_", base_stem.strip())
+                    for idx, im in enumerate(g["images"], 1):
+                        im_ext = im.get("ext", "png")
+                        im_fname = f"{safe_stem}_fig{idx}.{im_ext}"
+                        extracted_images.append({
+                            "name": im_fname,
+                            "label": im.get("label", f"Fig {idx}"),
+                            "data_url": im["data_url"],
+                            "raw_bytes": im.get("raw_bytes"),
+                            "source_doc": name
+                        })
+
+        # Save extracted candidate images to a staged folder so they can be referenced or discarded
+        staged_candidate_images = []
+        if extracted_images:
+            _FnSweepStages()
+            stg_img_dir = os.path.join(_STAGE_ROOT, "ingest_figs_" + uuid.uuid4().hex)
+            os.makedirs(stg_img_dir, exist_ok=True)
+            for im in extracted_images:
+                fpath = os.path.join(stg_img_dir, im["name"])
+                if im.get("raw_bytes"):
+                    with open(fpath, "wb") as f_im:
+                        f_im.write(im["raw_bytes"])
+                staged_candidate_images.append({
+                    "name": im["name"],
+                    "staged_path": fpath,
+                    "data_url": im["data_url"],
+                    "label": im["label"]
+                })
+
+        all_multimodal_images = list(staged_candidate_images)
+        # If there are standalone photos in vision_paths, add them too
+        for p in vision_paths:
+            from .ingest import FnExtractImages
+            g = FnExtractImages(p)
+            if g.get("ok"):
+                for im in g.get("images", []):
+                    all_multimodal_images.append({
+                        "name": os.path.basename(p),
+                        "staged_path": p,
+                        "data_url": im["data_url"],
+                        "label": im.get("label", "[Image]")
+                    })
+
+        all_candidate_rels = [im["name"] for im in all_multimodal_images]
+        if pasted_image_rels:
+            for r in pasted_image_rels:
+                if r not in all_candidate_rels:
+                    all_candidate_rels.append(r)
 
         # Case 1: Mixed Text + Images (Multimodal combination)
-        if texts and vision_paths:
-            from .ingest import FnExtractImages, FnMultimodalSummarize
-            images = []
-            for p in vision_paths:
-                if len(images) >= VISION_MAX_TOTAL:
-                    break
-                g = FnExtractImages(p)
-                if g.get("ok"):
-                    images.extend(g.get("images") or [])
+        if texts and all_multimodal_images:
+            from .ingest import FnMultimodalSummarize
             combo = "\n\n===== 下一個段落 =====\n\n".join(texts)
-            res = FnMultimodalSummarize(combo, images, [os.path.basename(p) for p in (paths or ["剪貼簿"])], pasted_image_rels)
+            res = FnMultimodalSummarize(combo, all_multimodal_images, [os.path.basename(p) for p in (paths or ["剪貼簿"])], all_candidate_rels)
             if not res.get("ok"):
                 return jsonify({"success": False, "error": res.get("error")}), 502
-            return jsonify({"success": True, "summary": res["summary"],
-                            "model": res.get("model"), "sources": sources,
-                            "notes": notes})
+            return jsonify({
+                "success": True,
+                "summary": res["summary"],
+                "model": res.get("model"),
+                "sources": sources,
+                "notes": notes,
+                "candidate_images": [{"name": im["name"], "path": im["staged_path"]} for im in staged_candidate_images]
+            })
 
         # Case 2: Pure Text
         if texts:
-            for p in vision_paths:
-                notes.append("%s：無文字未納入本次摘要（圖片型請單批上傳走 vision）"
-                             % os.path.basename(p))
             combo = "\n\n===== 下一份文件 =====\n\n".join(texts)
             res = FnChatSummarize(combo, [os.path.basename(p) for p in paths] if paths else ["剪貼簿文字"])
             if not res.get("ok"):
@@ -771,18 +847,69 @@ def create_app(initial_paths: Optional[List[str]] = None, search_roots: Optional
         repos = scan_doc_repositories(roots)
         repo_root = FnFindOwningRepo(target_dir, repos)
         # Staged files live outside the repo: move them in NOW (confirm time).
-        # realpath check keeps this from becoming an arbitrary-file mover.
+        # Derive user chosen stem from filename (e.g. "包裝價格 vs. 真實成本.md" -> "包裝價格 vs. 真實成本")
+        user_stem = os.path.splitext(os.path.basename(filename))[0].strip()
+        safe_user_stem = re.sub(r"\s+", "_", user_stem) if user_stem else "doc"
+
+        # Staged files live outside the repo: move them in NOW (confirm time).
+        # Align document source name with user_stem if there is a single primary document.
         stage_root = os.path.realpath(_STAGE_ROOT)
         final_srcs = []
+        doc_replacements = {}
+        single_src = len(src_paths) == 1
         for p in src_paths:
             a = os.path.realpath(p)
+            old_name = os.path.basename(p)
+            old_stem, old_ext = os.path.splitext(old_name)
+            desired_name = None
+            if user_stem and single_src:
+                desired_name = f"{user_stem}{old_ext}"
+            elif user_stem and old_stem != user_stem:
+                # If multiple sources, prefix with user_stem
+                desired_name = f"{user_stem}_{old_name}"
+
             if a.startswith(stage_root + os.sep):
                 if not os.path.isfile(a):
                     return jsonify({"success": False,
-                                    "error": "暫存檔已遺失: %s" % os.path.basename(p)}), 400
-                final_srcs.append(_FnMoveStagedIntoTarget(a, target_dir))
+                                    "error": "暫存檔已遺失: %s" % old_name}), 400
+                new_dst = _FnMoveStagedIntoTarget(a, target_dir, desired_name=desired_name)
+                final_srcs.append(new_dst)
+                if desired_name:
+                    doc_replacements[old_name] = os.path.basename(new_dst)
             else:
                 final_srcs.append(os.path.abspath(p))
+
+        # Check candidate images: align with user_stem and only preserve those referenced in summary_md!
+        candidate_images = data.get("candidate_images") or []
+        referenced_images = set(re.findall(r'!\[.*?\]\((.*?)\)', summary))
+        fig_replacements = {}
+        for idx, c_img in enumerate(candidate_images, 1):
+            c_name = c_img.get("name")
+            c_staged = c_img.get("path")
+            if not c_name or not c_staged or not os.path.isfile(c_staged):
+                continue
+            # If the image is referenced in the markdown summary, move to target_dir!
+            if c_name in referenced_images or any(c_name in ref for ref in referenced_images):
+                img_ext = os.path.splitext(c_name)[1]
+                # Match suffix e.g. _fig1.jpeg
+                m_fig = re.search(r'(_fig\d+.*)$', c_name)
+                fig_suffix = m_fig.group(1) if m_fig else f"_fig{idx}{img_ext}"
+                target_img_name = f"{safe_user_stem}{fig_suffix}"
+
+                dst = os.path.join(target_dir, target_img_name)
+                shutil.copy2(c_staged, dst)
+                final_srcs.append(os.path.abspath(dst))
+                if target_img_name != c_name:
+                    fig_replacements[c_name] = target_img_name
+                    fig_replacements[urllib.parse.quote(c_name)] = urllib.parse.quote(target_img_name)
+
+        # Replace image and doc references in summary markdown
+        all_replacements = {**doc_replacements, **fig_replacements}
+        for old_ref, new_ref in all_replacements.items():
+            summary = summary.replace(f"({old_ref})", f"({new_ref})")
+            summary = summary.replace(f"(<{old_ref}>)", f"(<{new_ref}>)")
+            summary = summary.replace(f"`{old_ref}`", f"`{new_ref}`")
+
         src_paths = final_srcs
         rels = []
         for p in src_paths:
@@ -829,7 +956,8 @@ def create_app(initial_paths: Optional[List[str]] = None, search_roots: Optional
             with open(md_path, "w", encoding="utf-8") as f:
                 f.write(FnBuildMd(title, rels, summary,
                                   (data.get("model") or ""),
-                                  source_urls=source_urls))
+                                  source_urls=source_urls,
+                                  concept_tags=selected_matched))
         except Exception as e:
             return jsonify({"success": False, "error": str(e)}), 500
         index_res = None
@@ -852,9 +980,17 @@ def create_app(initial_paths: Optional[List[str]] = None, search_roots: Optional
                         _con = _sq.connect(_dbp)
                         try:
                             # 1. Store discovered candidates into candidates pool (filtered by user selection)
-                            _now = _time.strftime("%Y-%m-%d %H:%M:%S")
+                            _now = time.strftime("%Y-%m-%d %H:%M:%S")
                             _cand_added = []
-                            for cand in c_tag_res.get("discovered_candidates") or []:
+                            # Merge candidates from Pass-2 and user-selected candidates
+                            all_cands_to_check = list(c_tag_res.get("discovered_candidates") or [])
+                            if selected_candidates:
+                                existing_cand_terms = {c.get("term") for c in all_cands_to_check if c.get("term")}
+                                for sc in selected_candidates:
+                                    if sc and sc not in existing_cand_terms:
+                                        all_cands_to_check.append({"term": sc, "category": "機器挖掘", "aliases": ""})
+
+                            for cand in all_cands_to_check:
                                 c_term = ((cand.get("term") or "").strip())[:30]
                                 c_cat = ((cand.get("category") or "機器挖掘").strip())[:20]
                                 c_aliases = ((cand.get("aliases") or "").strip())[:50]
@@ -880,6 +1016,8 @@ def create_app(initial_paths: Optional[List[str]] = None, search_roots: Optional
                         finally:
                             _con.close()
             except Exception as e:
+                import traceback
+                traceback.print_exc()
                 compound_res = {"ok": False, "error": str(e)}
 
             # Logging must never break the index response: own try block.
@@ -992,6 +1130,155 @@ def create_app(initial_paths: Optional[List[str]] = None, search_roots: Optional
         return jsonify({"success": True, "deleted": deleted,
                         "missing": missing, "index": index_res})
 
+    @app.route("/api/file/rename", methods=["POST"])
+    def api_file_rename():
+        """Safely rename a file (markdown or document/image) under authorized search roots.
+        If it's an .md file, automatically updates index and references if applicable.
+        Body: {old_path: <abs path>, new_name: <new filename with or without ext>}
+        """
+        data = request.get_json(silent=True) or {}
+        old_path = (data.get("old_path") or "").strip()
+        new_name = (data.get("new_name") or "").strip()
+        roots = get_search_roots(search_roots)
+        if not old_path or not new_name:
+            return jsonify({"success": False, "error": "缺少舊檔案路徑或新檔名"}), 400
+        
+        # Clean new_name of path separators
+        new_name = os.path.basename(new_name).strip()
+        # Security: disallow invalid chars
+        if not new_name or any(c in new_name for c in r'/\:*?"<>|'):
+            return jsonify({"success": False, "error": "檔名包含非法字元"}), 400
+
+        old_real = os.path.realpath(old_path)
+        if not os.path.isfile(old_real):
+            return jsonify({"success": False, "error": "目標檔案不存在"}), 404
+
+        real_roots = [os.path.realpath(r) for r in roots if r and os.path.isdir(r)]
+        if not any(old_real == r or old_real.startswith(r + os.sep) for r in real_roots):
+            return jsonify({"success": False, "error": "檔案不在搜尋範圍內"}), 403
+
+        # Preserve extension: if original was .md, always lock extension to .md
+        old_ext = os.path.splitext(old_real)[1].lower()
+        new_stem, new_ext = os.path.splitext(new_name)
+        if old_ext == ".md":
+            # Force .md extension regardless of what user typed
+            new_name = new_stem + ".md" if new_stem else new_name
+            if not new_name.lower().endswith(".md"):
+                new_name += ".md"
+        elif not new_ext and old_ext:
+            new_name = new_stem + old_ext
+            new_ext = old_ext
+
+        parent_dir = os.path.dirname(old_real)
+        new_real = os.path.realpath(os.path.join(parent_dir, new_name))
+        if os.path.exists(new_real) and new_real != old_real:
+            return jsonify({"success": False, "error": f"目標檔名已存在：{new_name}"}), 409
+
+        # If this is a markdown file, we should cascade rename its ingest-generated source attachments!
+        renamed_sources = []
+        if old_ext == ".md":
+            old_stem = os.path.splitext(os.path.basename(old_real))[0]
+            new_stem = os.path.splitext(new_name)[0]
+            
+            # Read header to find attached sources
+            rels = []
+            content_str = ""
+            try:
+                with open(old_real, "r", encoding="utf-8", errors="replace") as f:
+                    content_str = f.read()
+                for line in content_str.splitlines():
+                    m = re.match(r"^> - `(.+)`$", line.strip())
+                    if m and m.group(1) not in rels:
+                        rels.append(m.group(1))
+            except Exception:
+                pass
+
+            repos = scan_doc_repositories(roots)
+            repo_root = FnFindOwningRepo(parent_dir, repos)
+            repo_real = os.path.realpath(repo_root) if repo_root else parent_dir
+
+            # Perform rename on the md file first
+            try:
+                os.rename(old_real, new_real)
+            except OSError as e:
+                return jsonify({"success": False, "error": f"重新命名失敗：{str(e)}"}), 500
+
+            # Cascade rename related sources that share the old_stem prefix
+            replacements = {}
+            for r in rels:
+                rel = (r or "").replace("/", os.sep).strip()
+                if not rel or ".." in rel.split(os.sep):
+                    continue
+                s_path = os.path.realpath(os.path.join(repo_real, rel))
+                if os.path.isfile(s_path) and s_path != new_real:
+                    s_name = os.path.basename(s_path)
+                    s_parent = os.path.dirname(s_path)
+                    # Match either old_stem prefix, or if single source doc (e.g. PDF/DOCX)
+                    m_fig = re.search(r'(_fig\d+.*)$', s_name)
+                    s_ext = os.path.splitext(s_name)[1]
+                    if m_fig:
+                        # It is an extracted figure
+                        new_s_name = f"{re.sub(r'\\s+', '_', new_stem)}{m_fig.group(1)}"
+                    elif s_name.startswith(old_stem):
+                        new_s_name = new_stem + s_name[len(old_stem):]
+                    else:
+                        # Direct source document attached to this md: adopt new_stem + original ext!
+                        new_s_name = f"{new_stem}{s_ext}"
+                    
+                    if new_s_name and new_s_name != s_name:
+                        new_s_path = os.path.join(s_parent, new_s_name)
+                        try:
+                            os.rename(s_path, new_s_path)
+                            renamed_sources.append({"old": s_name, "new": new_s_name})
+                            replacements[s_name] = new_s_name
+                            # Also track URL-quoted variant if markdown links had it
+                            replacements[urllib.parse.quote(s_name)] = urllib.parse.quote(new_s_name)
+                        except Exception:
+                            pass
+
+            # Update markdown file content if filenames were replaced
+            if replacements:
+                try:
+                    updated_content = content_str
+                    # Update header line references
+                    for old_fn, new_fn in replacements.items():
+                        updated_content = updated_content.replace(f"`{old_fn}`", f"`{new_fn}`")
+                        updated_content = updated_content.replace(f"({old_fn})", f"({new_fn})")
+                        updated_content = updated_content.replace(f"(<{old_fn}>)", f"(<{new_fn}>)")
+                    with open(new_real, "w", encoding="utf-8") as f:
+                        f.write(updated_content)
+                except Exception:
+                    pass
+        else:
+            try:
+                os.rename(old_real, new_real)
+            except OSError as e:
+                return jsonify({"success": False, "error": f"重新命名失敗：{str(e)}"}), 500
+
+        # Trigger incremental re-index for the owning repo
+        repos = scan_doc_repositories(roots)
+        repo_root = FnFindOwningRepo(parent_dir, repos)
+        index_res = None
+        if repo_root:
+            try:
+                index_res = index_repository(repo_root, incremental=True)
+            except Exception as e:
+                index_res = {"success": False, "error": str(e)}
+            try:
+                record_log(repo_root, "RENAME_FILE", target_file=new_real,
+                           summary=f"Renamed {os.path.basename(old_real)} -> {new_name} (sources: {len(renamed_sources)})")
+            except Exception:
+                pass
+
+        return jsonify({
+            "success": True,
+            "old_path": old_real,
+            "new_path": new_real,
+            "new_name": new_name,
+            "renamed_sources": renamed_sources,
+            "index": index_res
+        })
+
     @app.route("/api/browse/delete-dir", methods=["POST"])
     def browse_delete_dir():
         '''Recursively delete a directory under an authorized search root, then re-index repo.
@@ -1089,7 +1376,25 @@ def create_app(initial_paths: Optional[List[str]] = None, search_roots: Optional
         data = request.get_json(silent=True) or {}
         return jsonify(FnSetActiveLLM(data.get("provider", ""), data.get("model", "")))
 
-    
+    # ---------------- Image Ingest Settings API (/api/settings/image_ingest) ----------------
+    @app.route("/api/settings/image_ingest", methods=["GET"])
+    def settings_image_ingest_get():
+        from .image_settings import FnGetImageSettings
+        return jsonify({"success": True, "settings": FnGetImageSettings()})
+
+    @app.route("/api/settings/image_ingest", methods=["POST"])
+    def settings_image_ingest_set():
+        data = request.get_json(silent=True) or {}
+        from .image_settings import FnSaveImageSettings
+        saved = FnSaveImageSettings(data)
+        return jsonify({"success": True, "settings": saved})
+
+    @app.route("/api/settings/image_ingest/reset", methods=["POST"])
+    def settings_image_ingest_reset():
+        from .image_settings import FnResetImageSettings
+        res = FnResetImageSettings()
+        return jsonify({"success": True, "settings": res})
+
 
     # ─── Concepts Registry RESTful Endpoints ──────────────────────────
 

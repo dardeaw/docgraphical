@@ -419,10 +419,13 @@ def index_repository(repo_path: str, incremental: bool = False) -> Dict[str, Any
         _FnDeleteFileRows(cur, rel)
         _FnInsertFileNodes(cur, repo_path, fpath, rel)
 
+    # Compile / update DOC_CATALOG.md first so newly added or renamed files are cataloged
+    _FnSyncGlobalIndex(cur, repo_path)
+
+    # Rebuild all cross-document and catalog links
     _FnRebuildDocLinks(cur, repo_path, md_files)
 
     conn.commit()
-    _FnSyncGlobalIndex(cur, repo_path)
     cur.execute("SELECT count(*) FROM nodes")
     n_nodes = cur.fetchone()[0]
     cur.execute("SELECT count(*) FROM edges")

@@ -2145,6 +2145,43 @@ html, body {
   line-height: 1;
 }
 
+.activity-badge.badge-alert {
+  background: #f85149;
+  color: #ffffff;
+  box-shadow: 0 0 8px rgba(248, 81, 73, 0.6);
+  animation: pulseAlert 2s infinite ease-in-out;
+}
+
+.stg-alert-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: #f85149;
+  color: #ffffff;
+  font-weight: 800;
+  font-size: 11px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  margin-left: auto;
+  box-shadow: 0 0 6px rgba(248, 81, 73, 0.6);
+  animation: pulseAlert 2s infinite ease-in-out;
+}
+
+.btn-browse-alert {
+  border-color: #f85149 !important;
+  color: #ff7b72 !important;
+  background: rgba(248, 81, 73, 0.12) !important;
+  box-shadow: 0 0 10px rgba(248, 81, 73, 0.4) !important;
+  animation: pulseAlert 2s infinite ease-in-out !important;
+}
+
+@keyframes pulseAlert {
+  0% { transform: scale(1); opacity: 0.95; }
+  50% { transform: scale(1.08); opacity: 1; filter: brightness(1.2); }
+  100% { transform: scale(1); opacity: 0.95; }
+}
+
 /* Left Sidebar Drawer Container (Collapsible) */
 #left-sidebar-drawer {
   position: static !important;

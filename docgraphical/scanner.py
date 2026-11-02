@@ -27,8 +27,10 @@ def scan_doc_repositories(search_roots: List[str]) -> Dict[str, str]:
         if abs_root in excluded:
             continue
 
-        # Add root itself
-        repos[os.path.basename(abs_root) or abs_root] = abs_root
+        # Check if root is a drive root (e.g. C:\ or D:\)
+        is_drive_root = (os.path.splitdrive(abs_root)[1] in ("\\", "/", ""))
+        if not is_drive_root:
+            repos[os.path.basename(abs_root) or abs_root] = abs_root
 
         # Scan 2 levels down for project folders
         try:
@@ -107,6 +109,7 @@ def get_repo_doc_metrics(repo_path: str,
         blind "Index" button. None => repo has no index => no pending report.
     """
     md_files = 0
+    effective_md_files = 0
     total_headings = 0
     total_size = 0
     vPending: List[str] = []
@@ -121,6 +124,10 @@ def get_repo_doc_metrics(repo_path: str,
     for root, dirs, files in os.walk(repo_path):
         dirs[:] = [d for d in dirs if d not in IGNORE_DIRS and not d.startswith(".")]
         rel_root = os.path.relpath(root, repo_path).replace("\\", "/")
+        # Depth limit protection: skip scanning beyond 10 directory levels
+        if rel_root != "." and rel_root.count("/") >= 10:
+            dirs.clear()
+            continue
         if rel_root != "." and len(vDirs) < 500:
             vDirs.append(rel_root)
         for f in files:
@@ -136,6 +143,8 @@ def get_repo_doc_metrics(repo_path: str,
                 continue
             if is_doc_file(f):
                 md_files += 1
+                if f.upper() != "DOC_CATALOG.MD":
+                    effective_md_files += 1
                 full = os.path.join(root, f)
                 rel = os.path.relpath(full, repo_path).replace("\\", "/")
                 if indexed_set is not None:
@@ -179,6 +188,7 @@ def get_repo_doc_metrics(repo_path: str,
                     pass
     return {
         "files": md_files,
+        "effective_files": effective_md_files,
         "headings": total_headings,
         "size": total_size,
         "pending_files": vPending if indexed_set is not None else [],

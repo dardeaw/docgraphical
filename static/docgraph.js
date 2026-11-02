@@ -49,6 +49,10 @@ function getDocIconSvg(color = KIND_COLORS.file || '#f0883e') {
   return `<svg class="tree-doc-icon" viewBox="0 0 16 16" width="13" height="13" fill="${color}" style="margin-right:5px; flex-shrink:0; vertical-align:-1.5px; display:inline-block;"><path d="M4 0h5.5l4.5 4.5V14a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V2a2 2 0 0 1 2-2zm5 1v3.5a.5.5 0 0 0 .5.5H13L9 1z"/></svg>`;
 }
 
+function getCatalogIconSvg(color = '#58a6ff') {
+  return `<svg class="tree-doc-icon" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="${color}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="margin-right:5px; flex-shrink:0; vertical-align:-2px; display:inline-block;"><polygon points="1 6 1 22 8 18 16 22 23 18 23 2 16 6 8 2 1 6"></polygon><line x1="8" y1="2" x2="8" y2="18"></line><line x1="16" y1="6" x2="16" y2="22"></line></svg>`;
+}
+
 const KIND_COLORS = {
   concept: '#e2e8f0', // Core Concept WikiLink (Royal Silver Cube)
   file: '#f0883e',       // Document (Warm Cyber Orange)
@@ -957,13 +961,24 @@ function loadProjects(opts = {}) {
       // files yet must NOT trigger this — the user already did the setup.
       if (allProjectsList.length === 0) {
         buildProjectTree();
-        showToast(currentLanguage === 'zh' ? '👋 知識庫是空的 — 先加入文件目錄吧' : '👋 Knowledge base is empty — add a directory to begin');
-        // bRefresh=false: this call is INSIDE loadProjects — re-triggering a
-        // refresh here would recurse forever (loadProjects -> openPathModal
-        // -> loadProjects -> ...) and flood /api/projects (~200 req/s).
-        openPathModal(false);
+        if (typeof updateOnboardingGuidance === 'function') updateOnboardingGuidance();
+        
+        // Prevent toast from flickering repeatedly when empty
+        if (!window._hasShownEmptyRepoToast) {
+          window._hasShownEmptyRepoToast = true;
+          showToast(currentLanguage === 'zh' ? '👋 知識庫是空的 — 先加入文件目錄吧' : '👋 Knowledge base is empty — add a directory to begin');
+        }
+        
+        const m = document.getElementById('settings-modal') || document.getElementById('path-modal');
+        if (!m || !m.classList.contains('show')) {
+          openPathModal(false);
+        }
         return;
+      } else {
+        window._hasShownEmptyRepoToast = false;
       }
+
+      if (typeof updateOnboardingGuidance === 'function') updateOnboardingGuidance();
 
       if (allProjectsList.length > 0) {
         loadMasterGraphAndFilter();
@@ -1276,14 +1291,21 @@ function buildProjectTree() {
     const projData = projRoots[projName] || { dirs: {}, files: {} };
     const isProjOpen = openProjs.size === 0 ? true : openProjs.has(projName);
 
+    const vProjZh = currentLanguage === 'zh';
+    const vProjJa = currentLanguage === 'ja';
+    const vProjEsc = (proj.path || '').replace(/\\/g, '\\\\');
+    const vProjIndexed = proj.is_indexed || proj.has_db;
+
     const projNodeEl = document.createElement('div');
     projNodeEl.className = 'tree-node';
     projNodeEl.setAttribute('data-tree-proj', projName);
 
-    // Unindexed projects stay visible as todo entries with an inline Create Index action.
-    const vProjIndexed = proj.status === 'ready' || proj.is_indexed || proj.has_db;
-    const vProjZh = currentLanguage === 'zh';
-    const vProjEsc = (proj.path || '').replace(/\\/g, '\\\\');
+    // Check if repo has no effective Markdown files (empty or only DOC_CATALOG.md)
+    const vEffectiveCount = (proj.effective_files !== undefined) ? proj.effective_files : (proj.files || 0);
+    const vNeedsIngest = (vEffectiveCount === 0);
+    const vIngestBadgeHtml = vNeedsIngest ? `
+      <span class="node-kind-tag txbadge" style="margin-left:6px; background:rgba(248,81,73,0.18); color:#ff7b72; border:1px solid #f85149; font-weight:700; cursor:pointer;" title="${vProjZh ? '⚠️ 尚未匯入文件，僅有目錄或為空！點擊立即 Ingest 文件' : (vProjJa ? '⚠️ ドキュメントがありません！クリックして Ingest を開始' : '⚠️ No documents yet (empty/catalog only)! Click to Ingest documents')}" onclick="event.stopPropagation();treeNewDocument('${vProjEsc}')">⚠️ ${vProjZh ? '需 Ingest' : (vProjJa ? '要 Ingest' : 'Needs Ingest')}</span>
+    ` : '';
 
     projNodeEl.innerHTML = `
       <span class="tree-arrow ${isProjOpen ? 'open' : ''}">▸</span>
@@ -1291,6 +1313,7 @@ function buildProjectTree() {
       <span title="${escapeHtml(projName)}" style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:600;color:#58a6ff;">📦 ${escapeHtml(projName)}</span>
       <button class="mini-btn txbtn" style="margin-left:auto; width:22px; height:20px; padding:0; font-size:13px; display:inline-flex; align-items:center; justify-content:center; flex-shrink:0;" title="${vProjZh ? '在此專案新增文件…（開啟 LLM 摘要入庫對話框）' : 'New document here… (open LLM summary ingest dialog)'}" onclick="event.stopPropagation();treeNewDocument('${vProjEsc}')">＋</button>
       <span class="node-kind-tag txbadge" style="margin-left:6px;">${proj.files || Object.keys(projData.files).length} md</span>
+      ${vIngestBadgeHtml}
       ${vProjIndexed ? '' : `<button class="mini-btn" style="margin-left:6px; padding:1px 8px; font-size:10px; border-color:#9e6a03; color:#d29922;" title="${vProjZh ? '建立索引後才會出現在圖上' : 'Index it to show its nodes in the graph'}" onclick="event.stopPropagation();initRepo('${vProjEsc}', this)">${vProjZh ? '＋ 建立索引' : '＋ Create Index'}</button>`}
     `;
 
@@ -1590,14 +1613,20 @@ function renderDirContents(projName, dirObj, parentEl, openDirs, openFiles, sele
     fileNodeEl.setAttribute('data-tree-file-path', cleanFilePath);
 
     // Long names truncate with … (badge + delete stay visible); full name on hover.
-    const vIsMd = /\.md$/i.test(fName || '');
+    const isDocCatalog = /^DOC_CATALOG\.md$/i.test(fName || '');
+    const vIsMd = /\.md$/i.test(fName || '') && !isDocCatalog;
     const vFileAbs = resolveTreeAbsPath(projName, cleanFilePath);
     const vFileEsc = (vFileAbs || '').replace(/\\/g, '\\\\').replace(/'/g, "\\'");
     const vNameEsc = (fName || '').replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+
+    const fileIconSvg = isDocCatalog
+      ? getCatalogIconSvg('#58a6ff')
+      : getDocIconSvg(bUnindexed ? '#d29922' : (KIND_COLORS.file || '#f0883e'));
+
     fileNodeEl.innerHTML = `
       <span class="tree-arrow ${isFileOpen ? 'open' : ''}" style="${bUnindexed ? 'visibility:hidden;' : ''}">▸</span>
-      ${getDocIconSvg(bUnindexed ? '#d29922' : (KIND_COLORS.file || '#f0883e'))}
-      <span title="${escapeHtml(fName)}" style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:${bUnindexed ? '#d29922' : '#c9d1d9'};">${escapeHtml(fName)}</span>
+      ${fileIconSvg}
+      <span title="${escapeHtml(fName)}" style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:${isDocCatalog ? '#58a6ff' : (bUnindexed ? '#d29922' : '#c9d1d9')};font-weight:${isDocCatalog ? '600' : 'normal'};">${escapeHtml(fName)}</span>
       ${vIsMd ? `<button class="mini-btn txbtn" style="width:22px; height:20px; padding:0; font-size:13px; display:inline-flex; align-items:center; justify-content:center; flex-shrink:0; border-color:#5a2d2d; color:#f85149;" title="${bUzh ? `刪除「${escapeHtml(fName)}」（md＋來源檔＋索引，需確認）` : `Delete "${escapeHtml(fName)}" (md + sources + index, asks first)`}" onclick="event.stopPropagation();treeDeleteFile('${vFileEsc}', '${vNameEsc}')">−</button>` : ''}
       ${bUnindexed
         ? `<button class="node-kind-tag txbadge" style="flex-shrink:0;margin-left:6px;background:#3a2e12;color:#d29922;border:1px solid #9e6a03;cursor:pointer;padding:2px 8px;border-radius:4px;font-size:13px;font-weight:600;" title="${bUzh ? '點擊立即將此檔案納入索引' : 'Click to index this file now'}" onclick="event.stopPropagation();promptToIndexFile('${escapeHtml(projName)}', '${vNameEsc}')">${bUzh ? '⏳ 待索引' : '⏳ unindexed'}</button>`
@@ -2149,7 +2178,6 @@ function renderMarkdown(mdText, extraSources) {
   const curFile = (viewCtx && viewCtx.file) ? viewCtx.file : (activeNode ? (activeNode.file || activeNode.abs_path || '') : '');
   updateDocTagsBar(mdText, curFile);
 
-  // Convert [[Concept]] into clickable interactive inline links (clean blue underline, no tag icon)
   let processedMd = mdText || '';
   const zhLang = (typeof currentLanguage !== 'undefined' && currentLanguage === 'zh');
   const openConceptPrefix = zhLang ? '開啟概念頁：' : 'Open concept page: ';
@@ -2158,6 +2186,18 @@ function renderMarkdown(mdText, extraSources) {
     const displayName = alias ? alias.trim() : rawTarget;
     if (rawTarget.toLowerCase().endsWith('.md')) return m; // keep standard doc links
     return `<a class="concept-inline-link" title="${openConceptPrefix}${escapeHtml(rawTarget)}" style="color:#58a6ff; text-decoration:underline; text-underline-offset:3px; cursor:pointer; font-weight:500;" onclick="onConceptCardClick('${escapeHtml(rawTarget)}', event)">${escapeHtml(displayName)}</a>`;
+  });
+
+  // Normalize Markdown image links so marked parses them cleanly into <img> tags
+  // Strip any accidental < or > inside parentheses, and wrap cleanly with URL encoding if containing spaces
+  processedMd = processedMd.replace(/!\[(.*?)\]\([<"']*(.*?)[>"']*\)/g, (m, alt, link) => {
+    const trimmed = link.trim();
+    if (!trimmed) return '';
+    // If link has spaces and no angle brackets, encode or angle-bracket
+    if (/\s/.test(trimmed)) {
+      return `![${alt}](<${trimmed}>)`;
+    }
+    return `![${alt}](${trimmed})`;
   });
   // Ingest-md header sources: `> - `rel`` lines — remembered for linkify + menu.
   // extraSources (server-provided, from the FULL file) keeps source links
@@ -2179,8 +2219,10 @@ function renderMarkdown(mdText, extraSources) {
     linkifyConceptLinks(container);
     bindMarkdownInternalLinks(container);
     resolveMarkdownImages(container, curFile);
+    renderKaTeXMath(container);
   } else {
     container.innerText = mdText || '';
+    renderKaTeXMath(container);
   }
   // Every new selection starts at the top — never inherit the old scroll
   // position (that made heading clicks look like "full doc minus the front").
@@ -2744,11 +2786,15 @@ function closePathModal() {
   if (m) m.classList.remove('show');
 }
 
-function submitAddPath() {
-  const input = document.getElementById('custom-path-input');
+function scanDirectory() {
+  const input = document.getElementById('txt-scan-dir') || document.getElementById('custom-path-input');
   if (!input) return;
   const path = input.value.trim();
-  if (!path) return;
+  if (!path) {
+    const lang = (typeof currentLanguage !== 'undefined') ? currentLanguage : 'zh';
+    alert(lang === 'zh' ? '請先輸入或瀏覽選擇一個專案目錄' : 'Please specify a directory path first');
+    return;
+  }
 
   fetch('/api/paths/add', {
     method: 'POST',
@@ -2760,11 +2806,19 @@ function submitAddPath() {
     if (res.success) {
       input.value = '';
       loadProjects();
-      showToast('✅ Directory added & indexed!');
+      const lang = (typeof currentLanguage !== 'undefined') ? currentLanguage : 'zh';
+      const msg = lang === 'zh' ? '✅ 目錄已加入專案儲存庫！' : '✅ Directory added successfully!';
+      if (typeof showToast === 'function') showToast(msg);
+      else alert(msg);
     } else {
       alert('Error: ' + res.error);
     }
-  });
+  })
+  .catch(err => alert('Request failed: ' + err));
+}
+
+function submitAddPath() {
+  scanDirectory();
 }
 
 function renderRepoTable(projects) {
@@ -2839,6 +2893,14 @@ function renderRepoTable(projects) {
     `;
     tbody.appendChild(tr);
   });
+
+  if (!projects || projects.length === 0) {
+    const tr = document.createElement('tr');
+    tr.innerHTML = `<td colspan="5" style="text-align:center; color:#8b949e; padding:24px 16px; font-size:13px;">
+      ${zh ? '⚠️ 尚未發現任何儲存庫。請點擊上方「瀏覽」選擇專案目錄後點擊「掃描」！' : (ja ? '⚠️ リポジトリが見つかりません。上の「参照」からフォルダを選択し「スキャン」してください！' : '⚠️ No repositories discovered yet. Click "Browse" above to select a folder, then click "Scan"!')}
+    </td>`;
+    tbody.appendChild(tr);
+  }
 }
 
 // Busy-state helper for index action buttons (galaxy-style: disable while running).
@@ -3209,8 +3271,8 @@ function openIngestDialog(absDir) {
           <span style="font-size:12px;color:#8b949e;">${editHint}</span>
         </div>
 
-        <!-- Markdown Preview Box -->
-        <div id="ing-preview" style="background:#010409;border:1px solid #21262d;border-radius:6px;padding:14px;font-size:13px;flex:1;min-height:180px;overflow-y:auto;color:#c9d1d9;word-break:break-word;line-height:1.6;">${emptyPrev}</div>
+        <!-- Markdown Preview Box (Rendered with full doc-content-viewer styling) -->
+        <div id="ing-preview" class="doc-content-viewer" style="background:#010409;border:1px solid #21262d;border-radius:6px;padding:18px 24px;font-size:14px;flex:1;min-height:180px;overflow-y:auto;color:#c9d1d9;word-break:break-word;line-height:1.7;">${emptyPrev}</div>
         <textarea id="ing-edit" oninput="ingOnEditorInput(this.value)" style="display:none;background:#010409;border:1px solid #1f6feb;border-radius:6px;padding:14px;font-size:13px;color:#e6edf3;flex:1;min-height:180px;overflow-y:auto;font-family:inherit;white-space:pre-wrap;line-height:1.6;"></textarea>
 
         <!-- Compound Tagging Visualization Tray -->
@@ -3218,12 +3280,12 @@ function openIngestDialog(absDir) {
           <div style="display:flex;align-items:center;justify-content:space-between;">
             <span style="font-size:15px;font-weight:600;color:#e2e8f0;display:flex;align-items:center;gap:5px;">
               <span style="display:inline-block;width:7px;height:7px;border-radius:50%;background:#3fb950;"></span>
-              ${zh ? '知識拓撲滾動複利 (Compound Ingest)' : 'Knowledge Topology Compound'}
+              ${zh ? '知識庫官方概念比對 (Official Concepts Matching)' : 'Official Concepts Matching'}
             </span>
-            <span id="ing-compound-status" style="font-size:13px;color:#8b949e;">${zh ? '點擊標籤/候選詞可自由勾選或剔除' : 'Click pills to toggle'}</span>
+            <span id="ing-compound-status" style="font-size:13px;color:#8b949e;">${zh ? '摘要生成後自動比對命中之官方標籤' : 'Official concepts will appear here'}</span>
           </div>
           <div id="ing-compound-pills" style="display:flex;flex-wrap:wrap;gap:8px;min-height:26px;align-items:center;">
-            <span style="font-size:13px;color:#8b949e;">${zh ? '（產生摘要後將顯示比對命中之官方概念與新發掘候選術語）' : '(Compound terms will appear here)'}</span>
+            <span style="font-size:13px;color:#8b949e;">${zh ? '（產生摘要後將顯示比對命中之官方概念標籤）' : '(Official concepts will appear here)'}</span>
           </div>
         </div>
 
@@ -3569,31 +3631,33 @@ function renderIngCompoundTray(comp) {
   const statusEl = document.getElementById('ing-compound-status');
   if (!tray) return;
   const cur = ingCurEntry();
-  if (!comp || (!comp.matched && !comp.candidates && !comp.matched_concepts && !comp.discovered_candidates)) {
-    tray.innerHTML = `<span style="font-size:13px;color:#8b949e;">${ingState && ingState.zh ? '（產生摘要後將顯示比對命中之官方概念與新發掘候選術語）' : '(Compound terms will appear here)'}</span>`;
-    if (statusEl) statusEl.textContent = ingState && ingState.zh ? '摘要生成後自動打標與術語發掘' : 'Ready';
+  if (!comp || (!comp.matched && !comp.matched_concepts)) {
+    tray.innerHTML = `<span style="font-size:13px;color:#8b949e;">${ingState && ingState.zh ? '（產生摘要後將自動比對知識庫既有官方概念）' : '(Official concepts will appear here)'}</span>`;
+    if (statusEl) statusEl.textContent = ingState && ingState.zh ? '摘要生成後自動比對官方概念' : 'Ready';
     return;
   }
 
   const matched = comp.matched || (comp.matched_concepts || []).map(m => m.name) || [];
-  const candidates = comp.candidates || (comp.discovered_candidates || []).map(c => c.term) || [];
 
   // Initialize selection sets if not present
   if (!cur.selectedMatched) {
-    cur.selectedMatched = new Set(matched);
-  }
-  if (!cur.selectedCandidates) {
-    cur.selectedCandidates = new Set(candidates);
+    cur.selectedMatched = new Set(matched); // Matched official concepts default to checked
   }
 
   const selMatchedCount = cur.selectedMatched.size;
-  const selCandCount = cur.selectedCandidates.size;
 
   if (statusEl) {
-    statusEl.innerHTML = `<span style="color:#3fb950;font-weight:600;">已選鏈接 ${selMatchedCount}/${matched.length} 個</span> &nbsp;·&nbsp; <span style="color:#d29922;font-weight:600;">已選候選 ${selCandCount}/${candidates.length} 個</span> <span style="font-size:11.5px;color:#8b949e;margin-left:6px;">(點擊膠囊切換選取)</span>`;
+    statusEl.innerHTML = `<span style="color:#3fb950;font-weight:600;">已選鏈接 ${selMatchedCount}/${matched.length} 個</span> <span style="font-size:11.5px;color:#8b949e;margin-left:6px;">(點擊膠囊切換選取，入庫自動建立實體跳轉超連結)</span>`;
   }
 
   let html = '';
+  if (matched.length > 0) {
+    html += `<div style="display:flex;align-items:center;gap:6px;margin-bottom:6px;width:100%;">
+      <span style="font-size:12px;color:#58a6ff;font-weight:600;">命中官方概念：</span>
+      <button type="button" onclick="ingBatchMatched(true)" style="background:#21262d;border:1px solid #30363d;color:#c9d1d9;border-radius:4px;padding:2px 7px;font-size:11.5px;cursor:pointer;">全選</button>
+      <button type="button" onclick="ingBatchMatched(false)" style="background:#21262d;border:1px solid #30363d;color:#c9d1d9;border-radius:4px;padding:2px 7px;font-size:11.5px;cursor:pointer;">全清</button>
+    </div>`;
+  }
   matched.forEach(name => {
     const isSelected = cur.selectedMatched.has(name);
     const bg = isSelected ? '#23863628' : '#21262d44';
@@ -3602,23 +3666,21 @@ function renderIngCompoundTray(comp) {
     const checkIcon = isSelected ? '✓ ' : '';
     const opacity = isSelected ? '1' : '0.6';
     const lineThrough = isSelected ? 'none' : 'line-through';
-    html += `<span onclick="ingToggleCompoundPill('matched', '${escapeHtml(name)}')" title="${isSelected ? '已選取入庫 (點擊取消)' : '已排除 (點擊啟用)'}" style="display:inline-flex;align-items:center;gap:4px;background:${bg};border:1px solid ${border};color:${color};padding:3px 9px;border-radius:6px;font-size:13px;font-weight:600;cursor:pointer;user-select:none;transition:all 0.15s ease;opacity:${opacity};text-decoration:${lineThrough};">🏷️ ${checkIcon}${escapeHtml(name)}</span>`;
+    html += `<span onclick="ingToggleCompoundPill('matched', '${escapeHtml(name)}')" title="${isSelected ? '已選取入庫鏈接 (點擊取消)' : '已排除 (點擊啟用)'}" style="display:inline-flex;align-items:center;gap:4px;background:${bg};border:1px solid ${border};color:${color};padding:3px 9px;border-radius:6px;font-size:13px;font-weight:600;cursor:pointer;user-select:none;transition:all 0.15s ease;opacity:${opacity};text-decoration:${lineThrough};margin-right:6px;margin-bottom:6px;">🏷️ ${checkIcon}${escapeHtml(name)}</span>`;
   });
-  candidates.forEach(term => {
-    const isSelected = cur.selectedCandidates.has(term);
-    const bg = isSelected ? '#d2992228' : '#21262d44';
-    const border = isSelected ? '#d29922' : '#30363d';
-    const color = isSelected ? '#e3b341' : '#8b949e';
-    const checkIcon = isSelected ? '✓ ' : '';
-    const opacity = isSelected ? '1' : '0.6';
-    const lineThrough = isSelected ? 'none' : 'line-through';
-    html += `<span onclick="ingToggleCompoundPill('candidate', '${escapeHtml(term)}')" title="${isSelected ? '已選取收錄 (點擊取消)' : '已排除 (點擊啟用)'}" style="display:inline-flex;align-items:center;gap:4px;background:${bg};border:1px solid ${border};color:${color};padding:3px 9px;border-radius:6px;font-size:13px;font-weight:600;cursor:pointer;user-select:none;transition:all 0.15s ease;opacity:${opacity};text-decoration:${lineThrough};">✨ ${checkIcon}${escapeHtml(term)}</span>`;
-  });
-  if (!html) {
-    html = `<span style="font-size:13px;color:#8b949e;">（本次摘要內容無新領域術語）</span>`;
+  if (!matched.length) {
+    html = `<span style="font-size:13px;color:#8b949e;">（本文件摘要無命中任何既有官方概念）</span>`;
   }
   tray.innerHTML = html;
 }
+
+window.ingBatchMatched = function(selectAll) {
+  const cur = ingCurEntry();
+  if (!cur || !cur.compounding) return;
+  const matched = cur.compounding.matched || (cur.compounding.matched_concepts || []).map(m => m.name) || [];
+  cur.selectedMatched = selectAll ? new Set(matched) : new Set();
+  renderIngCompoundTray(cur.compounding);
+};
 
 window.ingToggleCompoundPill = function(type, val) {
   const cur = ingCurEntry();
@@ -3688,13 +3750,48 @@ function ingShowTab(which) {
       return;
     }
     try {
-      if (window.marked && typeof window.marked.parse === 'function') pv.innerHTML = window.marked.parse(txt);
-      else if (typeof window.marked === 'function') pv.innerHTML = window.marked(txt);
-      else pv.textContent = txt;
+      let processed = txt;
+      // Convert [[Concept]] links if any
+      const zhLang = (typeof currentLanguage !== 'undefined' && currentLanguage === 'zh');
+      const openConceptPrefix = zhLang ? '開啟概念頁：' : 'Open concept page: ';
+      processed = processed.replace(/\[\[([^\]|#\n]+)(?:#[^\]|\n]+)?(?:\|([^\]\n]+))?\]\]/g, (m, cName, alias) => {
+        const rawTarget = cName.trim();
+        const displayName = alias ? alias.trim() : rawTarget;
+        if (rawTarget.toLowerCase().endsWith('.md')) return m;
+        return `<a class="concept-inline-link" title="${openConceptPrefix}${escapeHtml(rawTarget)}" style="color:#58a6ff; text-decoration:underline; text-underline-offset:3px; cursor:pointer; font-weight:500;" onclick="onConceptCardClick('${escapeHtml(rawTarget)}', event)">${escapeHtml(displayName)}</a>`;
+      });
+
+      // Normalize Markdown image links so marked parses them cleanly into <img> tags
+      processed = processed.replace(/!\[(.*?)\]\([<"']*(.*?)[>"']*\)/g, (m, alt, link) => {
+        const trimmed = link.trim();
+        if (!trimmed) return '';
+        if (/\s/.test(trimmed)) {
+          return `![${alt}](<${trimmed}>)`;
+        }
+        return `![${alt}](${trimmed})`;
+      });
+
+      if (window.marked && typeof window.marked.parse === 'function') {
+        pv.innerHTML = window.marked.parse(processed);
+      } else if (typeof window.marked === 'function') {
+        pv.innerHTML = window.marked(processed);
+      } else {
+        pv.textContent = processed;
+      }
+
+      // Syntax highlight if hljs exists
+      pv.querySelectorAll('pre code').forEach((block) => {
+        if (window.hljs) hljs.highlightElement(block);
+      });
+
+      // Resolve images in preview (resolves through /api/doc/image)
       if (typeof resolveMarkdownImages === 'function') {
         const previewDocPath = (st.dir ? st.dir + '/' : '') + (cur.customFilename || cur.filename || 'preview.md');
         resolveMarkdownImages(pv, previewDocPath);
       }
+
+      // Render KaTeX Math in Ingest Preview
+      renderKaTeXMath(pv);
     } catch (e) { pv.textContent = txt; }
   }
 }
@@ -3805,6 +3902,7 @@ function ingSummarizeAll(btn) {
           e.status = 'done';
           e.summary = body.summary || '';
           e.model = body.model || '';
+          e.candidate_images = body.candidate_images || [];
 
           // Auto-derive filename from LLM H1 if title was untitled or clipboard
           const h1Match = e.summary.match(/^#\s+(.+)$/m);
@@ -3905,6 +4003,7 @@ function ingSave(btn) {
       source_paths: e.type === 'clipboard' ? (e.stagedImagePaths || []) : (e.stagedPath ? [e.stagedPath] : []),
       source_urls: e.type === 'url' ? [e.url] : [],
       model: e.model,
+      candidate_images: e.candidate_images || [],
       selected_matched: e.selectedMatched ? Array.from(e.selectedMatched) : null,
       selected_candidates: e.selectedCandidates ? Array.from(e.selectedCandidates) : null
     };
@@ -4125,17 +4224,20 @@ function openTreeCtxMenu(e) {
       else showToast(zh ? '⏳ 文件匯入即將推出' : (ja ? '⏳ ドキュメント取り込みは準備中' : '⏳ Document ingest coming soon'));
     }});
     items.push({ label: zh ? '📁 新增資料夾…' : (ja ? '📁 新規フォルダ…' : '📁 New folder…'), fn: () => treeNewFolder(absPath) });
+    items.push({ label: zh ? '✏️ 重新命名…' : (ja ? '✏️ 名前の変更…' : '✏️ Rename…'), fn: () => treeRenameFile(absPath, treePath.split('/').pop() || treePath) });
     items.push({ label: zh ? '🗑️ 刪除此資料夾…' : (ja ? '🗑️ このフォルダを削除…' : '🗑️ Delete folder…'), fn: () => treeDeleteDir(absPath, treePath.split('/').pop() || treePath) });
     addCopyAbs(zh ? '📋 複製絕對路徑' : (ja ? '📋 絶対パスをコピー' : '📋 Copy absolute path'));
   } else if (kind === 'file') {
     items.push({ label: zh ? '🎯 在圖上定位' : (ja ? '🎯 グラフで位置を特定' : '🎯 Locate in graph'), fn: () => focusGraphNodeById(nodeId) });
+    items.push({ label: zh ? '✏️ 重新命名…' : (ja ? '✏️ 名前の変更…' : '✏️ Rename…'), fn: () => treeRenameFile(absPath, treePath.split('/').pop() || treePath) });
     items.push({ label: zh ? '🗑️ 刪除此文件…' : (ja ? '🗑️ このドキュメントを削除…' : '🗑️ Delete document…'), fn: () => treeDeleteFile(absPath, treePath.split('/').pop() || treePath) });
     addCopyAbs(zh ? '📋 複製絕對路徑' : (ja ? '📋 絶対パスをコピー' : '📋 Copy absolute path'));
   } else if (kind === 'source') {
-    // Source child row under its md (never indexed): open + copy only.
+    // Source child row under its md (never indexed): open + rename + copy.
     const srcUrl = (projEntry && projEntry.path)
       ? `/api/ingest/source?repo=${encodeURIComponent(projEntry.path)}&file=${encodeURIComponent(treePath)}` : '';
     if (srcUrl) items.push({ label: zh ? '📂 開啟來源檔案' : '📂 Open source file', fn: () => window.open(srcUrl, '_blank', 'noopener') });
+    items.push({ label: zh ? '✏️ 重新命名…' : (ja ? '✏️ 名前の変更…' : '✏️ Rename…'), fn: () => treeRenameFile(absPath, treePath.split('/').pop() || treePath) });
     addCopyAbs(zh ? '📋 複製絕對路徑' : '📋 Copy absolute path');
   } else {
     items.push({ label: zh ? '🎯 定位此節' : '🎯 Locate this section', fn: () => focusGraphNodeById(nodeId) });
@@ -4146,11 +4248,11 @@ function openTreeCtxMenu(e) {
 
   closeTreeCtxMenu();
   treeCtxEl = document.createElement('div');
-  treeCtxEl.style.cssText = 'position:fixed;z-index:1000004;min-width:200px;max-width:320px;background:#161b22;border:1px solid #30363d;border-radius:8px;padding:4px;box-shadow:0 8px 24px rgba(0,0,0,.55);font-size:12px;color:#e6edf3;zoom:1.16;';
+  treeCtxEl.style.cssText = 'position:fixed;z-index:1000004;min-width:180px;max-width:300px;background:#161b22;border:1px solid #30363d;border-radius:8px;padding:5px;box-shadow:0 8px 24px rgba(0,0,0,.65);font-size:13px;color:#e6edf3;';
   items.forEach(it => {
     const row = document.createElement('div');
     row.textContent = it.label;
-    row.style.cssText = 'padding:7px 10px;border-radius:6px;cursor:pointer;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;';
+    row.style.cssText = 'padding:7px 12px;border-radius:6px;cursor:pointer;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-size:13px;display:flex;align-items:center;gap:6px;';
     row.onmouseenter = () => { row.style.background = '#1f6feb44'; };
     row.onmouseleave = () => { row.style.background = ''; };
     row.onclick = (ev) => { ev.stopPropagation(); closeTreeCtxMenu(); it.fn(); };
@@ -4202,7 +4304,10 @@ function updateExplorerI18n() {
   const set = (id, txt) => { const el = document.getElementById(id); if (el) el.textContent = txt; };
   const setAttr = (id, attr, txt) => { const el = document.getElementById(id); if (el) el.setAttribute(attr, txt); };
 
+  set('lbl-drawer-explorer-title', zh ? '文件瀏覽器' : (ja ? 'ファイルエクスプローラー' : 'EXPLORER'));
   set('btn-repo-mgr', zh ? '⚙ 倉庫' : (ja ? '⚙ リポジトリ' : '⚙ Repos'));
+  set('btn-sync-all-tree', zh ? '⚡ 全部同步' : (ja ? '⚡ すべて同期' : '⚡ Sync'));
+  setAttr('btn-sync-all-tree', 'title', zh ? '增量同步所有已索引的儲存庫' : (ja ? 'すべてのインデックス済みリポジトリを増分同期' : 'Incremental sync every indexed repository'));
   set('btn-sel-all', zh ? '全選' : (ja ? 'すべて選択' : 'Select All'));
   set('btn-sel-none', zh ? '取消選取' : (ja ? '選択解除' : 'Deselect'));
   set('btn-clear-filter', '✕');
@@ -4357,7 +4462,7 @@ function init3DNavControls() {
       } else {
         autoFrameGraph();
       }
-    } else if (code === 'KeyF') {
+    } else if (code === 'KeyF' && !e.ctrlKey && !e.metaKey && !e.altKey) {
       e.preventDefault();
       autoFrameGraph();
     } else if (code === 'Digit1') {
@@ -5084,18 +5189,27 @@ function loadProvActiveModel() {
         sel.appendChild(group);
       }
       if (!sel.value && sel.options.length) sel.selectedIndex = 0;
+      
+      const activeVal = sel.value || '';
+      const hasModel = !!(activeVal && activeVal.includes(':'));
+      gCachedLlmState = { checked: true, hasModel: hasModel, modelInfo: activeVal };
+      if (typeof updateOnboardingGuidance === 'function') updateOnboardingGuidance();
     })
     .catch(() => {
       sel.innerHTML = '';
       const opt = document.createElement('option');
       opt.textContent = provT('prov_model_unset');
       sel.appendChild(opt);
+      gCachedLlmState = { checked: true, hasModel: false, modelInfo: '' };
+      if (typeof updateOnboardingGuidance === 'function') updateOnboardingGuidance();
     });
   sel.onchange = () => {
     const idx = sel.value.indexOf(':');
     if (idx < 0) return;
     const pick = { provider: sel.value.substring(0, idx), model: sel.value.substring(idx + 1) };
     try { localStorage.setItem('docgraphical-llm-model', JSON.stringify(pick)); } catch (e) { /* ignore */ }
+    gCachedLlmState = { checked: true, hasModel: true, modelInfo: sel.value };
+    if (typeof updateOnboardingGuidance === 'function') updateOnboardingGuidance();
     // Server-side persist so background jobs (ingest) resolve the same target.
     fetch('/api/llm/active', {
       method: 'POST',
@@ -5164,30 +5278,120 @@ function bindMarkdownInternalLinks(container) {
   });
 }
 
-// Intercept and resolve markdown images (![alt](path))
+// Intercept and resolve markdown images (![alt](path)) -> Figure card with clickable link caption + responsive image
 function resolveMarkdownImages(container, docFilePath) {
   if (!container) return;
+  const zh = (typeof currentLanguage !== 'undefined' && currentLanguage === 'zh');
   container.querySelectorAll('img').forEach(img => {
     const src = img.getAttribute('src');
     if (!src) return;
-    // Don't modify web URLs or data URIs
-    if (/^(https?:|\/\/|data:)/i.test(src)) return;
 
-    // Route through /api/doc/image
-    const docParam = docFilePath ? encodeURIComponent(docFilePath) : '';
-    const imgParam = encodeURIComponent(src);
-    const resolvedUrl = `/api/doc/image?doc=${docParam}&img=${imgParam}`;
-    img.src = resolvedUrl;
-    img.style.maxWidth = '100%';
-    img.style.borderRadius = '6px';
-    img.style.boxShadow = '0 2px 8px rgba(0,0,0,0.3)';
-    img.style.cursor = 'zoom-in';
-    img.title = img.alt || '點擊在新分頁開啟全圖';
-    img.onclick = function(e) {
+    let cleanSrc = src;
+    try { cleanSrc = decodeURIComponent(src); } catch (_) {}
+    cleanSrc = cleanSrc.replace(/^[<"']+|[>"']+$/g, '').trim();
+
+    let resolvedUrl = src;
+    if (!/^(https?:|\/\/|data:)/i.test(src)) {
+      const docParam = docFilePath ? encodeURIComponent(docFilePath) : '';
+      const imgParam = encodeURIComponent(cleanSrc);
+      resolvedUrl = `/api/doc/image?doc=${docParam}&img=${imgParam}`;
+    }
+
+    const caption = (img.getAttribute('alt') || cleanSrc || '查看附圖').trim();
+    
+    // Create dedicated figure card wrapper
+    const fig = document.createElement('figure');
+    fig.className = 'doc-image-figure';
+    fig.style.cssText = 'margin:14px 0 18px 0; padding:0; display:flex; flex-direction:column; gap:8px; max-width:100%;';
+
+    // Caption link header (字串帶超連結)
+    const capLink = document.createElement('a');
+    capLink.className = 'doc-image-caption-link';
+    capLink.href = resolvedUrl;
+    capLink.target = '_blank';
+    capLink.rel = 'noopener noreferrer';
+    capLink.style.cssText = 'display:inline-flex; align-items:center; gap:6px; color:#58a6ff; text-decoration:none; font-size:13px; font-weight:600; width:fit-content;';
+    capLink.innerHTML = `<span style="font-size:15px;">🖼️</span> <span style="text-decoration:underline; text-underline-offset:3px;">${escapeHtml(caption)}</span> <span style="font-size:11px; color:#8b949e; font-weight:normal; margin-left:2px;">↗</span>`;
+    capLink.title = (zh ? '在新分頁開啟全圖：' : 'Open full image in new tab: ') + cleanSrc;
+
+    // Actual image element
+    const actualImg = document.createElement('img');
+    actualImg.src = resolvedUrl;
+    actualImg.alt = caption;
+    actualImg.style.cssText = 'max-width:100%; height:auto; border-radius:6px; border:1px solid #30363d; box-shadow:0 3px 12px rgba(0,0,0,0.35); cursor:zoom-in; display:block; background:#0d1117;';
+    actualImg.title = (zh ? '點擊在新分頁開啟原圖：' : 'Click to open in new tab: ') + caption;
+    actualImg.onclick = (e) => {
       e.stopPropagation();
       window.open(resolvedUrl, '_blank', 'noopener');
     };
+
+    fig.appendChild(capLink);
+    fig.appendChild(actualImg);
+
+    img.replaceWith(fig);
   });
+}
+
+// ─── KaTeX Mathematics Formula Auto-Renderer ───
+// Converts standard LaTeX ($$...$$, \(...\), \[...\], etc.) and fixes broken [ \text{...} ] brackets
+function renderKaTeXMath(container) {
+  if (!container) return;
+
+  // Tolerance normalization: if LLM outputted [ \text{...} ] or [ \frac... ], convert to $$ ... $$
+  const walker = document.createTreeWalker(container, NodeFilter.SHOW_TEXT, null, false);
+  const textNodes = [];
+  while (walker.nextNode()) textNodes.push(walker.currentNode);
+
+  textNodes.forEach(node => {
+    if (!node.nodeValue) return;
+    const parentTag = (node.parentNode && node.parentNode.tagName) ? node.parentNode.tagName.toLowerCase() : '';
+    if (['script', 'style', 'pre', 'code', 'textarea'].includes(parentTag)) return;
+
+    // Replace [ \text{...} ... ] or [ \frac... ] with $$ ... $$
+    if (node.nodeValue.includes('\\text{') || node.nodeValue.includes('\\frac{') || node.nodeValue.includes('\\times')) {
+      const fixed = node.nodeValue.replace(/\[\s*(\\text\{.*?|\\frac\{.*?)\s*\]/gs, (m, inner) => {
+        return `$$ ${inner} $$`;
+      });
+      if (fixed !== node.nodeValue) {
+        node.nodeValue = fixed;
+      }
+    }
+  });
+
+  const doRender = () => {
+    if (typeof renderMathInElement === 'function') {
+      try {
+        renderMathInElement(container, {
+          delimiters: [
+            { left: '$$', right: '$$', display: true },
+            { left: '\\[', right: '\\]', display: true },
+            { left: '$', right: '$', display: false },
+            { left: '\\(', right: '\\)', display: false }
+          ],
+          ignoredTags: ['script', 'noscript', 'style', 'textarea', 'pre', 'code', 'option'],
+          throwOnError: false
+        });
+      } catch (err) {
+        console.warn('KaTeX rendering error:', err);
+      }
+    }
+  };
+
+  if (typeof renderMathInElement === 'function') {
+    doRender();
+  } else {
+    // Wait slightly if KaTeX defer script is still executing
+    let attempts = 0;
+    const interval = setInterval(() => {
+      attempts++;
+      if (typeof renderMathInElement === 'function') {
+        clearInterval(interval);
+        doRender();
+      } else if (attempts >= 10) {
+        clearInterval(interval);
+      }
+    }, 150);
+  }
 }
 
 function navigateToMarkdownTarget(target) {
@@ -5913,7 +6117,20 @@ let cyberConfirmCallback = null;
 
 let cyberPromptCallback = null;
 
-function showCyberPrompt(title, msg, defaultValue, onSubmit, options = {}) {
+function showCyberPrompt(titleOrOpts, msg, defaultValue, onSubmit, options = {}) {
+  let opts = {};
+  if (typeof titleOrOpts === 'object' && titleOrOpts !== null) {
+    opts = titleOrOpts;
+  } else {
+    opts = {
+      title: titleOrOpts,
+      msg: msg,
+      defaultValue: defaultValue,
+      onConfirm: onSubmit,
+      ...options
+    };
+  }
+
   const modal = document.getElementById('cyber-prompt-modal');
   const tEl = document.getElementById('cyber-prompt-title');
   const mEl = document.getElementById('cyber-prompt-msg');
@@ -5923,29 +6140,32 @@ function showCyberPrompt(title, msg, defaultValue, onSubmit, options = {}) {
   const cancelBtn = document.getElementById('btn-cyber-prompt-cancel');
 
   if (!modal) {
-    const val = prompt(msg, defaultValue || '');
-    if (val !== null && onSubmit) onSubmit(val);
+    const val = prompt(opts.msg || '', opts.defaultValue || '');
+    if (val !== null && typeof opts.onConfirm === 'function') opts.onConfirm(val.trim());
     return;
   }
 
-  if (tEl) tEl.innerText = title || '📁 輸入名稱';
-  if (mEl) mEl.innerText = msg || '';
+  const zh = (typeof currentLanguage !== 'undefined' && currentLanguage === 'zh');
+  const ja = (typeof currentLanguage !== 'undefined' && currentLanguage === 'ja');
+
+  if (tEl) tEl.innerText = opts.title || (zh ? '✏️ 重新命名' : (ja ? '✏️ 名前の変更' : '✏️ Rename'));
+  if (mEl) mEl.innerText = opts.msg || '';
   if (iEl) {
-    iEl.value = defaultValue || '';
-    iEl.placeholder = options.placeholder || '';
+    iEl.value = opts.defaultValue || '';
+    iEl.placeholder = opts.placeholder || '';
   }
   if (tipEl) {
-    tipEl.innerText = options.tip || '';
-    tipEl.style.display = options.tip ? 'block' : 'none';
+    tipEl.innerText = opts.tip || '';
+    tipEl.style.display = opts.tip ? 'block' : 'none';
   }
   if (okBtn) {
-    okBtn.innerText = options.confirmText || (currentLanguage === 'zh' ? '建立' : (currentLanguage === 'ja' ? '作成' : 'Create'));
+    okBtn.innerText = opts.confirmText || (zh ? '確定' : (ja ? '確認' : 'Confirm'));
   }
   if (cancelBtn) {
-    cancelBtn.innerText = options.cancelText || (currentLanguage === 'zh' ? '取消' : (currentLanguage === 'ja' ? 'キャンセル' : 'Cancel'));
+    cancelBtn.innerText = opts.cancelText || (zh ? '取消' : (ja ? 'キャンセル' : 'Cancel'));
   }
 
-  cyberPromptCallback = onSubmit;
+  cyberPromptCallback = opts.onConfirm;
   modal.style.display = 'flex';
   setTimeout(() => {
     if (iEl) {
@@ -5953,19 +6173,32 @@ function showCyberPrompt(title, msg, defaultValue, onSubmit, options = {}) {
       iEl.select();
     }
   }, 60);
+
+  iEl.onkeydown = function(ev) {
+    if (ev.key === 'Enter') {
+      ev.preventDefault();
+      closeCyberPrompt(true);
+    } else if (ev.key === 'Escape') {
+      ev.preventDefault();
+      closeCyberPrompt(false);
+    }
+  };
 }
 
 function submitCyberPrompt() {
-  const iEl = document.getElementById('cyber-prompt-input');
-  const val = iEl ? (iEl.value || '').trim() : '';
-  closeCyberPrompt(val);
+  closeCyberPrompt(true);
 }
 
-function closeCyberPrompt(val) {
+function closeCyberPrompt(isConfirmedOrVal) {
   const modal = document.getElementById('cyber-prompt-modal');
+  const iEl = document.getElementById('cyber-prompt-input');
+  const val = iEl ? (iEl.value || '').trim() : '';
   if (modal) modal.style.display = 'none';
-  if (val !== null && typeof cyberPromptCallback === 'function') {
-    cyberPromptCallback(val);
+
+  if (typeof isConfirmedOrVal === 'string') {
+    if (typeof cyberPromptCallback === 'function') cyberPromptCallback(isConfirmedOrVal);
+  } else if (isConfirmedOrVal === true) {
+    if (typeof cyberPromptCallback === 'function') cyberPromptCallback(val);
   }
   cyberPromptCallback = null;
 }
@@ -6005,6 +6238,62 @@ function closeCyberConfirm(isConfirmed) {
     cyberConfirmCallback();
   }
   cyberConfirmCallback = null;
+}
+
+
+function treeRenameFile(absPath, oldName) {
+  const zh = (typeof currentLanguage !== 'undefined' && currentLanguage === 'zh');
+  const ja = (typeof currentLanguage !== 'undefined' && currentLanguage === 'ja');
+  if (!absPath) return;
+
+  const currentBasename = oldName || absPath.split('\\').pop() || absPath.split('/').pop() || '';
+  const isMd = currentBasename.toLowerCase().endsWith('.md');
+  const displayName = isMd ? currentBasename.replace(/\.md$/i, '') : currentBasename;
+
+  const title = zh ? `✏️ 重新命名「${escapeHtml(displayName)}」` : `✏️ Rename "${escapeHtml(displayName)}"`;
+  const msg = zh
+    ? (isMd ? `請輸入新的文件名稱（副檔名 .md 會自動保留）：` : `請輸入新的檔案名稱：`)
+    : (isMd ? `Enter new document name (.md is preserved automatically):` : `Enter new filename:`);
+  const tip = zh ? `💡 系統將自動更新關聯索引並即時刷新目錄樹。` : `💡 The index and tree will be refreshed automatically.`;
+
+  showCyberPrompt({
+    title,
+    msg,
+    defaultValue: displayName,
+    tip,
+    confirmText: zh ? '確定修改' : 'Rename',
+    cancelText: zh ? '取消' : 'Cancel',
+    onConfirm: (newName) => {
+      let trimmed = (newName || '').trim();
+      if (!trimmed) return;
+      if (isMd) {
+        // Strip any typed .md then re-attach .md cleanly
+        trimmed = trimmed.replace(/\.md$/i, '') + '.md';
+      }
+      if (trimmed === currentBasename) return;
+      fetch('/api/file/rename', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ old_path: absPath, new_name: trimmed })
+      })
+      .then(async r => {
+        const data = await r.json();
+        if (r.ok && data.success) {
+          const sCount = (data.renamed_sources || []).length;
+          const sMsg = sCount ? (zh ? `（同步更名 ${sCount} 個關聯檔案）` : ` (${sCount} linked files renamed)`) : '';
+          showToast((zh ? `✅ 檔案已成功更名為「${data.new_name}」` : `✅ Renamed to "${data.new_name}"`) + sMsg);
+          // Immediate in-place refresh of project tree and graph (zero reload needed!)
+          if (typeof loadProjects === 'function') loadProjects({ preserve: true });
+          if (typeof fetchGraphData === 'function') fetchGraphData();
+        } else {
+          showToast(`❌ ${data.error || '重新命名失敗'}`);
+        }
+      })
+      .catch(err => {
+        showToast(`❌ ${err.message}`);
+      });
+    }
+  });
 }
 
 // ─── Concept Unlink Controller (Clean & Elegant) ────────────────────
@@ -7777,6 +8066,7 @@ function openSettingsModal(tab = 'repo') {
   if (!m) return;
   m.classList.add('show');
   updateSettingsModalI18n();
+  loadImageSettings();
   switchSettingsTab(tab);
 }
 
@@ -7808,18 +8098,22 @@ function switchSettingsTab(tabName) {
   const navRepo = document.getElementById('stg-nav-repo');
   const navLang = document.getElementById('stg-nav-lang');
   const navLlm = document.getElementById('stg-nav-llm');
+  const navImage = document.getElementById('stg-nav-image');
 
   const pageRepo = document.getElementById('stg-page-repo');
   const pageLang = document.getElementById('stg-page-lang');
   const pageLlm = document.getElementById('stg-page-llm');
+  const pageImage = document.getElementById('stg-page-image');
 
   if (navRepo) navRepo.classList.toggle('active', tabName === 'repo');
   if (navLang) navLang.classList.toggle('active', tabName === 'lang');
   if (navLlm) navLlm.classList.toggle('active', tabName === 'llm');
+  if (navImage) navImage.classList.toggle('active', tabName === 'image');
 
   if (pageRepo) pageRepo.style.display = tabName === 'repo' ? 'flex' : 'none';
   if (pageLang) pageLang.style.display = tabName === 'lang' ? 'flex' : 'none';
   if (pageLlm) pageLlm.style.display = tabName === 'llm' ? 'flex' : 'none';
+  if (pageImage) pageImage.style.display = tabName === 'image' ? 'flex' : 'none';
 
   if (tabName === 'repo') {
     loadProjects();
@@ -7830,7 +8124,93 @@ function switchSettingsTab(tabName) {
     renderProvPresets();
     refreshProviderList();
     loadProvActiveModel();
+  } else if (tabName === 'image') {
+    loadImageSettings();
   }
+}
+
+function loadImageSettings() {
+  fetch('/api/settings/image_ingest')
+    .then(r => r.json())
+    .then(d => {
+      if (d.success && d.settings) {
+        applyImageSettingsToForm(d.settings);
+      }
+    })
+    .catch(() => {});
+}
+
+function applyImageSettingsToForm(s) {
+  const minW = document.getElementById('cfg-img-min-width');
+  const minH = document.getElementById('cfg-img-min-height');
+  const maxR = document.getElementById('cfg-img-max-ratio');
+  const minStd = document.getElementById('cfg-img-min-stddev');
+  const maxCol = document.getElementById('cfg-img-max-single-color');
+  const minEdge = document.getElementById('cfg-img-min-edge');
+  const dedup = document.getElementById('cfg-img-dedup');
+
+  if (minW && s.min_width !== undefined) minW.value = s.min_width;
+  if (minH && s.min_height !== undefined) minH.value = s.min_height;
+  if (maxR && s.max_aspect_ratio !== undefined) maxR.value = s.max_aspect_ratio;
+  if (minStd && s.min_std_dev !== undefined) minStd.value = s.min_std_dev;
+  if (maxCol && s.max_single_color !== undefined) {
+    maxCol.value = s.max_single_color <= 1.0 ? Math.round(s.max_single_color * 100) : s.max_single_color;
+  }
+  if (minEdge && s.min_edge_intensity !== undefined) minEdge.value = s.min_edge_intensity;
+  if (dedup && s.deduplicate !== undefined) dedup.checked = !!s.deduplicate;
+}
+
+function saveImageSettings() {
+  const minW = document.getElementById('cfg-img-min-width');
+  const minH = document.getElementById('cfg-img-min-height');
+  const maxR = document.getElementById('cfg-img-max-ratio');
+  const minStd = document.getElementById('cfg-img-min-stddev');
+  const maxCol = document.getElementById('cfg-img-max-single-color');
+  const minEdge = document.getElementById('cfg-img-min-edge');
+  const dedup = document.getElementById('cfg-img-dedup');
+
+  const payload = {
+    min_width: minW ? parseInt(minW.value) || 200 : 200,
+    min_height: minH ? parseInt(minH.value) || 200 : 200,
+    max_aspect_ratio: maxR ? parseFloat(maxR.value) || 10.0 : 10.0,
+    min_std_dev: minStd ? parseFloat(minStd.value) || 15.0 : 15.0,
+    max_single_color: maxCol ? (parseFloat(maxCol.value) || 95) / 100.0 : 0.95,
+    min_edge_intensity: minEdge ? parseFloat(minEdge.value) || 3.0 : 3.0,
+    deduplicate: dedup ? dedup.checked : true
+  };
+
+  fetch('/api/settings/image_ingest', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload)
+  })
+    .then(r => r.json())
+    .then(d => {
+      if (d.success) {
+        const lang = (typeof currentLanguage !== 'undefined') ? currentLanguage : 'zh';
+        const msg = lang === 'zh' ? '圖片擷取與過濾設定已成功儲存！' : (lang === 'ja' ? '画像取得設定を保存しました！' : 'Image ingest settings saved successfully!');
+        if (typeof showToast === 'function') showToast(msg);
+        else alert(msg);
+      }
+    })
+    .catch(err => alert('Save failed: ' + err));
+}
+
+function resetImageSettingsToDefault() {
+  const lang = (typeof currentLanguage !== 'undefined') ? currentLanguage : 'zh';
+  const confirmMsg = lang === 'zh' ? '確定要將圖片擷取過濾條件重設為預設值嗎？' : 'Reset image settings to default?';
+  if (!confirm(confirmMsg)) return;
+
+  fetch('/api/settings/image_ingest/reset', { method: 'POST' })
+    .then(r => r.json())
+    .then(d => {
+      if (d.success && d.settings) {
+        applyImageSettingsToForm(d.settings);
+        const msg = lang === 'zh' ? '已恢復預設圖片過濾參數！' : 'Restored default image settings!';
+        if (typeof showToast === 'function') showToast(msg);
+      }
+    })
+    .catch(err => alert('Reset failed: ' + err));
 }
 
 function selectAppLanguage(lang) {
@@ -7880,6 +8260,12 @@ function applyAppLanguage() {
   updateChatWidgetI18n();
   if (typeof buildLegends === 'function') {
     buildLegends();
+  }
+  if (typeof buildProjectTree === 'function') {
+    buildProjectTree();
+  }
+  if (typeof cachedLintData !== 'undefined' && cachedLintData && typeof renderLintResults === 'function') {
+    renderLintResults(cachedLintData);
   }
 
   const msg = currentLanguage === 'zh' ? '語系切換：繁體中文'
@@ -7985,6 +8371,32 @@ function updateSettingsModalI18n() {
   // LLM Page
   renderProvDialogLabels();
   updateLanguageCardsUI();
+
+  // Image Ingest Settings Page
+  set('stg-lbl-image', lang === 'zh' ? '圖片擷取' : (lang === 'ja' ? '画像取り込み' : 'Image Ingest'));
+  set('lbl-imgstg-title', lang === 'zh' ? '圖片附件擷取與過濾設定' : (lang === 'ja' ? '添付画像取り込み・フィルター設定' : 'Image Ingest & Noise Filtering'));
+  set('lbl-imgstg-desc', lang === 'zh' ? '自訂 PDF、PPTX、Word 與圖片入庫時的硬體特徵與資訊量過濾漏斗，過濾裝飾線條與純色圖標。'
+                       : (lang === 'ja' ? 'PDF、PPTX、Word からの画像抽出時に、装飾線や単色アイコンを除外するフィルター閾値を設定します。'
+                       : 'Configure hardware-level feature & entropy filter thresholds for images extracted from PDF/PPTX/Word.'));
+  set('lbl-imgstg-geom-title', lang === 'zh' ? '尺寸與長寬比過濾 (Geometry)' : (lang === 'ja' ? 'サイズ・アスペクト比フィルター (Geometry)' : 'Geometry & Aspect Ratio Filters'));
+  set('lbl-imgstg-minw', lang === 'zh' ? '最小寬度 (Min Width px)' : (lang === 'ja' ? '最小幅 (Min Width px)' : 'Min Width (px)'));
+  set('lbl-imgstg-minw-hint', lang === 'zh' ? '過濾小按鈕與圖標 (預設 200)' : (lang === 'ja' ? '小さなボタンやアイコンを除外 (初期値 200)' : 'Filter tiny buttons & icons (default 200)'));
+  set('lbl-imgstg-minh', lang === 'zh' ? '最小高度 (Min Height px)' : (lang === 'ja' ? '最小高さ (Min Height px)' : 'Min Height (px)'));
+  set('lbl-imgstg-minh-hint', lang === 'zh' ? '過濾頁籤與符號 (預設 200)' : (lang === 'ja' ? 'タブや記号を除外 (初期値 200)' : 'Filter tabs & badges (default 200)'));
+  set('lbl-imgstg-ratio', lang === 'zh' ? '極限長寬比 (Max Aspect Ratio，互為倒數)' : (lang === 'ja' ? '最大アスペクト比 (Max Aspect Ratio)' : 'Max Aspect Ratio'));
+  set('lbl-imgstg-ratio-hint', lang === 'zh' ? '設定為 10.0 代表允許長寬比 0.1 ～ 10.0 之間，剔除長條裝飾線 (預設 10.0)' : (lang === 'ja' ? '0.1〜10.0 の範囲外となる細長い装飾線を除外 (初期値 10.0)' : 'Prunes extreme horizontal/vertical separator lines (default 10.0)'));
+  set('lbl-imgstg-entropy-title', lang === 'zh' ? '資訊量與色彩過濾 (Content & Entropy)' : (lang === 'ja' ? '情報量・色彩フィルター (Content & Entropy)' : 'Content & Entropy Filters'));
+  set('lbl-imgstg-stddev', lang === 'zh' ? '灰階標準差 (Min StdDev)' : (lang === 'ja' ? 'グレースケール標準偏差 (Min StdDev)' : 'Min Grayscale StdDev'));
+  set('lbl-imgstg-stddev-hint', lang === 'zh' ? '色彩標準差過低代表純色背景 (預設 15.0)' : (lang === 'ja' ? '低すぎる場合は単色・ベタ塗りと判定 (初期値 15.0)' : 'Filters solid/blank backgrounds (default 15.0)'));
+  set('lbl-imgstg-maxcolor', lang === 'zh' ? '單色最大佔比 (Max Single Color %)' : (lang === 'ja' ? '単色最大比率 (Max Single Color %)' : 'Max Single Color (%)'));
+  set('lbl-imgstg-maxcolor-hint', lang === 'zh' ? '單一顏色佔比過高代表純白框/大色塊 (預設 95%)' : (lang === 'ja' ? '大部分が同一色の枠やブロックを除外 (初期値 95%)' : 'Prunes giant monochrome boxes (default 95%)'));
+  set('lbl-imgstg-edge', lang === 'zh' ? '最小邊緣輪廓強度 (Min Edge Intensity)' : (lang === 'ja' ? '最小エッジ輪郭強度 (Min Edge Intensity)' : 'Min Edge Intensity'));
+  set('lbl-imgstg-edge-hint', lang === 'zh' ? '無文字邊框或線條細節者剔除 (預設 3.0)' : (lang === 'ja' ? '文字や輪郭のディテールがない画像を除外 (初期値 3.0)' : 'Requires meaningful lines or text edges (default 3.0)'));
+  set('lbl-imgstg-dedup', lang === 'zh' ? '母片 Logo / 重複圖片雜湊去重' : (lang === 'ja' ? 'スライドロゴ・重複画像のハッシュ重複排除' : 'Slide Master Logo & Duplicate Image Deduplication'));
+  set('lbl-imgstg-dedup-hint', lang === 'zh' ? '同一簡報每頁重複角落 Logo 僅收一張' : (lang === 'ja' ? '同一プレゼンの各ページにある共通ロゴを1枚のみ収集' : 'Keeps only one instance of repeated corner logos per deck'));
+  set('lbl-imgstg-btn-reset', lang === 'zh' ? '回到預設' : (lang === 'ja' ? '初期値に戻す' : 'Reset Defaults'));
+  set('lbl-imgstg-btn-cancel', lang === 'zh' ? '取消' : (lang === 'ja' ? 'キャンセル' : 'Cancel'));
+  set('lbl-imgstg-btn-save', lang === 'zh' ? '儲存設定' : (lang === 'ja' ? '設定を保存' : 'Save Settings'));
 }
 
 
@@ -8008,6 +8420,165 @@ function updateActivityBarI18n() {
   setAttr('act-tab-lint', 'title', tipLint);
   setAttr('act-tab-prompts', 'title', tipPrompts);
   setAttr('act-tab-settings', 'title', tipSettings);
+  updateOnboardingGuidance();
+}
+
+// ─── System Onboarding & Game Guidance Engine ──────────────────────────────
+let gCachedLlmState = { checked: false, hasModel: true, modelInfo: '' };
+
+function checkLlmGuidanceState(callback) {
+  fetch('/api/llm/providers')
+    .then(r => r.json())
+    .then(data => {
+      const current = (data && data.current) || {};
+      let saved = null;
+      try { saved = JSON.parse(localStorage.getItem('docgraphical-llm-model') || 'null'); } catch (e) { /* ignore */ }
+      const model = (saved && saved.model) || current.model || '';
+      const provider = (saved && saved.provider) || current.provider || '';
+      
+      const hasModel = !!(model && model.trim() && model !== 'None' && model !== 'null');
+      gCachedLlmState = {
+        checked: true,
+        hasModel: hasModel,
+        modelInfo: hasModel ? `${provider} / ${model}` : ''
+      };
+      if (typeof callback === 'function') callback(gCachedLlmState);
+    })
+    .catch(() => {
+      gCachedLlmState = { checked: true, hasModel: false, modelInfo: '' };
+      if (typeof callback === 'function') callback(gCachedLlmState);
+    });
+}
+
+function updateOnboardingGuidance() {
+  const lang = currentLanguage || 'zh';
+  const zh = lang === 'zh';
+  const ja = lang === 'ja';
+
+  // 1. Repo Status: Has any repo been discovered / created?
+  const hasRepos = Array.isArray(allProjectsList) && allProjectsList.length > 0;
+  
+  // Count empty repos (repos with 0 effective markdown files, e.g. empty or only DOC_CATALOG.md)
+  let emptyRepoCount = 0;
+  if (hasRepos) {
+    allProjectsList.forEach(p => {
+      const eff = (p.effective_files !== undefined) ? p.effective_files : (p.files || 0);
+      if (eff === 0) emptyRepoCount++;
+    });
+  }
+
+  // Update Settings Tab 1: Repo badge & Browse button
+  const badgeStgRepo = document.getElementById('badge-stg-repo-alert');
+  const btnBrowse = document.getElementById('btn-browse-folder');
+  
+  const repoAlertTip = zh 
+    ? '尚未建立任何專案儲存庫！請於右側透過 Browse 選取目錄並 Scan'
+    : (ja ? 'リポジトリが設定されていません！右側の Browse からフォルダを選択して Scan してください'
+          : 'No repository configured! Please Browse to select a folder and Scan');
+  
+  const browseAlertTip = zh
+    ? '⚠️ 尚未設定儲存庫！請點擊此處選取本機專案目錄，選取後點擊 Scan 建立'
+    : (ja ? '⚠️ リポジトリが未設定です！ここをクリックしてフォルダを選択し、Scan してください'
+          : '⚠️ No repository configured! Click here to select a project folder, then click Scan');
+
+  if (badgeStgRepo) {
+    if (!hasRepos) {
+      badgeStgRepo.style.display = 'inline-flex';
+      badgeStgRepo.textContent = '!';
+      badgeStgRepo.title = repoAlertTip;
+    } else {
+      badgeStgRepo.style.display = 'none';
+      badgeStgRepo.title = '';
+    }
+  }
+
+  if (btnBrowse) {
+    if (!hasRepos) {
+      btnBrowse.classList.add('btn-browse-alert');
+      btnBrowse.title = browseAlertTip;
+      btnBrowse.innerHTML = `⚠️ 📁 ${zh ? '瀏覽目錄' : (ja ? 'フォルダ参照' : 'Browse')}`;
+    } else {
+      btnBrowse.classList.remove('btn-browse-alert');
+      btnBrowse.title = zh ? '瀏覽本機檔案系統目錄' : (ja ? 'ローカルファイルシステムを参照' : 'Browse local filesystem');
+      btnBrowse.innerHTML = `📁 ${zh ? '瀏覽' : (ja ? '参照' : 'Browse')}`;
+    }
+  }
+
+  // 2. LLM Status: Check active model
+  const badgeStgLlm = document.getElementById('badge-stg-llm-alert');
+  const llmAlertTip = zh
+    ? '尚未設定預設 LLM 模型！請設定 Provider API Key 並選取預設模型'
+    : (ja ? 'LLM モデルが設定されていません！Provider とデフォルトモデルを設定してください'
+          : 'Default LLM model not configured! Please configure Provider API Key & select model');
+
+  const updateLlmBadgeUI = (llmState) => {
+    if (badgeStgLlm) {
+      if (!llmState.hasModel) {
+        badgeStgLlm.style.display = 'inline-flex';
+        badgeStgLlm.textContent = '!';
+        badgeStgLlm.title = llmAlertTip;
+      } else {
+        badgeStgLlm.style.display = 'none';
+        badgeStgLlm.title = '';
+      }
+    }
+
+    // 3. Settings Gear Button (Act Tab Settings): Alert if Repo OR LLM is missing
+    const badgeSettings = document.getElementById('badge-settings-alert');
+    const actTabSettings = document.getElementById('act-tab-settings');
+    const missingItems = [];
+    if (!hasRepos) {
+      missingItems.push(zh ? '尚未建立專案儲存庫' : (ja ? 'リポジトリ未設定' : 'Repository not configured'));
+    }
+    if (!llmState.hasModel) {
+      missingItems.push(zh ? '尚未設定 LLM 預設模型' : (ja ? 'LLMモデル未設定' : 'LLM model not configured'));
+    }
+
+    if (badgeSettings) {
+      if (missingItems.length > 0) {
+        badgeSettings.style.display = 'block';
+        badgeSettings.textContent = '!';
+        const settingsAlertTip = (zh ? '⚠️ 系統尚未配置完成：\n• ' : (ja ? '⚠️ システム設定が未完了です：\n• ' : '⚠️ System setup incomplete:\n• ')) 
+          + missingItems.join(zh ? '\n• ' : (ja ? '\n• ' : '\n• '));
+        badgeSettings.title = settingsAlertTip;
+        if (actTabSettings) actTabSettings.title = settingsAlertTip;
+      } else {
+        badgeSettings.style.display = 'none';
+        badgeSettings.title = '';
+        if (actTabSettings) {
+          actTabSettings.title = zh ? '系統設定 (Settings)' : (ja ? 'システム設定 (Settings)' : 'System Settings (Settings)');
+        }
+      }
+    }
+  };
+
+  if (gCachedLlmState.checked) {
+    updateLlmBadgeUI(gCachedLlmState);
+  } else {
+    checkLlmGuidanceState(updateLlmBadgeUI);
+  }
+
+  // 4. Explorer Drawer Tab: Count of empty repos
+  const badgeExplorer = document.getElementById('badge-explorer-alert');
+  const actTabExplorer = document.getElementById('act-tab-explorer');
+  if (badgeExplorer) {
+    if (emptyRepoCount > 0) {
+      badgeExplorer.style.display = 'block';
+      badgeExplorer.textContent = String(emptyRepoCount);
+      const emptyTip = zh
+        ? `⚠️ 有 ${emptyRepoCount} 個儲存庫尚未匯入文件（僅有目錄或為空），需要 Ingest！`
+        : (ja ? `⚠️ ${emptyRepoCount} 件のリポジトリにドキュメントがありません。Ingest を実行してください！`
+              : `⚠️ ${emptyRepoCount} repository(ies) have no documents yet, Ingest needed!`);
+      badgeExplorer.title = emptyTip;
+      if (actTabExplorer) actTabExplorer.title = emptyTip;
+    } else {
+      badgeExplorer.style.display = 'none';
+      badgeExplorer.title = '';
+      if (actTabExplorer) {
+        actTabExplorer.title = zh ? '文件瀏覽器 (Explorer)' : (ja ? 'ファイルエクスプローラー (Explorer)' : 'File Explorer (Explorer)');
+      }
+    }
+  }
 }
 
 function openFileInEditor(filePath, targetLine = 1) {
@@ -8870,6 +9441,17 @@ function updateLintBadgeOnly() {
 function renderLintResults(data) {
   const zh = (currentLanguage === 'zh');
   const ja = (currentLanguage === 'ja');
+
+  // Multi-language headers & labels
+  const lblLintTitle = document.getElementById('lbl-drawer-lint-title');
+  if (lblLintTitle) lblLintTitle.textContent = zh ? '知識治理與體檢' : (ja ? 'ナレッジ検証・ガバナンス' : 'LINTING & GOVERNANCE');
+  const btnRefreshLint = document.getElementById('btn-refresh-lint');
+  if (btnRefreshLint) {
+    btnRefreshLint.textContent = zh ? '↻ 重新體檢' : (ja ? '↻ スキャン' : '↻ Scan');
+    btnRefreshLint.title = zh ? '重新體檢知識庫' : (ja ? 'ナレッジベースを再検証' : 'Rescan knowledge base');
+  }
+  const lblScore = document.getElementById('lbl-lint-score-label');
+  if (lblScore) lblScore.textContent = zh ? '知識健康度' : (ja ? 'ナレッジ健康度' : 'Knowledge Health');
 
   // Update Score & Status Badge
   const scoreVal = document.getElementById('lint-score-val');

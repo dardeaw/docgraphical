@@ -305,10 +305,17 @@ def FnExtractImages(path: str) -> Dict[str, Any]:
     import io as _io
     ext = os.path.splitext(path or "")[1].lower()
     images: List[Dict[str, str]] = []
+    from .image_settings import FnGetImageSettings, FnIsSignificantImage
+    img_cfg = FnGetImageSettings()
+    seen_hashes = set()
+
     # Standalone photos/scans go straight to eyes (no page rendering).
     if ext in IMAGE_EXTS:
         try:
             img = Image.open(path)
+            sig, _ = FnIsSignificantImage(img, img_cfg, seen_hashes)
+            if not sig:
+                return {"ok": False, "error": "圖片未達資訊量門檻或過於狹長/單色"}
             url = _FnPilToDataUrl(img)
         except Exception as e:
             return {"ok": False, "error": "%s: %s" % (type(e).__name__, e)}
@@ -320,27 +327,60 @@ def FnExtractImages(path: str) -> Dict[str, Any]:
             import fitz
             doc = fitz.open(path)
             n = doc.page_count
-            idxs = list(range(n)) if n <= VISION_MAX_PAGES else [
-                int(i * n / VISION_MAX_PAGES) for i in range(VISION_MAX_PAGES)]
-            for k, i in enumerate(idxs):
-                if len(images) >= VISION_MAX_PAGES:
-                    break
-                page = doc[i]
-                pix = page.get_pixmap(matrix=fitz.Matrix(1.5, 1.5), alpha=False)
-                img = Image.frombytes("RGB", (pix.width, pix.height), pix.samples)
-                url = _FnPilToDataUrl(img)
-                if url:
-                    images.append({"label": "[Page %d]" % (i + 1), "data_url": url})
+            seen_xrefs = set()
+            for pno in range(n):
+                page = doc[pno]
+                img_list = page.get_images()
+                for idx, img_info in enumerate(img_list, 1):
+                    xref = img_info[0]
+                    if xref in seen_xrefs:
+                        continue
+                    seen_xrefs.add(xref)
+                    try:
+                        base_img = doc.extract_image(xref)
+                        raw_bytes = base_img.get("image")
+                        if not raw_bytes:
+                            continue
+                        img = Image.open(_io.BytesIO(raw_bytes))
+                        sig, _ = FnIsSignificantImage(img, img_cfg, seen_hashes)
+                        if not sig:
+                            continue
+                        url = _FnPilToDataUrl(img)
+                        if url:
+                            images.append({
+                                "label": "[P%d_img%d]" % (pno + 1, idx),
+                                "data_url": url,
+                                "raw_bytes": raw_bytes,
+                                "ext": base_img.get("ext", "png")
+                            })
+                    except Exception:
+                        continue
             doc.close()
-            if n > VISION_MAX_PAGES:
-                return {"ok": True, "images": images,
-                        "note": "%d 頁僅取 %d 頁辨識" % (n, len(images))}
+            # If no embedded image found (e.g. scanned whole-page PDF), fallback to page pixmaps
+            if not images:
+                doc = fitz.open(path)
+                for i in range(n):
+                    page = doc[i]
+                    pix = page.get_pixmap(matrix=fitz.Matrix(1.5, 1.5), alpha=False)
+                    img = Image.frombytes("RGB", (pix.width, pix.height), pix.samples)
+                    sig, _ = FnIsSignificantImage(img, img_cfg, seen_hashes)
+                    if not sig:
+                        continue
+                    url = _FnPilToDataUrl(img)
+                    if url:
+                        buf = _io.BytesIO()
+                        img.save(buf, format="JPEG", quality=85)
+                        images.append({
+                            "label": "[Page %d]" % (i + 1),
+                            "data_url": url,
+                            "raw_bytes": buf.getvalue(),
+                            "ext": "jpeg"
+                        })
+                doc.close()
         elif ext == ".pptx":
             from pptx import Presentation
             prs = Presentation(path)
             for i, slide in enumerate(prs.slides, 1):
-                if len(images) >= VISION_MAX_PAGES:
-                    break
                 for shape in slide.shapes:
                     try:
                         blob = shape.image.blob
@@ -350,16 +390,25 @@ def FnExtractImages(path: str) -> Dict[str, Any]:
                         img = Image.open(_io.BytesIO(blob))
                     except Exception:
                         continue
+                    sig, _ = FnIsSignificantImage(img, img_cfg, seen_hashes)
+                    if not sig:
+                        continue
                     url = _FnPilToDataUrl(img)
                     if url:
-                        images.append({"label": "[Slide %d]" % i, "data_url": url})
+                        ext_fmt = (img.format or "PNG").lower()
+                        images.append({
+                            "label": "[Slide %d]" % i,
+                            "data_url": url,
+                            "raw_bytes": blob,
+                            "ext": ext_fmt
+                        })
         else:
             return {"ok": False, "error": "不支援圖片辨識的格式: %s" % ext}
     except Exception as e:
         return {"ok": False, "error": "%s: %s" % (type(e).__name__, e)}
     if not images:
-        return {"ok": False, "error": "找不到可辨識的頁面圖片（可能是加密或純向量檔）"}
-    return {"ok": True, "images": images, "note": ""}
+        return {"ok": False, "error": "找不到符合資訊量門檻的圖片（可能是純色裝飾圖或加密檔）"}
+    return {"ok": True, "images": images, "note": f"共篩選提取出 {len(images)} 張有效圖片"}
 
 
 def FnVisionSummarize(images: List[Dict[str, str]],
@@ -421,23 +470,33 @@ def FnMultimodalSummarize(text: str, images: List[Dict[str, str]],
     img_hints = []
     if pasted_image_rels:
         for idx, rel in enumerate(pasted_image_rels, 1):
-            img_hints.append(f"- 截圖附件 {idx}：`![截圖說明]({rel})`")
+            img_hints.append(f"- 候選圖片 {idx}：`![圖片說明]({rel})`")
     hints_text = "\n".join(img_hints)
 
-    prompt = f"""請研讀以下剪貼簿提供的文字筆記，以及所附帶的截圖影像，進行嚴謹、結構化的技術與業務摘要。
-若摘要中有說明到各張截圖的關鍵畫面、架構或介面，請在該段落適當處以 Markdown 語法引用該圖片（例如：`![畫面說明](檔案名稱.png)`）。
+    prompt = f"""請研讀以下文件提供的文字內容，以及所抽取的相關插圖/圖表/截圖影像，進行嚴謹、結構化的技術與業務知識摘要。
 
-【可引用的截圖附件清單】：
+【圖片重要性判斷與引用規則】：
+1. 視覺上若僅為純裝飾、無具體工程資訊或純粹頁首背景，請勿引用。
+2. 只要具有實質技術結構、包裝緩衝工法、裝箱流程、測試數據或產品圖示價值的圖片，**必須在摘要對應章節中以 Markdown 語法引用**（例如：`![結構或圖表說明](圖片檔名)`），圖文並茂以利團隊理解。
+3. 嚴格限定：圖片檔名請務必參照下方【可引用的候選圖片清單】中的檔名。未被引用的無意義圖檔將不會被保留存檔。
+
+【數學與計算公式排版規範（KaTeX 相容）】：
+若內容涉及力學、計算式或工程公式（例如含水率、應力、衝擊力等），請嚴格使用標準 KaTeX 語法排版：
+- 獨立區塊公式請務必使用雙錢字號包裹（例：`$$ \\text{{含水率 (MC)}} = \\frac{{\\text{{濕重}} - \\text{{絕乾重}}}}{{\\text{{絕乾重}}}} \\times 100\\% $$`）。
+- 行內公式請使用單錢字號包裹（例：`$E = mc^2$`）。
+- 嚴禁裸露或使用方括號 `[ ... ]` 包裹 LaTeX 代碼，務必保持合法標準的 KaTeX / LaTeX 語法。
+
+【可引用的候選圖片清單】：
 {hints_text if hints_text else "（無額外圖片附件）"}
 
-【筆記文字內容】：
+【文件文字內容】：
 ===== 開始 =====
 {text}
 ===== 結束 =====
 
 請輸出完整、排版優良的繁體中文 Markdown 摘要。第一行請給出精準的 H1 主標題（格式：`# 主標題`）。"""
 
-    system_msg = "你是繁體中文技術文件摘要助手，擅長解讀混合文字與截圖，只輸出 Markdown。"
+    system_msg = "你是繁體中文技術文件摘要助手，擅長解讀文字並精準篩選有價值的技術圖表，只輸出 Markdown。"
     parts: List[Dict[str, Any]] = [{"type": "text", "text": prompt}]
     for im in images:
         parts.append({"type": "image_url",
@@ -618,11 +677,36 @@ def FnUniqueMdPath(target_dir: str, filename: str) -> str:
 
 
 def FnBuildMd(title: str, source_rels: List[str], summary: str,
-              model: str = "", source_urls: Optional[List[str]] = None) -> str:
-    """Assemble the final md. Handles source files, URLs, and image attachments in the header."""
+              model: str = "", source_urls: Optional[List[str]] = None,
+              concept_tags: Optional[List[str]] = None) -> str:
+    """Assemble the final md.
+    
+    Header contains ONLY the Document Title and Concept Tags (if any).
+    The source files, URLs, and ingest metadata are appended at the very END of the document.
+    """
+    import datetime
     stamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
     lines = ["# %s" % (title or "文件摘要"), ""]
     
+    # 1. Concept Tags at the TOP (clean and prominent)
+    if concept_tags:
+        clean_tags = [t.strip() for t in concept_tags if t and t.strip()]
+        if clean_tags:
+            tag_spans = " ".join(f"[[{t}]]" if not t.startswith("[") else t for t in clean_tags)
+            lines.append(f"> 🏷️ 概念標籤： {tag_spans}")
+            lines.append("")
+
+    # 2. Document Summary / Content
+    cleaned_summary = (summary or "").strip()
+    # Strip any duplicate leading H1 title if present in summary
+    lines.append(cleaned_summary)
+    lines.append("")
+
+    # 3. Source References and Ingest Metadata at the very BOTTOM
+    lines.append("---")
+    lines.append("")
+    lines.append("## 附錄：來源與匯入資訊")
+    lines.append("")
     if source_urls:
         lines.append("> 來源網址：")
         for u in source_urls:
@@ -638,10 +722,6 @@ def FnBuildMd(title: str, source_rels: List[str], summary: str,
             
     lines.append(">")
     lines.append("> 匯入時間：%s%s" % (stamp, ("　生成模型：%s" % model) if model else ""))
-    lines.append("")
-    lines.append("---")
-    lines.append("")
-    lines.append((summary or "").strip())
     lines.append("")
     return "\n".join(lines)
 
@@ -691,34 +771,27 @@ def FnIngestCompoundTagging(summary_text: str, repo_path: str) -> Dict[str, Any]
             pass
 
     official_list_str = "\n".join(official_concepts) if official_concepts else "(尚無官方概念)"
-    blacklist_str = "、".join(blacklist_terms) if blacklist_terms else "無"
 
     system_msg = (
-        "你是知識庫拓撲架構師。你的唯一天職是依據技術摘要，比對現有官方概念並發掘新領域術語。"
+        "你是知識庫拓撲架構師。你的唯一天職是依據技術文件摘要，精準比對現有官方概念標籤。"
         "嚴格只輸出單一合法的 JSON 物件，絕不輸出任何 Markdown 代碼塊或額外解釋。"
     )
 
     user_prompt = f"""【現有官方概念清單】：
 {official_list_str}
 
-【黑名單排除詞彙（絕對不可再提）】：
-{blacklist_str}
-
 【輸入技術文件摘要內容】：
 ===== 摘要開始 =====
 {summary_text[:8000]}
 ===== 摘要結束 =====
 
-請仔細研讀上述摘要，精準輸出以下 JSON 格式：
+請仔細比對上述摘要與官方概念清單，精準輸出以下 JSON 格式：
 {{
   "matched_concepts": [
     {{"name": "吻合的官方概念名", "evidence": "摘要中提及此概念的佐證段落（15字內）"}}
-  ],
-  "discovered_candidates": [
-    {{"term": "高價值新領域專有名詞（設備、代號、工藝，嚴禁通用詞）", "category": "建議分類", "reason": "收錄原因（10字內）", "aliases": "可能的別名或縮寫"}}
   ]
 }}
-無吻合或無新詞時請給空陣列 []。只輸出純 JSON。"""
+無吻合官方概念時請給空陣列 []。只輸出純 JSON。"""
 
     payload = json.dumps({
         "model": tgt["model"],
@@ -747,12 +820,11 @@ def FnIngestCompoundTagging(summary_text: str, repo_path: str) -> Dict[str, Any]
         parsed = json.loads(cleaned)
 
         matched = parsed.get("matched_concepts") or []
-        candidates = parsed.get("discovered_candidates") or []
 
         return {
             "ok": True,
             "matched_concepts": matched,
-            "discovered_candidates": candidates,
+            "discovered_candidates": [],
             "model": tgt["model"]
         }
     except Exception as e:

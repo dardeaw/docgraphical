@@ -7,6 +7,23 @@ All notable changes to the DocGraphical project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.0.2] - 2026-11-02
+
+### Added
+- **Gamified Onboarding Guidance System**:
+  - Highlights Settings tabs and Browse button with pulsing red exclamation badges when no repositories exist, providing clear hover tooltips.
+  - Highlights LLM Providers tab with an alert badge when no default model is configured.
+  - Displays a pulsing badge on the settings gear button summarizing all missing configuration steps.
+  - Marks empty/catalog-only repos in the Explorer tree with a `⚠️ Needs Ingest` action button, and tracks empty repo counts on the activity drawer badge.
+- **KaTeX Mathematical Formula Rendering**:
+  - Native KaTeX rendering for block formulas `$$...$$` and inline formulas `$...$`.
+  - Built-in KaTeX formatting guidelines in Prompt Manager.
+
+### Fixed & Improved
+- **Comprehensive Trilingual Support (i18n)**: All badges, drawers, file pickers, image settings, and linting tools fully support Traditional Chinese (`zh`), English (`en`), and Japanese (`ja`).
+- **Filesystem Traversal Deadlock Protection**: Prevents drive roots (`C:\`, `D:\`) from being scanned as single repos; excludes deep system folders and enforces a 10-level directory depth limit.
+- **Empty State Toast Debouncing**: Eliminates flickering toast popups on clean empty instances.
+
 ---
 
 ## [3.0.1] - 2026-10-30

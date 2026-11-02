@@ -3,7 +3,9 @@ import os
 
 IGNORE_DIRS = {
     ".git", ".codegraph", "node_modules", "dist", "build", ".venv", "venv", "env",
-    "__pycache__", ".pytest_cache", ".mypy_cache", ".idea", ".vscode", "target", "vendor"
+    "__pycache__", ".pytest_cache", ".mypy_cache", ".idea", ".vscode", "target", "vendor",
+    "$Recycle.Bin", "$RECYCLE.BIN", "System Volume Information", "Windows", "Program Files",
+    "Program Files (x86)", "ProgramData", "AppData"
 }
 
 DOC_EXTS = (".md", ".markdown", ".mdown", ".txt")

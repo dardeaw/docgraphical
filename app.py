@@ -18,6 +18,7 @@ def main():
         port_cfg = os.path.expanduser(f"~/.docgraphical_config_{args.port}.json")
         constants.CONFIG_FILE = port_cfg
         os.environ["DOCGRAPHICAL_CONFIG"] = port_cfg
+        os.environ["DOCGRAPH_LLM_FILE"] = os.path.expanduser(f"~/.docgraphical_llm_{args.port}.json")
 
     app = create_app(initial_paths=args.paths)
     print(f"===============================================================")
