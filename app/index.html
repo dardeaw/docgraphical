@@ -561,72 +561,79 @@ if (window.THREE && !window.THREE.Timer) {
         </div>
 
         <!-- Tab Page 3: LLM Providers & Models -->
-        <div id="stg-page-llm" class="settings-page" style="display:none; flex-direction:column; gap:12px; height:100%; box-sizing:border-box;">
+        <div id="stg-page-llm" class="settings-page" style="display:none;">
           
-          <div style="display:flex; justify-content:space-between; align-items:flex-start; border-bottom:1px solid #21262d; padding-bottom:8px;">
-            <div>
-              <div style="font-weight:600; font-size:15px; color:#e6edf3;" id="lbl-prov-title">LLM Providers</div>
-              <div style="font-size:12px; color:#8b949e; margin-top:2px;" id="lbl-prov-note">This provider is used by the whole app (ingest, chat, and all LLM features).</div>
-            </div>
-          </div>
-
-          <!-- Active Model Bar -->
-          <div style="display:flex; gap:10px; align-items:center; background:#161b22; padding:10px 14px; border:1px solid #30363d; border-radius:8px;">
-            <span id="lbl-prov-cur" style="color:#8b949e; font-size:12px; font-weight:600; white-space:nowrap;">Active model</span>
-            <select id="prov-current-model" class="modal-input" style="flex:1; color:#58a6ff; font-weight:600; font-size:12px; min-width:0;"></select>
-          </div>
-
-          <!-- Registered Providers List -->
-          <!-- Saved Providers List Container (Shown only when there are saved custom providers) -->
-          <div id="chat-prov-list-section" style="display:none; flex-direction:column; gap:6px; background:#161b22; border:1px solid #30363d; border-radius:8px; padding:10px 14px;">
-            <div style="display:flex; justify-content:space-between; align-items:center;">
-              <span id="lbl-prov-configured-title" style="font-size:12px; font-weight:600; color:#c9d1d9;">已儲存的自訂供應商 (Configured Providers)</span>
-              <span id="prov-configured-count" style="font-size:11px; color:#8b949e;"></span>
-            </div>
-            <div id="chat-prov-list" style="display:flex; flex-direction:column; gap:6px; max-height:140px; overflow-y:auto;"></div>
-          </div>
-
-          <!-- Add / Edit Provider Form -->
-          <div style="background:#161b22; border:1px solid #30363d; border-radius:8px; padding:14px; display:flex; flex-direction:column; gap:10px;">
-            <div id="lbl-prov-add" style="font-weight:600; font-size:13px; color:#e6edf3; border-bottom:1px solid #21262d; padding-bottom:6px;">Add provider</div>
-            
-            <!-- Provider Name Dropdown Selector -->
-            <div>
-              <label style="color:#8b949e; font-size:11px; font-weight:600; display:block; margin-bottom:4px;"><span id="lbl-prov-f-label">Provider Name (供應商名稱)</span></label>
-              <select id="chat-prov-label" class="modal-input" style="width:100%;" onchange="onSelectProviderName(this.value)">
-                <!-- Dynamically populated with Cloud & Opencode Local options -->
-              </select>
-            </div>
-
-            <div id="prov-form" style="display:flex; flex-direction:column; gap:8px;">
-
-              <div id="prov-row-url">
-                <label style="color:#8b949e; font-size:11px; font-weight:600; display:block; margin-bottom:3px;"><span id="lbl-prov-f-base">Base URL</span></label>
-                <input id="chat-prov-base" class="modal-input" placeholder="http://127.0.0.1:11434" style="display:block; width:100%;" />
-              </div>
-
-              <div id="prov-fixed-url" style="display:none; font-size:11px; color:#8b949e; background:#0d1117; border:1px dashed #30363d; border-radius:6px; padding:7px 10px;"></div>
-
-              <div id="prov-row-key">
-                <label style="color:#8b949e; font-size:11px; font-weight:600; display:block; margin-bottom:3px;"><span id="lbl-prov-f-key">API key</span></label>
-                <input id="chat-prov-key" type="password" class="modal-input" placeholder="sk-…" style="display:block; width:100%;" />
-              </div>
-
+          <!-- Scrollable Configuration Content -->
+          <div class="llm-scrollable-body">
+            <div style="display:flex; justify-content:space-between; align-items:flex-start; border-bottom:1px solid #21262d; padding-bottom:8px;">
               <div>
-                <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:4px;">
-                  <span id="lbl-prov-f-models" style="color:#8b949e; font-size:11px; font-weight:600;">Models</span>
-                  <button id="btn-prov-fetch" onclick="fetchProvModels()" class="mini-btn" style="background:#21262d; border-color:#388bfd88; color:#58a6ff; padding:3px 10px; font-size:11px;">⇩ <span id="lbl-prov-fetch">Auto-fill</span></button>
-                </div>
-                <div id="prov-model-list" style="display:flex; flex-direction:column; gap:4px; max-height:110px; overflow-y:auto; background:#0d1117; border:1px solid #30363d; border-radius:6px; padding:6px;"></div>
-                <input id="prov-model-filter" class="modal-input" oninput="filterProvModelList(this.value)" placeholder="🔎 篩選模型… filter models…" style="margin-top:6px; width:100%; font-size:12px;" />
+                <div style="font-weight:600; font-size:15px; color:#e6edf3;" id="lbl-prov-title">LLM Providers</div>
+                <div style="font-size:12px; color:#8b949e; margin-top:2px;" id="lbl-prov-note">This provider is used by the whole app (ingest, chat, and all LLM features).</div>
               </div>
             </div>
 
-            <div id="chat-prov-msg" style="color:#8b949e; font-size:12px; min-height:16px;"></div>
+            <!-- Active Model Bar -->
+            <div style="display:flex; gap:10px; align-items:center; background:#161b22; padding:10px 14px; border:1px solid #30363d; border-radius:8px;">
+              <span id="lbl-prov-cur" style="color:#8b949e; font-size:12px; font-weight:600; white-space:nowrap;">Active model</span>
+              <select id="prov-current-model" class="modal-input" style="flex:1; color:#58a6ff; font-weight:600; font-size:13px; min-width:0;"></select>
+            </div>
 
-            <div style="display:flex; gap:8px; justify-content:flex-end; margin-top:6px; border-top:1px solid #21262d; padding-top:8px;">
-              <button onclick="closeSettingsModal()" class="mini-btn" style="padding:6px 14px; font-size:12px;">✕ <span id="lbl-prov-cancel">Cancel</span></button>
-              <button onclick="addChatProvider()" class="btn-primary" style="background:#238636; border:1px solid #2ea043; color:#fff; border-radius:6px; padding:6px 18px; font-size:12px; font-weight:600; cursor:pointer;">＋ <span id="lbl-prov-save">Save</span></button>
+            <!-- Registered Providers List -->
+            <div id="chat-prov-list-section" style="display:none; flex-direction:column; gap:6px; background:#161b22; border:1px solid #30363d; border-radius:8px; padding:10px 14px;">
+              <div style="display:flex; justify-content:space-between; align-items:center;">
+                <span id="lbl-prov-configured-title" style="font-size:12px; font-weight:600; color:#c9d1d9;">已儲存的自訂供應商 (Configured Providers)</span>
+                <span id="prov-configured-count" style="font-size:11px; color:#8b949e;"></span>
+              </div>
+              <div id="chat-prov-list" style="display:flex; flex-direction:column; gap:6px; max-height:140px; overflow-y:auto;"></div>
+            </div>
+
+            <!-- Add / Edit Provider Form -->
+            <div style="background:#161b22; border:1px solid #30363d; border-radius:8px; padding:14px; display:flex; flex-direction:column; gap:10px;">
+              <div id="lbl-prov-add" style="font-weight:600; font-size:13px; color:#e6edf3; border-bottom:1px solid #21262d; padding-bottom:6px;">Add provider</div>
+              
+              <!-- Provider Name Dropdown Selector -->
+              <div>
+                <label style="color:#8b949e; font-size:12px; font-weight:600; display:block; margin-bottom:4px;"><span id="lbl-prov-f-label">Provider Name (供應商名稱)</span></label>
+                <select id="chat-prov-label" class="modal-input" style="width:100%; font-size:13px;" onchange="onSelectProviderName(this.value)">
+                  <!-- Dynamically populated with Cloud & Opencode Local options -->
+                </select>
+              </div>
+
+              <div id="prov-form" style="display:flex; flex-direction:column; gap:8px;">
+
+                <div id="prov-row-url">
+                  <label style="color:#8b949e; font-size:12px; font-weight:600; display:block; margin-bottom:3px;"><span id="lbl-prov-f-base">Base URL</span></label>
+                  <input id="chat-prov-base" class="modal-input" placeholder="http://127.0.0.1:11434" style="display:block; width:100%; font-size:13px;" />
+                </div>
+
+                <div id="prov-fixed-url" style="display:none; font-size:12px; color:#8b949e; background:#0d1117; border:1px dashed #30363d; border-radius:6px; padding:7px 10px;"></div>
+
+                <div id="prov-row-key">
+                  <label style="color:#8b949e; font-size:12px; font-weight:600; display:block; margin-bottom:3px;"><span id="lbl-prov-f-key">API key</span></label>
+                  <input id="chat-prov-key" type="password" class="modal-input" placeholder="sk-…" style="display:block; width:100%; font-size:13px;" />
+                </div>
+
+                <div>
+                  <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:6px;">
+                    <span id="lbl-prov-f-models" style="color:#8b949e; font-size:13px; font-weight:600;">Models</span>
+                    <button id="btn-prov-fetch" onclick="fetchProvModels()" class="mini-btn" style="background:#21262d; border-color:#388bfd88; color:#58a6ff; padding:4px 12px; font-size:12px; cursor:pointer;">⇩ <span id="lbl-prov-fetch">Auto-fill</span></button>
+                  </div>
+                  <!-- Only this models container scrolls internally -->
+                  <div id="prov-model-list"></div>
+                  <input id="prov-model-filter" class="modal-input" oninput="filterProvModelList(this.value)" placeholder="🔎 篩選模型… filter models…" style="margin-top:6px; width:100%; font-size:13px;" />
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Pinned Fixed Action Bar: Always Visible at Bottom without Scrolling -->
+          <div class="llm-fixed-actions">
+            <div id="chat-prov-msg" style="color:#8b949e; font-size:13px; flex:1; min-height:18px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;"></div>
+            <div style="display:flex; gap:10px; align-items:center; flex-shrink:0;">
+              <button onclick="closeSettingsModal()" class="mini-btn" style="padding:7px 16px; font-size:13px; cursor:pointer;">✕ <span id="lbl-prov-cancel">Cancel</span></button>
+              <button onclick="addChatProvider()" class="btn-primary" style="background:#238636; border:1px solid #2ea043; color:#fff; border-radius:6px; padding:8px 22px; font-size:13px; font-weight:600; cursor:pointer; display:flex; align-items:center; gap:6px;">
+                <span>✓</span> <span id="lbl-prov-save">Save & Activate</span>
+              </button>
             </div>
           </div>
 

@@ -3151,8 +3151,8 @@ html, body {
 .settings-dialog-card {
   width: 980px !important;
   max-width: 95vw !important;
-  height: 660px !important;
-  max-height: 90vh !important;
+  height: 790px !important;
+  max-height: 94vh !important;
   display: flex !important;
   flex-direction: column !important;
   background: #161b22 !important;
@@ -3809,30 +3809,104 @@ select.modal-input:focus,
   padding: 4px 12px !important;
 }
 
+/* LLM Settings Form & Model List Polish */
+#stg-page-llm {
+  display: flex !important;
+  flex-direction: column !important;
+  height: 100% !important;
+  overflow: hidden !important;
+  gap: 12px !important;
+}
+
+#stg-page-llm .llm-scrollable-body {
+  flex: 1 !important;
+  min-height: 0 !important;
+  overflow-y: auto !important;
+  display: flex !important;
+  flex-direction: column !important;
+  gap: 12px !important;
+  padding-right: 4px !important;
+}
+
+#stg-page-llm .llm-fixed-actions {
+  flex-shrink: 0 !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: space-between !important;
+  background: #161b22 !important;
+  border: 1px solid #30363d !important;
+  border-radius: 8px !important;
+  padding: 10px 16px !important;
+  box-shadow: 0 -4px 16px rgba(0, 0, 0, 0.4) !important;
+  z-index: 10 !important;
+}
+
 #stg-page-llm #prov-model-list {
-  font-size: 13px !important;
+  font-size: 14px !important;
+  max-height: 220px !important;
+  min-height: 100px !important;
+  overflow-y: auto !important;
+  display: flex !important;
+  flex-direction: column !important;
+  gap: 6px !important;
+  padding: 8px !important;
+  background: #0d1117 !important;
+  border: 1px solid #30363d !important;
+  border-radius: 8px !important;
 }
 
 #stg-page-llm #prov-model-list label {
-  font-size: 13px !important;
+  font-size: 14px !important;
+  font-weight: 500 !important;
+  display: flex !important;
+  align-items: center !important;
+  gap: 10px !important;
+  padding: 8px 12px !important;
+  background: #161b22 !important;
+  border: 1px solid #30363d !important;
+  border-radius: 6px !important;
+  color: #c9d1d9 !important;
+  cursor: pointer !important;
+  transition: all 0.15s ease !important;
+}
+
+#stg-page-llm #prov-model-list label:hover {
+  background: #21262d !important;
+  border-color: #58a6ff !important;
+  color: #58a6ff !important;
+}
+
+#stg-page-llm #prov-model-list label input[type="radio"] {
+  width: 16px !important;
+  height: 16px !important;
+  accent-color: #58a6ff !important;
+  cursor: pointer !important;
+}
+
+#stg-page-llm #prov-model-list label span {
+  font-size: 14px !important;
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace !important;
 }
 
 #stg-page-llm #prov-model-filter {
-  font-size: 14px !important;
+  font-size: 13px !important;
   height: 36px !important;
+  border-radius: 6px !important;
 }
 
 #stg-page-llm #chat-prov-msg {
-  font-size: 14px !important;
+  font-size: 13px !important;
 }
 
 #stg-page-llm .mini-btn {
-  font-size: 14px !important;
+  font-size: 13px !important;
+  padding: 6px 14px !important;
 }
 
 #stg-page-llm .btn-primary {
-  font-size: 14px !important;
-  padding: 8px 20px !important;
+  font-size: 13px !important;
+  padding: 8px 22px !important;
+  font-weight: 600 !important;
 }
 
 #stg-page-llm #chat-prov-list .prov-row-item {

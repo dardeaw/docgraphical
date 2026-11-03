@@ -4954,16 +4954,17 @@ function renderProvModelList(models) {
   provFetchedModels.forEach((m, idx) => {
     const lab = document.createElement('label');
     lab.dataset.modelName = (m || '').toLowerCase();
-    lab.style.cssText = 'display:flex; gap:8px; align-items:center; border:1px solid #21262d; border-radius:6px; padding:6px 10px; cursor:pointer; font-size:16px;';
+    lab.style.cssText = 'display:flex; gap:10px; align-items:center; border:1px solid #30363d; border-radius:6px; padding:8px 12px; cursor:pointer; font-size:14px; background:#161b22; transition:all 0.15s ease;';
     const radio = document.createElement('input');
     radio.type = 'radio';
     radio.name = 'prov-model-pick';
     radio.value = m;
+    radio.style.cssText = 'width:16px; height:16px; cursor:pointer; flex-shrink:0;';
     if (idx === 0) radio.checked = true;
     lab.appendChild(radio);
     const span = document.createElement('span');
     span.textContent = m;
-    span.style.cssText = 'overflow:hidden; text-overflow:ellipsis; white-space:nowrap;';
+    span.style.cssText = 'overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:14px; font-weight:500; color:#e6edf3; font-family:ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;';
     lab.appendChild(span);
     box.appendChild(lab);
   });
