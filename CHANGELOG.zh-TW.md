@@ -6,6 +6,18 @@
 
 格式遵循 [Keep a Changelog](https://keepachangelog.com/zh-TW/1.0.0/)，並嚴格遵循 [語意化版本 (Semantic Versioning)](https://semver.org/lang/zh-TW/) 規範。
 
+## [3.0.3] - 2026-11-03
+
+### 新增
+- **全域多工作區管理體系 (Multi-Workspace Suite - CLI & Web UI)**：
+  - 完整支援工作區生命週期（建立、重新命名、切換、刪除、清單），具備獨立工作區設定檔與語意 ID 綁定。
+  - 頂端工作區膠囊按鈕嚴格水平垂直中軸切齊，配備精緻垂直分隔線與毛玻璃下拉選單。
+  - 就地即時重新命名（In-Place Rename）：點擊鉛筆圖示就地編輯，支援 `Enter` 儲存與 `Esc` 取消，毫秒級同步頂部狀態。
+  - CLI 終端命令列全面支援 `docgraph workspace <list|create|rename|switch|delete>` 與 `-w/--workspace` 啟動參數。
+  - 涵蓋完整多工作區 CRUD 單元測試 (`tests/test_workspace.py`)。
+
+---
+
 ## [3.0.2] - 2026-11-02
 
 ### 新增

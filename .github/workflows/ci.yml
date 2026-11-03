@@ -63,4 +63,5 @@ jobs:
         run: |
           cmp static/docgraph.js app/static/docgraph.js
           cmp static/docgraph.css app/static/docgraph.css
+          cmp static/galaxy.css app/static/galaxy.css
           cmp templates/index.html app/index.html

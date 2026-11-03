@@ -8333,6 +8333,11 @@ function updateGlobalUIElementsI18n() {
   set('btn-cyber-prompt-ok', zh ? '確定' : (ja ? '確定' : 'OK'));
   set('btn-cyber-confirm-cancel', zh ? '取消' : (ja ? 'キャンセル' : 'Cancel'));
   set('btn-cyber-confirm-ok', zh ? '確定' : (ja ? '確定' : 'Confirm'));
+
+  // Update Workspace Menu I18n
+  if (typeof renderWorkspaceUI === 'function') {
+    renderWorkspaceUI();
+  }
 }
 
 function updateSettingsModalI18n() {
@@ -10570,4 +10575,265 @@ function closeChatStrategyModal() {
   const modal = document.getElementById('chat-strategy-modal');
   if (modal) modal.style.display = 'none';
 }
+
+// ─────────────────────────────────────────────────────────────
+// 🌟 Workspace Management Engine (Multi-Workspace & In-Place Rename)
+// ─────────────────────────────────────────────────────────────
+let gWorkspaces = [];
+let gActiveWorkspaceId = 'default';
+let gRenamingWsId = null;
+
+function toggleWorkspaceDropdown(forceState) {
+  const menu = document.getElementById('ws-dropdown-menu');
+  const btn = document.getElementById('btn-ws-capsule');
+  if (!menu || !btn) return;
+  const isShow = (forceState !== undefined) ? forceState : (menu.style.display === 'none' || !menu.style.display);
+  menu.style.display = isShow ? 'block' : 'none';
+  btn.classList.toggle('open', isShow);
+  if (isShow) {
+    loadWorkspaces(false);
+  }
+}
+
+// Close workspace dropdown when clicking outside
+window.addEventListener('click', (e) => {
+  const wrapper = document.getElementById('ws-dropdown-wrapper');
+  if (wrapper && !wrapper.contains(e.target)) {
+    toggleWorkspaceDropdown(false);
+  }
+});
+
+function loadWorkspaces(bReloadProjects = true) {
+  fetch('/api/workspaces')
+    .then(res => res.json())
+    .then(data => {
+      if (data && data.success) {
+        gWorkspaces = data.workspaces || [];
+        gActiveWorkspaceId = data.active || 'default';
+        renderWorkspaceUI();
+        if (bReloadProjects && typeof loadProjects === 'function') {
+          // Trigger repo load if workspace changed
+        }
+      }
+    })
+    .catch(err => console.error('Failed to load workspaces:', err));
+}
+
+function renderWorkspaceUI() {
+  const lang = (typeof currentLanguage !== 'undefined') ? currentLanguage : 'zh';
+  const zh = lang === 'zh', ja = lang === 'ja';
+
+  // 1. Update Capsule Display
+  const activeWs = gWorkspaces.find(w => w.id === gActiveWorkspaceId) || {
+    id: 'default',
+    name: zh ? '預設工作區' : (ja ? 'デフォルトワークスペース' : 'Default Workspace'),
+    icon: '🏢'
+  };
+
+  const nameEl = document.getElementById('ws-capsule-name');
+  const iconEl = document.getElementById('ws-capsule-icon');
+  if (nameEl) {
+    const displayName = zh ? activeWs.name : (ja ? (activeWs.name_ja || activeWs.name) : (activeWs.name_en || activeWs.name));
+    nameEl.textContent = displayName;
+  }
+  if (iconEl) iconEl.textContent = activeWs.icon || '🏢';
+
+  // 2. Update Header Text
+  const headerEl = document.getElementById('lbl-ws-menu-header');
+  if (headerEl) {
+    headerEl.textContent = zh ? '選擇工作區 (Workspaces)' : (ja ? 'ワークスペースの選択' : 'Select Workspace');
+  }
+  const createTextEl = document.getElementById('lbl-ws-create-text');
+  if (createTextEl) {
+    createTextEl.textContent = zh ? '建立新工作區...' : (ja ? '新規ワークスペース作成...' : 'New Workspace...');
+  }
+
+  // 3. Render List
+  const listEl = document.getElementById('ws-dropdown-list');
+  if (!listEl) return;
+  listEl.innerHTML = '';
+
+  gWorkspaces.forEach(w => {
+    const isAct = (w.id === gActiveWorkspaceId);
+    const item = document.createElement('div');
+    item.className = 'ws-item' + (isAct ? ' active' : '');
+    item.id = `ws-item-${w.id}`;
+
+    const displayName = zh ? w.name : (ja ? (w.name_ja || w.name) : (w.name_en || w.name));
+
+    if (gRenamingWsId === w.id) {
+      // In-place rename editor
+      item.innerHTML = `
+        <span style="font-size:14px;">${escapeHtml(w.icon || '📁')}</span>
+        <input type="text" class="ws-rename-input" id="input-rename-${w.id}" value="${escapeHtml(w.name)}" />
+        <button class="ws-action-icon-btn" onclick="saveRenameWorkspace('${w.id}', event)" title="${zh ? '確認儲存' : 'Save'}">✓</button>
+        <button class="ws-action-icon-btn" onclick="cancelRenameWorkspace(event)" title="${zh ? '取消' : 'Cancel'}">✕</button>
+      `;
+      setTimeout(() => {
+        const inp = document.getElementById(`input-rename-${w.id}`);
+        if (inp) {
+          inp.focus();
+          inp.select();
+          inp.addEventListener('keydown', (ev) => {
+            if (ev.key === 'Enter') saveRenameWorkspace(w.id, ev);
+            if (ev.key === 'Escape') cancelRenameWorkspace(ev);
+          });
+        }
+      }, 50);
+    } else {
+      // Normal display row
+      const repoTip = zh ? `${w.roots_count} 個目錄` : `${w.roots_count} repos`;
+      const delBtnHtml = (w.id !== 'default')
+        ? `<button class="ws-action-icon-btn danger" onclick="confirmDeleteWorkspace('${w.id}', '${escapeHtml(displayName)}', event)" title="${zh ? '刪除工作區' : 'Delete'}">🗑️</button>`
+        : '';
+
+      item.innerHTML = `
+        <span style="font-size:14px;">${escapeHtml(w.icon || '📁')}</span>
+        <span class="ws-item-title" onclick="switchActiveWorkspace('${w.id}')" title="${escapeHtml(displayName)}">${escapeHtml(displayName)}</span>
+        <span class="ws-item-badge" title="${repoTip}">${w.roots_count}</span>
+        <div class="ws-item-actions">
+          <button class="ws-action-icon-btn" onclick="startRenameWorkspace('${w.id}', event)" title="${zh ? '重新命名' : 'Rename'}">✏️</button>
+          ${delBtnHtml}
+        </div>
+      `;
+    }
+
+    listEl.appendChild(item);
+  });
+}
+
+function switchActiveWorkspace(wsId) {
+  if (wsId === gActiveWorkspaceId) {
+    toggleWorkspaceDropdown(false);
+    return;
+  }
+  fetch('/api/workspaces/switch', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ id: wsId })
+  })
+    .then(res => res.json())
+    .then(res => {
+      if (res && res.success) {
+        gActiveWorkspaceId = wsId;
+        toggleWorkspaceDropdown(false);
+        const lang = (typeof currentLanguage !== 'undefined') ? currentLanguage : 'zh';
+        const msg = (lang === 'zh') ? '✨ 已切換工作區' : '✨ Workspace activated';
+        if (typeof showToast === 'function') showToast(msg);
+
+        // Reload UI and data for the new workspace
+        if (typeof loadProjects === 'function') loadProjects();
+        if (typeof loadGraphData === 'function') loadGraphData();
+        loadWorkspaces(false);
+      } else {
+        alert('Switch failed: ' + (res.error || 'Unknown error'));
+      }
+    })
+    .catch(err => alert('Request failed: ' + err));
+}
+
+function promptCreateWorkspace() {
+  const lang = (typeof currentLanguage !== 'undefined') ? currentLanguage : 'zh';
+  const zh = lang === 'zh', ja = lang === 'ja';
+  const title = zh ? '➕ 建立新工作區' : (ja ? '➕ 新規ワークスペース作成' : '➕ Create New Workspace');
+  const msg = zh ? '請輸入新工作區名稱（例如：伺服器研發專案、新人教材）：' : 'Enter a name for the new workspace:';
+
+  openCyberPrompt(title, msg, '', zh ? '建立後可在頂端下拉選單隨時秒級切換' : 'You can switch between workspaces anytime from the top bar.', (name) => {
+    if (!name || !name.trim()) return;
+    fetch('/api/workspaces/create', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: name.trim() })
+    })
+      .then(res => res.json())
+      .then(res => {
+        if (res && res.success) {
+          const newWs = res.workspace;
+          switchActiveWorkspace(newWs.id);
+        } else {
+          alert('Creation failed: ' + (res.error || 'Unknown error'));
+        }
+      })
+      .catch(err => alert('Request failed: ' + err));
+  });
+}
+
+function startRenameWorkspace(wsId, event) {
+  if (event) event.stopPropagation();
+  gRenamingWsId = wsId;
+  renderWorkspaceUI();
+}
+
+function cancelRenameWorkspace(event) {
+  if (event) event.stopPropagation();
+  gRenamingWsId = null;
+  renderWorkspaceUI();
+}
+
+function saveRenameWorkspace(wsId, event) {
+  if (event) event.stopPropagation();
+  const inp = document.getElementById(`input-rename-${wsId}`);
+  if (!inp) return;
+  const newName = inp.value.trim();
+  if (!newName) {
+    cancelRenameWorkspace();
+    return;
+  }
+
+  fetch('/api/workspaces/rename', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ id: wsId, name: newName })
+  })
+    .then(res => res.json())
+    .then(res => {
+      if (res && res.success) {
+        gRenamingWsId = null;
+        loadWorkspaces(false);
+      } else {
+        alert('Rename failed: ' + (res.error || 'Unknown error'));
+      }
+    })
+    .catch(err => alert('Request failed: ' + err));
+}
+
+function confirmDeleteWorkspace(wsId, wsName, event) {
+  if (event) event.stopPropagation();
+  const lang = (typeof currentLanguage !== 'undefined') ? currentLanguage : 'zh';
+  const zh = lang === 'zh', ja = lang === 'ja';
+  const title = zh ? '⚠ 刪除工作區' : (ja ? '⚠ ワークスペース削除' : '⚠ Delete Workspace');
+  const msg = zh ? `確定要刪除工作區「${wsName}」嗎？` : `Are you sure you want to delete workspace '${wsName}'?`;
+  const tip = zh ? '刪除工作區僅移除工作區配置，各專案硬碟檔案與本地資料庫不受影響。' : 'Deleting a workspace only removes its profile; disk files remain intact.';
+
+  openCyberConfirm(title, msg, tip, () => {
+    fetch('/api/workspaces/delete', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id: wsId })
+    })
+      .then(res => res.json())
+      .then(res => {
+        if (res && res.success) {
+          if (typeof showToast === 'function') {
+            showToast(zh ? '🗑️ 工作區已刪除' : '🗑️ Workspace deleted');
+          }
+          gActiveWorkspaceId = res.active || 'default';
+          loadWorkspaces(true);
+          if (typeof loadProjects === 'function') loadProjects();
+          if (typeof loadGraphData === 'function') loadGraphData();
+        } else {
+          alert('Delete failed: ' + (res.error || 'Unknown error'));
+        }
+      })
+      .catch(err => alert('Request failed: ' + err));
+  });
+}
+
+// Auto-mount workspace loader when page is ready
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', () => loadWorkspaces(false));
+} else {
+  loadWorkspaces(false);
+}
+
 

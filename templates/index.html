@@ -34,7 +34,7 @@ if (window.THREE && !window.THREE.Timer) {
 </script>
 <script src="/static/three-spritetext.min.js"></script>
 <script src="/static/3d-force-graph.min.js"></script>
-<link rel="stylesheet" href="/static/galaxy.css?v=5.9.24">
+<link rel="stylesheet" href="/static/galaxy.css?v=3.0.3">
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark-dimmed.min.css">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
@@ -50,6 +50,29 @@ if (window.THREE && !window.THREE.Timer) {
   <div class="brand-badge">
     <div class="brand-dot" style="background:#00ffaa; box-shadow:0 0 10px #00ffaa;"></div>
     <span id="app-logo">DocGraph 3D</span>
+  </div>
+
+  <div class="brand-divider"></div>
+
+  <!-- Workspace Selector Capsule -->
+  <div class="ws-dropdown-wrapper" id="ws-dropdown-wrapper">
+    <button class="ws-capsule-btn" id="btn-ws-capsule" onclick="toggleWorkspaceDropdown()" title="切換／管理工作區 (Workspaces)">
+      <span id="ws-capsule-icon">🏢</span>
+      <span id="ws-capsule-name">預設工作區</span>
+      <span class="ws-caret">▾</span>
+    </button>
+    <div class="ws-dropdown-menu" id="ws-dropdown-menu" style="display:none;">
+      <div class="ws-menu-header" id="lbl-ws-menu-header">工作區 (Workspaces)</div>
+      <div class="ws-list" id="ws-dropdown-list">
+        <!-- Rendered dynamically -->
+      </div>
+      <div class="ws-menu-footer">
+        <button class="ws-create-btn" onclick="promptCreateWorkspace()">
+          <span>➕</span>
+          <span id="lbl-ws-create-text">建立新工作區...</span>
+        </button>
+      </div>
+    </div>
   </div>
 
   <div class="toolbar-right">
@@ -944,7 +967,7 @@ function confirmBrowsePick() {
   closeBrowsePicker();
 }
 </script>
-<script src="/static/docgraph.js?v=3.6.5"></script>
+<script src="/static/docgraph.js?v=3.0.3"></script>
 
 <!-- Sleek In-App Concepts Action Modal (No ugly browser prompts!) -->
 <div id="concept-action-modal" class="modal-overlay" style="display:none; position:fixed; top:0; left:0; width:100vw; height:100vh; background:rgba(0,0,0,0.75); z-index:9999; align-items:center; justify-content:center; backdrop-filter:blur(3px);">

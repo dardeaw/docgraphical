@@ -10,9 +10,12 @@ def main():
     parser = argparse.ArgumentParser(description="DocGraphical - Precision Markdown Intelligence Server")
     parser.add_argument("-p", "--port", type=int, default=DEFAULT_PORT, help="Port to bind server (default: 5002)")
     parser.add_argument("-H", "--host", default=DEFAULT_HOST, help="Host to bind server (default: 127.0.0.1)")
+    parser.add_argument("-w", "--workspace", help="Active workspace ID or profile name")
     parser.add_argument("paths", nargs="*", help="Optional project directory roots to scan")
 
     args = parser.parse_args()
+    if args.workspace:
+        os.environ["DOCGRAPHICAL_ACTIVE_WORKSPACE"] = args.workspace
     if args.port != DEFAULT_PORT and not os.environ.get("DOCGRAPHICAL_CONFIG"):
         from docgraphical import constants
         port_cfg = os.path.expanduser(f"~/.docgraphical_config_{args.port}.json")

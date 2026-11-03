@@ -41,66 +41,41 @@ def get_default_db_path(repo_path: Optional[str] = None) -> str:
 
 
 def load_config() -> Dict[str, List[str]]:
-    """Load configuration, seamlessly migrating from legacy config if needed.
-
-    Isolated mode: when DOCGRAPHICAL_CONFIG env points to a dedicated file
-    (e.g. a clean test instance), skip legacy migration AND the standard
-    PythonCode fallback so an empty config truly means "no roots yet" —
-    the UI then guides the user into repo setup instead of inheriting
-    the main instance's roots.
-    """
-    isolated = bool(os.environ.get("DOCGRAPHICAL_CONFIG"))
-    legacy_cfg_path = os.path.expanduser("~/.docgraph_config.json")
-    cfg_file = _get_config_file()
+    """Load configuration.
     
-    roots: List[str] = []
-    excluded: List[str] = []
-
-    # 1. Try modern config file
-    if os.path.exists(cfg_file):
-        try:
-            with open(cfg_file, "r", encoding="utf-8") as f:
-                data = json.load(f)
-                roots = data.get("custom_roots") or []
-                excluded = data.get("excluded_paths") or []
-        except Exception:
-            pass
-
-    # 2. If modern config has no roots, check legacy config (skip when isolated)
-    if not roots and not isolated and os.path.exists(legacy_cfg_path):
-        try:
-            with open(legacy_cfg_path, "r", encoding="utf-8") as f:
-                data = json.load(f)
-                roots = data.get("custom_roots") or []
-                if not excluded:
+    If DOCGRAPHICAL_CONFIG environment variable is explicitly set (e.g. isolated test mode),
+    read directly from that file. Otherwise, delegate to the active Workspace config.
+    """
+    if os.environ.get("DOCGRAPHICAL_CONFIG"):
+        cfg_file = _get_config_file()
+        roots: List[str] = []
+        excluded: List[str] = []
+        if os.path.exists(cfg_file):
+            try:
+                with open(cfg_file, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                    roots = data.get("custom_roots") or []
                     excluded = data.get("excluded_paths") or []
-                # Save migrated config
-                save_config({"custom_roots": roots, "excluded_paths": excluded})
-        except Exception:
-            pass
+            except Exception:
+                pass
+        return {"custom_roots": roots, "excluded_paths": excluded}
 
-    # 3. If still empty, check standard OneDrive PythonCode folder (skip when isolated)
-    if not roots and not isolated:
-        standard_roots = [
-            os.path.abspath(r"D:\OneDrive - 勤誠興業股份有限公司\文件\PythonCode"),
-            os.path.abspath(r"C:\OneDrive - 勤誠興業股份有限公司\文件\PythonCode"),
-        ]
-        for sr in standard_roots:
-            if os.path.exists(sr) and sr not in roots:
-                roots.append(sr)
-        if roots:
-            save_config({"custom_roots": roots, "excluded_paths": excluded})
-
-    return {"custom_roots": roots, "excluded_paths": excluded}
+    from . import workspace
+    return workspace.load_workspace_config()
 
 
 def save_config(cfg: Dict[str, List[str]]) -> None:
-    """Save configuration to user home directory."""
-    try:
-        with open(_get_config_file(), "w", encoding="utf-8") as f:
-            json.dump(cfg, f, indent=2, ensure_ascii=False)
-    except Exception as e:
-        print(f"Failed to save docgraphical config: {e}", file=sys.stderr)
+    """Save configuration."""
+    if os.environ.get("DOCGRAPHICAL_CONFIG"):
+        try:
+            with open(_get_config_file(), "w", encoding="utf-8") as f:
+                json.dump(cfg, f, indent=2, ensure_ascii=False)
+        except Exception as e:
+            print(f"Failed to save docgraphical config: {e}", file=sys.stderr)
+        return
+
+    from . import workspace
+    workspace.save_workspace_config(cfg)
 
 
 def get_search_roots(extra_paths: Optional[List[str]] = None) -> List[str]:

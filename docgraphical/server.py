@@ -469,6 +469,58 @@ def create_app(initial_paths: Optional[List[str]] = None, search_roots: Optional
             return jsonify({"success": False, "error": str(ex)}), 500
         return jsonify({"success": True, "path": target, "name": name})
 
+    # --- Workspaces Management API ---
+    @app.route("/api/workspaces", methods=["GET"])
+    def api_list_workspaces():
+        from . import workspace
+        return jsonify({
+            "success": True,
+            "active": workspace.get_active_workspace_id(),
+            "workspaces": workspace.list_workspaces()
+        })
+
+    @app.route("/api/workspaces/switch", methods=["POST"])
+    def api_switch_workspace():
+        from . import workspace
+        data = request.get_json(silent=True) or {}
+        ws_id = data.get("id", "").strip()
+        res = workspace.switch_workspace(ws_id)
+        if not res.get("success"):
+            return jsonify(res), 400
+        return jsonify(res)
+
+    @app.route("/api/workspaces/create", methods=["POST"])
+    def api_create_workspace():
+        from . import workspace
+        data = request.get_json(silent=True) or {}
+        name = data.get("name", "").strip()
+        copy_from = data.get("copy_from", "").strip() or None
+        res = workspace.create_workspace(name, copy_from=copy_from)
+        if not res.get("success"):
+            return jsonify(res), 400
+        return jsonify(res)
+
+    @app.route("/api/workspaces/rename", methods=["POST"])
+    def api_rename_workspace():
+        from . import workspace
+        data = request.get_json(silent=True) or {}
+        ws_id = data.get("id", "").strip()
+        new_name = data.get("name", "").strip()
+        res = workspace.rename_workspace(ws_id, new_name)
+        if not res.get("success"):
+            return jsonify(res), 400
+        return jsonify(res)
+
+    @app.route("/api/workspaces/delete", methods=["POST"])
+    def api_delete_workspace():
+        from . import workspace
+        data = request.get_json(silent=True) or {}
+        ws_id = data.get("id", "").strip()
+        res = workspace.delete_workspace(ws_id)
+        if not res.get("success"):
+            return jsonify(res), 400
+        return jsonify(res)
+
     @app.route("/api/paths/add", methods=["POST"])
     def add_custom_path():
         data = request.get_json(silent=True) or {}
