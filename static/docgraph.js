@@ -5058,24 +5058,36 @@ function fetchProvModels() {
 
 function refreshProviderList() {
   const list = document.getElementById('chat-prov-list');
+  const section = document.getElementById('chat-prov-list-section');
+  const countSpan = document.getElementById('prov-configured-count');
   const msg = document.getElementById('chat-prov-msg');
   if (!list) return;
   fetch('/api/llm/providers')
     .then((res) => res.json())
     .then((data) => {
       list.innerHTML = '';
-      for (const p of (data && data.providers) || []) {
+      const providers = (data && data.providers) || [];
+      if (section) {
+        section.style.display = providers.length ? 'flex' : 'none';
+      }
+      if (countSpan) {
+        countSpan.textContent = providers.length ? `(${providers.length})` : '';
+      }
+      for (const p of providers) {
         const row = document.createElement('div');
-        row.style.cssText = 'display:flex; gap:6px; align-items:center; border:1px solid #21262d; border-radius:6px; padding:4px 8px;';
+        row.style.cssText = 'display:flex; gap:8px; align-items:center; border:1px solid #30363d; border-radius:6px; padding:6px 10px; background:#0d1117;';
+        
         const label = document.createElement('span');
         label.style.flex = '1';
-        label.style.cssText += ' overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:15px;';
-        label.textContent = `${p.label || p.id} [${(p.models || []).join(', ')}]${p.source === 'file' ? '' : ' 🔒'}`;
+        label.style.cssText += ' overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:13px; font-weight:500; color:#e6edf3;';
+        const modelTxt = (p.models && p.models.length) ? p.models.join(', ') : 'No model';
+        label.textContent = `${p.label || p.id} [${modelTxt}]${p.source === 'file' ? '' : ' 🔒'}`;
         label.title = label.textContent;
         row.appendChild(label);
+
         const testBtn = document.createElement('button');
         testBtn.textContent = provT('prov_test');
-        testBtn.style.cssText = 'background:transparent; border:1px solid #30363d; border-radius:6px; color:#c9d1d9; cursor:pointer; padding:2px 8px; font-size:15px;';
+        testBtn.style.cssText = 'background:#21262d; border:1px solid #30363d; border-radius:6px; color:#c9d1d9; cursor:pointer; padding:3px 10px; font-size:12px;';
         testBtn.onclick = () => {
           if (msg) msg.textContent = '…';
           fetch(`/api/llm/providers/${encodeURIComponent(p.id)}/test`, {
@@ -5088,14 +5100,23 @@ function refreshProviderList() {
             .catch(() => { if (msg) msg.textContent = '❌'; });
         };
         row.appendChild(testBtn);
+
+        // Delete button for custom file-persisted providers
         if (p.source === 'file') {
           const delBtn = document.createElement('button');
-          delBtn.textContent = '✕';
-          delBtn.style.cssText = 'background:transparent; border:1px solid #30363d; border-radius:6px; color:#f85149; cursor:pointer; padding:2px 8px; font-size:15px;';
+          delBtn.textContent = '🗑️ 刪除';
+          delBtn.title = (currentLanguage === 'zh' ? '刪除此供應商與配置' : 'Delete provider');
+          delBtn.style.cssText = 'background:#3d1117; border:1px solid #f8514988; border-radius:6px; color:#ff7b72; cursor:pointer; padding:3px 10px; font-size:12px; font-weight:600;';
           delBtn.onclick = () => {
             const lang = (typeof currentLanguage !== 'undefined' && currentLanguage === 'zh') ? 'zh-TW' : 'en-US';
+            const confirmMsg = (currentLanguage === 'zh' ? `確定要刪除供應商「${p.label || p.id}」嗎？` : `Delete provider "${p.label || p.id}"?`);
+            if (!confirm(confirmMsg)) return;
             fetch(`/api/llm/providers/${encodeURIComponent(p.id)}?strLang=${encodeURIComponent(lang)}`, { method: 'DELETE' })
-              .then(() => { refreshProviderList(); loadProvActiveModel(); })
+              .then(() => { 
+                refreshProviderList(); 
+                loadProvActiveModel();
+                showToast(currentLanguage === 'zh' ? '🗑️ 已刪除供應商' : '🗑️ Provider deleted');
+              })
               .catch(() => { /* ignore */ });
           };
           row.appendChild(delBtn);
