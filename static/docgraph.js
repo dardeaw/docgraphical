@@ -5126,11 +5126,14 @@ function addChatProvider() {
     if (msg) msg.textContent = `❌ ${provT('prov_models_empty')}`;
     return;
   }
+  // 陛下勾選哪個模型，就只以該模型收錄進可用清單，絕不把抓到的 134 個無關廢料模型塞進去
+  const selectedModels = [picked];
+
   const payload = {
     label: provLabel,
     base: base,
     key: provFormKey(),
-    models: provFetchedModels,
+    models: selectedModels,
     strLang: zh ? 'zh-TW' : 'en-US',
   };
   fetch('/api/llm/providers', {

@@ -212,19 +212,35 @@ def _FnSlug(strLabel: str) -> str:
 # ----------------------------------------------------------------- CRUD ----
 def FnAddProvider(str_label: str, str_base: str, str_key: str = "",
                   v_models: Optional[List[str]] = None, str_lang: str = "") -> Dict[str, Any]:
-    """Add a user provider (persisted to JSON file). Returns the entry (key masked)."""
+    """Add or update a user provider (persisted to JSON file). Returns the entry (key masked)."""
     strBase = (str_base or "").rstrip("/")
     if not str_label or not strBase:
         raise ValueError("label 與 base URL 不可為空" if str_lang.startswith("zh") else "Label and base URL are required")
     dicData = _FnLoadFileProviders()
     vP = dicData["providers"]
     strId = _FnSlug(str_label)
-    if any(p.get("id") == strId for p in vP):
-        strId = f"{strId}-{len(vP) + 1}"
-    dicEntry = {"id": strId, "label": str_label.strip(), "base": strBase,
-                "key": str_key or "",
-                "models": [m.strip() for m in (v_models or []) if str(m).strip()] or ["default"]}
-    vP.append(dicEntry)
+
+    clean_models = [m.strip() for m in (v_models or []) if str(m).strip()] or ["default"]
+
+    # Check if an entry with the same ID or label already exists (In-Place Update)
+    existing_idx = next((i for i, p in enumerate(vP) if p.get("id") == strId or p.get("label") == str_label.strip()), None)
+
+    dicEntry = {
+        "id": strId,
+        "label": str_label.strip(),
+        "base": strBase,
+        "key": str_key or "",
+        "models": clean_models
+    }
+
+    if existing_idx is not None:
+        # Keep existing key if not supplied
+        if not str_key and vP[existing_idx].get("key"):
+            dicEntry["key"] = vP[existing_idx]["key"]
+        vP[existing_idx] = dicEntry
+    else:
+        vP.append(dicEntry)
+
     dicData["providers"] = vP
     _FnSaveFileProviders(dicData)
     return {**dicEntry, "key": "***" if dicEntry["key"] else ""}
