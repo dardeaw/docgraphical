@@ -4767,8 +4767,7 @@ function renderProvDialogLabels() {
   set('lbl-prov-f-models', provT('prov_f_models'));
   set('lbl-prov-fetch', provT('prov_fetch'));
   set('lbl-prov-cancel', provT('prov_cancel'));
-  set('lbl-prov-save', provT('prov_save'));
-  set('lbl-prov-configured-title', currentLanguage === 'zh' ? '已儲存的自訂供應商 (Configured Providers)' : (currentLanguage === 'ja' ? '保存済みのプロバイダー (Configured Providers)' : 'Configured Providers'));
+  set('lbl-prov-configured-title', currentLanguage === 'zh' ? '已儲存的模型 (Saved Models)' : (currentLanguage === 'ja' ? '保存済みモデル (Saved Models)' : 'Saved Models'));
 
   const filterInput = document.getElementById('prov-model-filter');
   if (filterInput) {

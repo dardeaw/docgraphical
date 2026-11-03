@@ -3828,23 +3828,36 @@ select.modal-input:focus,
   padding-right: 4px !important;
 }
 
-#stg-page-llm .llm-fixed-actions {
+#stg-page-llm .llm-card-container {
+  background: #161b22 !important;
+  border: 1px solid #30363d !important;
+  border-radius: 8px !important;
+  padding: 14px 14px 0 14px !important;
+  display: flex !important;
+  flex-direction: column !important;
+  gap: 10px !important;
+  position: relative !important;
+  overflow: hidden !important;
+}
+
+#stg-page-llm .llm-card-footer {
   flex-shrink: 0 !important;
   display: flex !important;
   align-items: center !important;
   justify-content: space-between !important;
   background: #161b22 !important;
-  border: 1px solid #30363d !important;
-  border-radius: 8px !important;
-  padding: 10px 16px !important;
-  box-shadow: 0 -4px 16px rgba(0, 0, 0, 0.4) !important;
-  z-index: 10 !important;
+  border-top: 1px solid #30363d !important;
+  padding: 10px 0 !important;
+  margin-top: 4px !important;
+  position: sticky !important;
+  bottom: 0 !important;
+  z-index: 5 !important;
 }
 
 #stg-page-llm #prov-model-list {
   font-size: 14px !important;
-  max-height: 220px !important;
-  min-height: 100px !important;
+  max-height: 200px !important;
+  min-height: 90px !important;
   overflow-y: auto !important;
   display: flex !important;
   flex-direction: column !important;
