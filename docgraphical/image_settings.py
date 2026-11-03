@@ -25,9 +25,25 @@ DEFAULT_IMAGE_SETTINGS: Dict[str, Any] = {
 
 
 def _FnConfigPath() -> str:
-    return os.environ.get("DOCGRAPH_IMAGE_SETTINGS_FILE") or os.path.join(
-        os.path.expanduser("~"), ".docgraphical", "image_settings.json"
-    )
+    env_override = os.environ.get("DOCGRAPH_IMAGE_SETTINGS_FILE")
+    if env_override:
+        return env_override
+    try:
+        from . import workspace
+        ws_path = workspace.get_workspace_file_path("image_settings.json")
+        # Seamless inheritance: if workspace file doesn't exist yet, check global
+        if not os.path.exists(ws_path):
+            global_path = os.path.join(os.path.expanduser("~"), ".docgraphical", "image_settings.json")
+            if os.path.exists(global_path):
+                try:
+                    import shutil
+                    os.makedirs(os.path.dirname(ws_path), exist_ok=True)
+                    shutil.copy2(global_path, ws_path)
+                except Exception:
+                    return global_path
+        return ws_path
+    except Exception:
+        return os.path.join(os.path.expanduser("~"), ".docgraphical", "image_settings.json")
 
 
 def FnGetImageSettings() -> Dict[str, Any]:

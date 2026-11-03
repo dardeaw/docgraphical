@@ -7,6 +7,18 @@ All notable changes to the DocGraphical project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.0.4] - 2026-11-03
+
+### Added
+- **Complete Workspace Context Isolation (Prompts & Settings Integration)**:
+  - Upgraded workspaces to dedicated profile directories (`~/.docgraphical/workspaces/<id>/`).
+  - **Prompt Templates per Workspace**: System prompt templates for concept scans, crawling, and multimodal ingest (`prompts.json`) are now isolated per workspace, enabling distinct AI personalities and workflows per domain.
+  - **LLM Providers & Active Model per Workspace**: Provider credentials and default models (`llm.json`) now automatically follow the active workspace with seamless global fallback and automatic inheritance upon creation.
+  - **Image Filter Ingest Thresholds per Workspace**: Geometric and entropy filter presets (`image_settings.json`) now adapt to each workspace's technical documentation requirements.
+  - **Live Dynamic Re-render**: Switching workspaces instantly reloads the Prompt Manager, LLM provider dialog, and image settings panels without requiring a browser refresh.
+
+---
+
 ## [3.0.3] - 2026-11-03
 
 ### Added

@@ -245,9 +245,25 @@ DEFAULT_PROMPTS: Dict[str, Dict[str, Dict[str, str]]] = {
 
 
 def _FnPromptsPath() -> str:
-    return os.environ.get("DOCGRAPH_PROMPTS_FILE") or os.path.join(
-        os.path.expanduser("~"), ".docgraphical", "prompts.json"
-    )
+    env_override = os.environ.get("DOCGRAPH_PROMPTS_FILE")
+    if env_override:
+        return env_override
+    try:
+        from . import workspace
+        ws_path = workspace.get_workspace_file_path("prompts.json")
+        # Seamless inheritance: if workspace prompt file doesn't exist yet, check global
+        if not os.path.exists(ws_path):
+            global_path = os.path.join(os.path.expanduser("~"), ".docgraphical", "prompts.json")
+            if os.path.exists(global_path):
+                try:
+                    import shutil
+                    os.makedirs(os.path.dirname(ws_path), exist_ok=True)
+                    shutil.copy2(global_path, ws_path)
+                except Exception:
+                    return global_path
+        return ws_path
+    except Exception:
+        return os.path.join(os.path.expanduser("~"), ".docgraphical", "prompts.json")
 
 
 def FnLoadPrompts() -> Dict[str, Dict[str, str]]:

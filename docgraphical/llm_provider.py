@@ -163,8 +163,25 @@ def FnListProviders() -> Dict[str, Any]:
 
 # --------------------------------------------------------------- files ----
 def _FnConfigPath() -> str:
-    return os.environ.get("DOCGRAPH_LLM_FILE") or os.path.join(
-        os.path.expanduser("~"), ".docgraphical", "llm.json")
+    env_override = os.environ.get("DOCGRAPH_LLM_FILE")
+    if env_override:
+        return env_override
+    try:
+        from . import workspace
+        ws_path = workspace.get_workspace_file_path("llm.json")
+        # Seamless inheritance: if workspace LLM file doesn't exist yet, check global
+        if not os.path.exists(ws_path):
+            global_path = os.path.join(os.path.expanduser("~"), ".docgraphical", "llm.json")
+            if os.path.exists(global_path):
+                try:
+                    import shutil
+                    os.makedirs(os.path.dirname(ws_path), exist_ok=True)
+                    shutil.copy2(global_path, ws_path)
+                except Exception:
+                    return global_path
+        return ws_path
+    except Exception:
+        return os.path.join(os.path.expanduser("~"), ".docgraphical", "llm.json")
 
 
 def _FnLoadFileProviders() -> Dict[str, Any]:

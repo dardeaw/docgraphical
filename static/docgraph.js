@@ -10724,6 +10724,10 @@ function switchActiveWorkspace(wsId) {
         // Reload UI and data for the new workspace
         if (typeof loadProjects === 'function') loadProjects();
         if (typeof loadGraphData === 'function') loadGraphData();
+        if (typeof loadPromptsList === 'function') loadPromptsList();
+        if (typeof refreshProviderList === 'function') refreshProviderList();
+        if (typeof updateActiveLLMDisplay === 'function') updateActiveLLMDisplay();
+        if (typeof loadImageSettingsToUI === 'function') loadImageSettingsToUI();
         loadWorkspaces(false);
       } else {
         alert('Switch failed: ' + (res.error || 'Unknown error'));

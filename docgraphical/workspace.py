@@ -84,10 +84,33 @@ def get_active_workspace_id() -> str:
     return manifest.get("active") or DEFAULT_WORKSPACE_ID
 
 
-def get_workspace_config_path(ws_id: Optional[str] = None) -> str:
+def get_workspace_dir(ws_id: Optional[str] = None, ensure: bool = True) -> str:
     target_id = ws_id or get_active_workspace_id()
-    _ensure_dir(WORKSPACES_ROOT)
-    return os.path.join(WORKSPACES_ROOT, f"{target_id}.json")
+    ws_dir = os.path.join(WORKSPACES_ROOT, target_id)
+    if ensure:
+        _ensure_dir(ws_dir)
+    return ws_dir
+
+
+def get_workspace_file_path(filename: str, ws_id: Optional[str] = None) -> str:
+    """Return the absolute path of a specific configuration file in a workspace."""
+    target_id = ws_id or get_active_workspace_id()
+    ws_dir = get_workspace_dir(target_id)
+    return os.path.join(ws_dir, filename)
+
+
+def get_workspace_config_path(ws_id: Optional[str] = None) -> str:
+    """Return repos config file path, migrating legacy single-file format if necessary."""
+    target_id = ws_id or get_active_workspace_id()
+    new_path = get_workspace_file_path("repos.json", target_id)
+    legacy_path = os.path.join(WORKSPACES_ROOT, f"{target_id}.json")
+    if not os.path.exists(new_path) and os.path.exists(legacy_path):
+        try:
+            import shutil
+            shutil.move(legacy_path, new_path)
+        except Exception:
+            pass
+    return new_path
 
 
 def load_workspace_config(ws_id: Optional[str] = None) -> Dict[str, List[str]]:
@@ -203,11 +226,26 @@ def create_workspace(name: str, copy_from: Optional[str] = None) -> Dict[str, An
         "icon": "📁"
     }
 
-    initial_cfg = {"custom_roots": [], "excluded_paths": []}
-    if copy_from and copy_from in ws_ids:
-        initial_cfg = load_workspace_config(copy_from)
+    # Ensure target workspace directory
+    target_dir = get_workspace_dir(cand_id)
 
-    save_workspace_config(initial_cfg, ws_id=cand_id)
+    # Copy files from source workspace if requested
+    if copy_from and copy_from in ws_ids:
+        src_dir = get_workspace_dir(copy_from)
+        if os.path.exists(src_dir):
+            import shutil
+            for item in os.listdir(src_dir):
+                s_item = os.path.join(src_dir, item)
+                d_item = os.path.join(target_dir, item)
+                if os.path.isfile(s_item):
+                    try:
+                        shutil.copy2(s_item, d_item)
+                    except Exception:
+                        pass
+    else:
+        # Save clean empty repo config
+        save_workspace_config({"custom_roots": [], "excluded_paths": []}, ws_id=cand_id)
+
     manifest.get("workspaces", []).append(new_item)
     save_manifest(manifest)
 
@@ -253,11 +291,20 @@ def delete_workspace(ws_id: str) -> Dict[str, Any]:
 
     save_manifest(manifest)
 
-    # Delete config file
-    cfg_path = get_workspace_config_path(ws_id)
-    if os.path.exists(cfg_path):
+    # Delete workspace directory
+    ws_dir = get_workspace_dir(ws_id)
+    if os.path.exists(ws_dir):
         try:
-            os.remove(cfg_path)
+            import shutil
+            shutil.rmtree(ws_dir, ignore_errors=True)
+        except Exception:
+            pass
+
+    # Legacy file cleanup
+    legacy_file = os.path.join(WORKSPACES_ROOT, f"{ws_id}.json")
+    if os.path.exists(legacy_file):
+        try:
+            os.remove(legacy_file)
         except OSError:
             pass
 

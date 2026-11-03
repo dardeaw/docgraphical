@@ -42,8 +42,25 @@ def test_workspaces_crud():
         loaded_cfg = workspace.load_workspace_config(new_id)
         assert loaded_cfg["custom_roots"] == test_roots
 
-        # 6. Delete workspace
+        # 6. Verify Prompts and LLM isolation per workspace
+        from docgraphical import prompts, llm_provider
+        # Set workspace specific prompt in new_id
+        prompts.FnSavePrompt("concept_scan", "專案專屬系統提示詞", "專案專屬模板")
+        loaded_p = prompts.FnGetPrompt("concept_scan")
+        assert loaded_p["system"] == "專案專屬系統提示詞"
+
+        # Switch back to default
+        workspace.switch_workspace("default")
+        def_p = prompts.FnGetPrompt("concept_scan")
+        # In default workspace it shouldn't be overwritten by new_id
+        assert def_p["system"] != "專案專屬系統提示詞"
+
+        # Switch back to new_id
+        workspace.switch_workspace(new_id)
+        assert prompts.FnGetPrompt("concept_scan")["system"] == "專案專屬系統提示詞"
+
+        # 7. Delete workspace
         del_res = workspace.delete_workspace(new_id)
         assert del_res["success"] is True
         assert workspace.get_active_workspace_id() == "default"
-        assert not os.path.exists(workspace.get_workspace_config_path(new_id))
+        assert not os.path.exists(workspace.get_workspace_dir(new_id, ensure=False))
