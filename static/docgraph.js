@@ -5431,10 +5431,15 @@ function renderKaTeXMath(container) {
     const parentTag = (node.parentNode && node.parentNode.tagName) ? node.parentNode.tagName.toLowerCase() : '';
     if (['script', 'style', 'pre', 'code', 'textarea'].includes(parentTag)) return;
 
-    // Replace [ \text{...} ... ] or [ \frac... ] with $$ ... $$
-    if (node.nodeValue.includes('\\text{') || node.nodeValue.includes('\\frac{') || node.nodeValue.includes('\\times')) {
-      const fixed = node.nodeValue.replace(/\[\s*(\\text\{.*?|\\frac\{.*?)\s*\]/gs, (m, inner) => {
-        return `$$ ${inner} $$`;
+    // Replace \[ ... \] or \\[ ... \\] or [ \text{...} ... ] or [ \frac... ] with $$ ... $$
+    if (node.nodeValue.includes('\\text{') || node.nodeValue.includes('\\frac{') || node.nodeValue.includes('\\times') || node.nodeValue.includes('\\[') || node.nodeValue.includes('\\\\]')) {
+      let fixed = node.nodeValue;
+      fixed = fixed.replace(/(?:\\+\[|\\+\])/g, (m) => m.endsWith('[') ? '\\[' : '\\]');
+      fixed = fixed.replace(/\\\[\s*([\s\S]*?)\s*\\\]/g, (m, inner) => {
+        return `$$ ${inner.trim()} $$`;
+      });
+      fixed = fixed.replace(/\[\s*(\\text\{.*?|\\frac\{.*?)\s*\]/gs, (m, inner) => {
+        return `$$ ${inner.trim()} $$`;
       });
       if (fixed !== node.nodeValue) {
         node.nodeValue = fixed;
@@ -10066,7 +10071,38 @@ function resolveHeadingColor(headingText, fallbackFile = '') {
 
 function formatChatMarkdown(text) {
   if (!text) return '';
-  let safe = text
+
+  // 1. Math Formula Pre-extraction & Normalization:
+  // Support $$, \[, \( and fix escaped bracket formulas like \[ \text{...} \]
+  const mathBlocks = [];
+  let safe = text;
+
+  // Normalize multi-line bracketed formulas \[ ... \] or \\[ ... \\]
+  safe = safe.replace(/(?:\\+\[|\\+\])/g, (m) => m.endsWith('[') ? '\\[' : '\\]');
+  safe = safe.replace(/(?:\\+\(|\\+\))/g, (m) => m.endsWith('(') ? '\\(' : '\\)');
+
+  // Normalize standalone \[ ... \] into $$ ... $$
+  safe = safe.replace(/\\\[([\s\S]*?)\\\]/g, (m, inner) => {
+    const oneline = inner.replace(/[\r\n]+/g, ' ').trim();
+    return `\n\n$$ ${oneline} $$\n\n`;
+  });
+
+  // Extract $$ ... $$ math blocks to prevent \n -> <br/> and tag escaping
+  safe = safe.replace(/\$\$([\s\S]*?)\$\$/g, (m, formula) => {
+    const oneline = formula.replace(/[\r\n]+/g, ' ').trim();
+    const token = `@@MATH_BLOCK_${mathBlocks.length}@@`;
+    mathBlocks.push(`$$ ${oneline} $$`);
+    return `\n\n${token}\n\n`;
+  });
+
+  // Extract $...$ inline math blocks
+  safe = safe.replace(/\$([^\$\n]+?)\$/g, (m, formula) => {
+    const token = `@@MATH_INLINE_${mathBlocks.length}@@`;
+    mathBlocks.push(`$${formula}$`);
+    return token;
+  });
+
+  safe = safe
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;');
@@ -10105,19 +10141,24 @@ function formatChatMarkdown(text) {
   safe = safe.replace(/`([^`]+)`/g, (match, content) => {
     const trimmed = content.trim();
     let codeColor = '#f0883e'; // default warm cyber orange
-    let bgOpacity = '15';
     let isFile = /\.(?:md|txt|docx|pdf|py|js|ts|json|html|css)$/i.test(trimmed);
 
     if (isFile) {
       codeColor = KIND_COLORS.file || '#f0883e';
     } else {
-      // Check if matches heading syntax or known heading node
       codeColor = resolveHeadingColor(trimmed);
     }
     return `<code style="background:#21262d; border:1px solid ${codeColor}44; padding:2px 5px; border-radius:4px; font-size:13px; font-weight:600; color:${codeColor};">${content}</code>`;
   });
 
   safe = safe.replace(/\n/g, '<br/>');
+
+  // Restore protected math blocks
+  mathBlocks.forEach((mathText, idx) => {
+    safe = safe.replace(`@@MATH_BLOCK_${idx}@@`, mathText);
+    safe = safe.replace(`@@MATH_INLINE_${idx}@@`, mathText);
+  });
+
   return safe;
 }
 
