@@ -1451,7 +1451,7 @@ def create_app(initial_paths: Optional[List[str]] = None, search_roots: Optional
 
     # ─── Concepts Registry RESTful Endpoints ──────────────────────────
 
-    def _resolve_repo(repo_val: str, target_file: str = "") -> str:
+    def _resolve_repo(repo_val: str, target_file: str = "", target_concept: str = "") -> str:
         repos = scan_doc_repositories(get_search_roots())
         repo_list = []
         if repo_val and repo_val.strip():
@@ -1471,6 +1471,26 @@ def create_app(initial_paths: Optional[List[str]] = None, search_roots: Optional
                     p = v.get("path", "") if isinstance(v, dict) else str(v)
                     if p and os.path.isdir(p):
                         repo_list.append(os.path.realpath(p))
+
+        if target_concept and repo_list:
+            # Check which repo actually contains this concept or its edges
+            import sqlite3
+            for r in repo_list:
+                db_f = os.path.join(r, ".docgraphical", "docgraphical.db")
+                if not os.path.isfile(db_f):
+                    db_f = os.path.join(r, ".docgraph", "docgraph.db")
+                if os.path.isfile(db_f):
+                    try:
+                        con = sqlite3.connect(db_f)
+                        c_found = con.execute("SELECT 1 FROM concepts WHERE name = ? LIMIT 1", (target_concept,)).fetchone()
+                        if not c_found:
+                            c_found = con.execute("SELECT 1 FROM edges WHERE kind = 'wiki_link' AND (target = ? OR target = ?) LIMIT 1",
+                                                  (f"concept::{target_concept}", target_concept)).fetchone()
+                        con.close()
+                        if c_found:
+                            return r
+                    except Exception:
+                        pass
 
         if target_file and repo_list:
             clean_tf = target_file.strip().replace("/", os.sep).replace("\\", os.sep)
@@ -1793,12 +1813,11 @@ def create_app(initial_paths: Optional[List[str]] = None, search_roots: Optional
     def api_scan_recount_one():
         """Per-card refresh, Prospect method: recount DF/TF/snippets for ONE
         term PLUS top up missing staged spots (evidence files with no kept
-        row get link+tag rows, concept bound). Pure CPU, zero LLM.
-        Body: {repo?, term}."""
+        row get link+tag rows, concept bound). Pure CPU, zero LLM."""
         from .concept_scan import FnRecountOneTerm
         data = request.get_json(silent=True) or {}
-        repo = _resolve_repo(data.get("repo") or "")
         term = (data.get("term") or "").strip()
+        repo = _resolve_repo(data.get("repo") or "", target_concept=term)
         if not repo:
             return jsonify({"ok": False, "error": "no repository"}), 400
         if not term:
@@ -2360,8 +2379,8 @@ def create_app(initial_paths: Optional[List[str]] = None, search_roots: Optional
         Body: {repo?, name, max_files?}."""
         from .crawl import FnCrawlRefresh
         data = request.get_json(silent=True) or {}
-        repo = _resolve_repo(data.get("repo") or "")
         name = (data.get("name") or "").strip()
+        repo = _resolve_repo(data.get("repo") or "", target_concept=name)
         if not repo or not name:
             return jsonify({"ok": False, "error": "repo and name required"}), 400
         try:
