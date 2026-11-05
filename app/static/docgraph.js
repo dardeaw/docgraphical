@@ -7847,12 +7847,11 @@ function openRefreshResultReviewDialog(how, term, items, extraInfo = {}) {
     }
     const h = (it.heading || '').trim();
     if (h) {
-      const headingRef1 = `heading::${f}::${h}`;
-      const headingRef2 = `heading::${cleanBasename}::${h}`;
-      for (const t of existingTargets) {
-        if (t.includes(f) && t.includes(h)) return false;
-        if (t.includes(cleanBasename) && t.includes(h)) return false;
-      }
+      // Precise check: only filter out if the exact same heading under this file is already linked
+      const isAlreadyLinked = Array.from(existingTargets).some(t => {
+        return (t.startsWith('heading::') && (t.includes(f) || t.includes(cleanBasename)) && t.endsWith(`::${h}`));
+      });
+      if (isAlreadyLinked) return false;
     }
     return true;
   });

@@ -807,40 +807,51 @@ def FnCrawlRefresh(repo, name, max_files=25):
     kept = res.get("kept") or []
     con = sqlite3.connect(db_path)
     try:
-        existing = {(r[0], r[1]) for r in con.execute(
+        # Only exclude items already applied or existing in wiki_link edges
+        applied_items = {(r[0], r[1]) for r in con.execute(
             "SELECT file, mention FROM staged_items"
-            " WHERE repo = ? AND concept = ? AND status IN ('kept', 'applied')",
+            " WHERE repo = ? AND concept = ? AND status = 'applied'",
             (repo, name)).fetchall()}
-        # Also include existing wiki_link edges in this repository
+        
+        # Check actual edges in DB
+        linked_sections = set()
         try:
             for (s_id,) in con.execute(
                 "SELECT source FROM edges WHERE kind = 'wiki_link' AND (target = ? OR target = ?)",
                 (f"concept::{name}", name)).fetchall():
+                linked_sections.add(s_id.strip())
                 clean_f = s_id.replace("heading::", "").replace("file::", "").split("::")[0].strip()
                 if clean_f:
-                    existing.add((clean_f, name))
-                    existing.add((os.path.basename(clean_f), name))
+                    linked_sections.add(clean_f)
+                    linked_sections.add(os.path.basename(clean_f))
         except Exception:
             pass
+
         added = 0
         new_items = []
+        seen_targets = set()
         for k in kept:
             f, m = (k or {}).get("file"), (k or {}).get("term")
+            h = (k or {}).get("heading") or ""
             if not f or not m or not _is_doc_file(f):
                 continue
-            if (f, m) in existing:
-                con.execute(
-                    "UPDATE staged_items SET status = 'dropped'"
-                    " WHERE run_id = ? AND status = 'kept'"
-                    " AND file = ? AND mention = ?", (run_id, f, m))
-            else:
-                con.execute(
-                    "UPDATE staged_items SET concept = ?"
-                    " WHERE run_id = ? AND status = 'kept'"
-                    " AND file = ? AND mention = ?", (name, run_id, f, m))
-                added += 1
-                new_items.append(k)
-                existing.add((f, m))
+            # Target identifier for section
+            target_key = f"{f}::{h}" if h else f
+            if target_key in seen_targets:
+                continue
+            
+            # Check if this exact section or file is already linked
+            if (f, m) in applied_items:
+                continue
+            if not h and (f in linked_sections or os.path.basename(f) in linked_sections):
+                continue
+            if h and (f"heading::{f}::" in str(linked_sections) and h in str(linked_sections)):
+                continue
+
+            seen_targets.add(target_key)
+            added += 1
+            new_items.append(k)
+
         con.commit()
     finally:
         con.close()
