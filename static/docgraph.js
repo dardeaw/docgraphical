@@ -10087,7 +10087,7 @@ function formatChatMarkdown(text) {
     return `\n\n$$ ${oneline} $$\n\n`;
   });
 
-  // Extract $$ ... $$ math blocks to prevent \n -> <br/> and tag escaping
+  // Extract $$ ... $$ math blocks to prevent marked from altering math syntax
   safe = safe.replace(/\$\$([\s\S]*?)\$\$/g, (m, formula) => {
     const oneline = formula.replace(/[\r\n]+/g, ' ').trim();
     const token = `@@MATH_BLOCK_${mathBlocks.length}@@`;
@@ -10102,12 +10102,8 @@ function formatChatMarkdown(text) {
     return token;
   });
 
-  safe = safe
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;');
-
-  // Render clickable citations: [[file#heading]] or [[file]] or [file:heading]
+  // 2. Pre-extract citations: [[file#heading]] or [[file]] or [file:heading]
+  const citationPlaceholders = [];
   safe = safe.replace(/\[\[(.*?)(?:#(.*?))?\]\]/g, (match, file, heading) => {
     const cleanFile = (file || '').trim();
     const rawHeading = heading || '';
@@ -10115,7 +10111,9 @@ function formatChatMarkdown(text) {
     const hashMatch = rawHeading.match(/^(#{1,6})\s*/);
     if (hashMatch) headingLvl = hashMatch[1].length;
     let cleanHeading = rawHeading.replace(/^#+\s*/, '').trim();
-    return buildCitationPillHtml(cleanFile, cleanHeading, headingLvl);
+    const ph = `@@CHAT_CITATION_${citationPlaceholders.length}@@`;
+    citationPlaceholders.push(buildCitationPillHtml(cleanFile, cleanHeading, headingLvl));
+    return ph;
   });
 
   // Also support [filename.md:heading] or [filename.md#heading] pattern
@@ -10126,19 +10124,32 @@ function formatChatMarkdown(text) {
     const hashMatch = rawHeading.match(/^(#{1,6})\s*/);
     if (hashMatch) headingLvl = hashMatch[1].length;
     let cleanHeading = rawHeading.replace(/^#+\s*/, '').trim();
-    return buildCitationPillHtml(cleanFile, cleanHeading, headingLvl);
+    const ph = `@@CHAT_CITATION_${citationPlaceholders.length}@@`;
+    citationPlaceholders.push(buildCitationPillHtml(cleanFile, cleanHeading, headingLvl));
+    return ph;
   });
 
   // Convert arrow navigation chains of backticks: `file.md` → `heading` or `file.md` -> `heading`
   safe = safe.replace(/`([^`]+\.(?:md|txt|docx|pdf))`\s*(?:→|-&gt;|&rarr;|->)\s*`([^`]+)`/g, (match, file, heading) => {
-    return buildCitationPillHtml(file.trim(), heading.trim());
+    const ph = `@@CHAT_CITATION_${citationPlaceholders.length}@@`;
+    citationPlaceholders.push(buildCitationPillHtml(file.trim(), heading.trim()));
+    return ph;
   });
 
-  // Simple Markdown inline formatting (bold, backticks)
-  safe = safe.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
+  // 3. Parse Markdown using marked (renders tables, headings, lists, bold)
+  let parsedHtml = '';
+  if (window.marked && typeof window.marked.parse === 'function') {
+    parsedHtml = window.marked.parse(safe);
+  } else {
+    parsedHtml = safe
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/\n/g, '<br/>');
+  }
 
-  // Dynamic backtick code highlighting respecting Node Kind colors
-  safe = safe.replace(/`([^`]+)`/g, (match, content) => {
+  // 4. Dynamic backtick code highlighting respecting Node Kind colors
+  parsedHtml = parsedHtml.replace(/<code>([^<]+)<\/code>/g, (match, content) => {
     const trimmed = content.trim();
     let codeColor = '#f0883e'; // default warm cyber orange
     let isFile = /\.(?:md|txt|docx|pdf|py|js|ts|json|html|css)$/i.test(trimmed);
@@ -10151,15 +10162,18 @@ function formatChatMarkdown(text) {
     return `<code style="background:#21262d; border:1px solid ${codeColor}44; padding:2px 5px; border-radius:4px; font-size:13px; font-weight:600; color:${codeColor};">${content}</code>`;
   });
 
-  safe = safe.replace(/\n/g, '<br/>');
-
-  // Restore protected math blocks
-  mathBlocks.forEach((mathText, idx) => {
-    safe = safe.replace(`@@MATH_BLOCK_${idx}@@`, mathText);
-    safe = safe.replace(`@@MATH_INLINE_${idx}@@`, mathText);
+  // 5. Restore citations
+  citationPlaceholders.forEach((pillHtml, idx) => {
+    parsedHtml = parsedHtml.replace(`@@CHAT_CITATION_${idx}@@`, pillHtml);
   });
 
-  return safe;
+  // 6. Restore protected math blocks
+  mathBlocks.forEach((mathText, idx) => {
+    parsedHtml = parsedHtml.replace(`@@MATH_BLOCK_${idx}@@`, mathText);
+    parsedHtml = parsedHtml.replace(`@@MATH_INLINE_${idx}@@`, mathText);
+  });
+
+  return parsedHtml;
 }
 
 function handleChatCitationClick(file, heading, bTargetFileOnly = false) {
