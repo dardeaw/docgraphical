@@ -7783,7 +7783,48 @@ function openCardRefresh(term) {
   </div>`;
   document.body.appendChild(o);
   o.addEventListener('click', (ev) => { if (ev.target === o) o.remove(); });
+// Interactive Dialog when Prospect or Vine discovers 0 new spots
+function openEmptyResultDialog(how, term, detail = {}) {
+  const zh = currentLanguage === 'zh';
+  const existing = document.getElementById('refresh-empty-modal');
+  if (existing) existing.remove();
+
+  const o = document.createElement('div');
+  o.id = 'refresh-empty-modal';
+  o.className = 'modal-overlay';
+  o.style.cssText = 'position:fixed;inset:0;z-index:1000007;background:rgba(0,0,0,0.75);display:flex;align-items:center;justify-content:center;backdrop-filter:blur(3px);';
+
+  const typeName = how === 'prospect' ? (zh ? '⛏ 探礦重算' : 'Prospect Recount') : (zh ? '🌿 順藤深挖' : 'Vine Deep Crawl');
+  const spentText = detail.spent ? (zh ? `（本次深度分析共呼叫 LLM ${detail.spent} 次）` : ` (${detail.spent} LLM calls used)`) : '';
+  const msgTitle = zh ? `${typeName}探索報告` : `${typeName} Report`;
+  
+  const msgBody = zh 
+    ? `已完成對概念「<b>${escapeHtml(term)}</b>」的全庫探測掃描。<br><br>` +
+      `<span style="color:#8b949e;">全庫所有文檔中出現的該詞彙或相關章節，<b>均已存在於當前的引用關聯或標籤中</b>，本次未發現額外的全新落點。${spentText}</span>`
+    : `Completed repository inspection for concept "<b>${escapeHtml(term)}</b>".<br><br>` +
+      `<span style="color:#8b949e;">All mentions and related sections are <b>already linked</b>. No additional unlinked references found.${spentText}</span>`;
+
+  o.innerHTML = `
+    <div style="background:#161b22;border:1px solid #30363d;border-radius:12px;width:480px;max-width:92vw;box-shadow:0 24px 60px rgba(0,0,0,0.85);display:flex;flex-direction:column;overflow:hidden;">
+      <div style="padding:14px 20px;border-bottom:1px solid #30363d;display:flex;justify-content:space-between;align-items:center;background:#0d1117;">
+        <div style="display:flex;align-items:center;gap:8px;">
+          <span style="font-size:17px;">ℹ️</span>
+          <span style="font-weight:600;font-size:15px;color:#e6edf3;">${msgTitle}</span>
+        </div>
+        <button onclick="document.getElementById('refresh-empty-modal').remove()" style="background:transparent;border:none;color:#8b949e;cursor:pointer;font-size:16px;">✕</button>
+      </div>
+      <div style="padding:22px 20px;font-size:14px;line-height:1.6;color:#c9d1d9;">
+        ${msgBody}
+      </div>
+      <div style="padding:12px 20px;border-top:1px solid #30363d;background:#0d1117;display:flex;justify-content:flex-end;">
+        <button onclick="document.getElementById('refresh-empty-modal').remove()" style="background:#238636;color:#fff;border:none;padding:7px 18px;border-radius:6px;font-weight:600;font-size:13px;cursor:pointer;">${zh ? '知道了' : 'Got it'}</button>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(o);
+  o.addEventListener('click', (ev) => { if (ev.target === o) o.remove(); });
 }
+
 // Interactive Review Dialog for Prospect recount and Vine dig results
 function openRefreshResultReviewDialog(how, term, items, extraInfo = {}) {
   const zh = currentLanguage === 'zh';
@@ -7898,8 +7939,8 @@ function openRefreshResultReviewDialog(how, term, items, extraInfo = {}) {
   }));
 
   if (normalized.length === 0) {
-    showToast(zh ? `「${term}」：目前所有挖掘落點均已存在於引用關聯中，無額外新落點！`
-                 : `"${term}": All references are already linked!`);
+    if (o) o.remove();
+    openEmptyResultDialog(mode, term, { ...detail, existingCount });
     return;
   }
 
@@ -8083,7 +8124,7 @@ function cardRefreshGo(how, term) {
                 openRefreshResultReviewDialog('prospect', term, files, d);
               });
           } else {
-            showToast(zh ? `「${term}」：未發現額外關聯落點` : `"${term}": No additional spots`);
+            openEmptyResultDialog('prospect', term, d);
           }
           if (typeof fetchConceptsData === 'function') fetchConceptsData();
         } else {
@@ -8109,13 +8150,12 @@ function cardRefreshGo(how, term) {
       if (o) o.remove();
       if (d && d.ok) {
         const items = d.new_items || d.all_items || [];
-        showToast(zh ? `「${term}」深度探索完成！已挖出 ${items.length} 處落點`
-                     : `"${term}" dig completed! Found ${items.length} references`);
         if (items.length > 0) {
+          showToast(zh ? `「${term}」深度探索完成！已挖出 ${items.length} 處落點`
+                       : `"${term}" dig completed! Found ${items.length} references`);
           openRefreshResultReviewDialog('vine', term, items, d);
         } else {
-          showToast(zh ? `「${term}」：無新增引用（呼叫 LLM ${d.spent || 0} 次）`
-                       : `"${term}": nothing new (${d.spent || 0} calls)`);
+          openEmptyResultDialog('vine', term, d);
         }
         if (typeof fetchConceptsData === 'function') fetchConceptsData();
         if (typeof loadMasterGraphAndFilter === 'function') loadMasterGraphAndFilter();

@@ -773,7 +773,7 @@ def FnCrawlRun(repo, seed_text="", max_starts=MAX_STARTS, max_files=MAX_FILES_PE
         return {"ok": False, "error": fin.get("error") or "finish failed",
                 "run_id": run_id}
     return {"ok": True, "run_id": run_id, "repo": repo,
-            "picks": st.get("picks") or [], "files": files,
+            "picks": st.get("picks") or [], "files": run.get("files_done", files),
             "title": fin.get("title") or "", "why": fin.get("why") or "",
             "kept": fin.get("kept") or [], "spent": fin.get("spent", 0),
             "capped": capped, "trace": fin.get("trace") or [],
