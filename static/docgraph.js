@@ -7980,10 +7980,10 @@ window.confirmRefreshReviewSelection = function(how, term) {
     setTimeout(() => {
       if (typeof buildProjectTree === 'function') buildProjectTree();
       if (typeof spotlightConceptNode === 'function') spotlightConceptNode(term);
-      if (selectedConceptName === term && typeof onConceptCardClick === 'function') {
+      if (typeof onConceptCardClick === 'function') {
         onConceptCardClick(term);
       }
-    }, 180);
+    }, 350);
   })();
 };
 

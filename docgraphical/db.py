@@ -1484,30 +1484,45 @@ def attach_concept_to_file(repo_path: str, concept_name: str, rel_file_path: str
     # Granular H-level injection
     if heading and heading.strip() and heading.strip() != "Full Document":
         h_clean = heading.strip().lower()
+        matched_idx = -1
+        # Pass 1: exact match
         for i, l in enumerate(lines):
             m = re.match(r"^(#{1,6})\s+(.+)$", l.strip())
             if m:
                 htext = re.sub(r"\s+#+$", "", m.group(2).strip()).lower()
-                if htext == h_clean or h_clean in htext:
-                    # Check if section block already has this tag before the next heading of same/higher level
-                    h_level = len(m.group(1))
-                    already_tagged = False
-                    check_pat = re.compile(
-                        r"\[%s\]\(|\[\[%s(?:\]\]|\|)|(?<![A-Za-z0-9_])%s(?![A-Za-z0-9_])" % (
-                            re.escape(concept_name), re.escape(concept_name), re.escape(concept_name)),
-                        re.IGNORECASE)
-                    for next_idx in range(i + 1, len(lines)):
-                        next_line = lines[next_idx].strip()
-                        nm = re.match(r"^(#{1,6})\s+", next_line)
-                        if nm and len(nm.group(1)) <= h_level:
-                            break
-                        if check_pat.search(next_line):
-                            already_tagged = True
-                            break
-                    if not already_tagged:
-                        lines.insert(i + 1, "\n> 🏷️ 標籤: " + tag_str + "\n\n")
-                    injected = True
+                if htext == h_clean:
+                    matched_idx = i
                     break
+        # Pass 2: substring fallback if not exact matched
+        if matched_idx < 0:
+            for i, l in enumerate(lines):
+                m = re.match(r"^(#{1,6})\s+(.+)$", l.strip())
+                if m:
+                    htext = re.sub(r"\s+#+$", "", m.group(2).strip()).lower()
+                    if h_clean in htext:
+                        matched_idx = i
+                        break
+
+        if matched_idx >= 0:
+            m = re.match(r"^(#{1,6})\s+(.+)$", lines[matched_idx].strip())
+            h_level = len(m.group(1)) if m else 1
+            already_tagged = False
+            # Check ONLY formal concept tags [[Name]] or tag-link [Name](...), NEVER plain text!
+            check_pat = re.compile(
+                r"\[\[\s*%s\s*(?:\]\]|\|)|\[\s*%s\s*\]\([^)]+\.md\)" % (
+                    re.escape(concept_name), re.escape(concept_name)),
+                re.IGNORECASE)
+            for next_idx in range(matched_idx + 1, len(lines)):
+                next_line = lines[next_idx].strip()
+                nm = re.match(r"^(#{1,6})\s+", next_line)
+                if nm and len(nm.group(1)) <= h_level:
+                    break
+                if check_pat.search(next_line):
+                    already_tagged = True
+                    break
+            if not already_tagged:
+                lines.insert(matched_idx + 1, "\n> 🏷️ 標籤: " + tag_str + "\n\n")
+            injected = True
 
     if not injected:
         # File-level tag: Inject at the top of the file
