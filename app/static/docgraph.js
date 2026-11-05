@@ -7798,19 +7798,37 @@ function openRefreshResultReviewDialog(how, term, items, extraInfo = {}) {
   const typeName = how === 'prospect' ? (zh ? '⛏ 探礦重算' : 'Prospect') : (zh ? '🌿 順藤深挖' : 'Vine');
   const titleText = zh ? `${typeName}關聯結果審核：「${escapeHtml(term)}」` : `${typeName} Dig Review: "${escapeHtml(term)}"`;
 
-  // Compute existing links count for this concept if available in memory
+  // Collect all known existing linked files / headings for this concept
+  const existingTargets = new Set();
   let existingCount = 0;
   try {
     const cid = `concept::${term}`;
     const gLinks = (rawData && rawData.links) ? rawData.links : [];
-    const matched = new Set();
     gLinks.forEach(l => {
-      const sId = typeof l.source === 'object' ? l.source.id : l.source;
-      const tId = typeof l.target === 'object' ? l.target.id : l.target;
-      if (tId === cid || tId.endsWith(`::${cid}`)) matched.add(sId);
-      if (sId === cid || sId.endsWith(`::${cid}`)) matched.add(tId);
+      const sId = String(typeof l.source === 'object' ? l.source.id : l.source);
+      const tId = String(typeof l.target === 'object' ? l.target.id : l.target);
+      if (tId === cid || tId.endsWith(`::${cid}`)) {
+        existingTargets.add(sId);
+        const cleanFile = sId.replace(/^(heading|file)::/, '').split('::')[0];
+        if (cleanFile) existingTargets.add(cleanFile);
+      }
+      if (sId === cid || sId.endsWith(`::${cid}`)) {
+        existingTargets.add(tId);
+        const cleanFile = tId.replace(/^(heading|file)::/, '').split('::')[0];
+        if (cleanFile) existingTargets.add(cleanFile);
+      }
     });
-    existingCount = matched.size;
+    // Also include memory cached activeConceptLinkedFiles
+    if (typeof activeConceptLinkedFiles !== 'undefined' && activeConceptLinkedFiles[term]) {
+      activeConceptLinkedFiles[term].forEach(lf => {
+        const p = lf.cleanPath || lf.filePath || '';
+        if (p) existingTargets.add(p);
+        if (lf.filePath) existingTargets.add(lf.filePath);
+      });
+    }
+    existingCount = (typeof activeConceptLinkedFiles !== 'undefined' && activeConceptLinkedFiles[term])
+      ? activeConceptLinkedFiles[term].length
+      : existingTargets.size;
   } catch(e) {}
 
   // Filter out internal system and tag files defensively
@@ -7820,6 +7838,21 @@ function openRefreshResultReviewDialog(how, term, items, extraInfo = {}) {
     const fl = f.toLowerCase();
     if (fl.includes('.docgraphical') || fl.includes('.docgraph') || fl.includes('doc_catalog.md') || fl.includes('log.md')) {
       return false;
+    }
+    // Strict duplication guard: If this file or heading is already linked to the concept, never re-surface it!
+    const cleanBasename = f.split('/').pop();
+    if (existingTargets.has(f) || existingTargets.has(cleanBasename)) {
+      // If candidate has no heading (file-level match like prospect) and file is already linked, filter it out!
+      if (!it.heading || !it.heading.trim()) return false;
+    }
+    const h = (it.heading || '').trim();
+    if (h) {
+      const headingRef1 = `heading::${f}::${h}`;
+      const headingRef2 = `heading::${cleanBasename}::${h}`;
+      for (const t of existingTargets) {
+        if (t.includes(f) && t.includes(h)) return false;
+        if (t.includes(cleanBasename) && t.includes(h)) return false;
+      }
     }
     return true;
   });
@@ -7843,6 +7876,10 @@ function openRefreshResultReviewDialog(how, term, items, extraInfo = {}) {
       }
     } else {
       const refId = (h && line) ? `heading::${f}::L${line}::${h}` : (f ? `file::${f}` : '');
+      // Extra safety check against existingTargets
+      if (existingTargets.has(refId) || (!h && existingTargets.has(f))) {
+        return;
+      }
       sectionMap.set(targetKey, {
         id: `rf-item-${idx}`,
         file: f,
@@ -7860,6 +7897,12 @@ function openRefreshResultReviewDialog(how, term, items, extraInfo = {}) {
     ...item,
     snippet: item.snippets.join(' ｜ ')
   }));
+
+  if (normalized.length === 0) {
+    showToast(zh ? `「${term}」：目前所有挖掘落點均已存在於引用關聯中，無額外新落點！`
+                 : `"${term}": All references are already linked!`);
+    return;
+  }
 
   const subHeaderNote = zh
     ? (existingCount > 0
@@ -8028,7 +8071,18 @@ function cardRefreshGo(how, term) {
                             : `"${term}": ${d.df || 0} docs·${d.tf || 0} hits`;
           showToast(cntTxt);
           if (files.length > 0) {
-            openRefreshResultReviewDialog('prospect', term, files, d);
+            // Guarantee fresh activeConceptLinkedFiles before opening review dialog
+            fetch(`/api/concepts/tag-page?name=${encodeURIComponent(term)}&repo=${encodeURIComponent(repo)}`)
+              .then(res => res.json())
+              .then(tpData => {
+                if (tpData && tpData.ok) {
+                  activeConceptLinkedFiles[term] = tpData.files || [];
+                }
+              })
+              .catch(() => {})
+              .finally(() => {
+                openRefreshResultReviewDialog('prospect', term, files, d);
+              });
           } else {
             showToast(zh ? `「${term}」：未發現額外關聯落點` : `"${term}": No additional spots`);
           }
