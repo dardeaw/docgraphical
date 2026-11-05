@@ -15,7 +15,7 @@ import os
 import re
 from typing import Any, Dict, List, Optional
 
-MAX_TEXT_CHARS = 120000  # per-file truncation budget for the LLM prompt (supports large CSV / reports up to ~120K chars)
+MAX_TEXT_CHARS = 131072  # 131K chars context budget, strictly aligned with 128k/131k token small LLM windows
 ALLOWED_EXTS = {".pptx", ".ppt", ".docx", ".doc", ".pdf",
                 ".txt", ".md", ".markdown", ".csv", ".html", ".htm",
                 ".eml", ".jpg", ".jpeg", ".png", ".webp", ".bmp",
@@ -25,7 +25,6 @@ PARSEABLE_EXTS = {".pptx", ".docx", ".pdf"}
 IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".webp", ".bmp", ".tiff", ".tif"}
 # Plain-text readable without special libs.
 TEXT_EXTS = {".txt", ".md", ".markdown", ".csv", ".html", ".htm", ".eml"}
-CSV_MAX_ROWS = 1000  # spreadsheet rows kept before truncation note (supports large datasets)
 # Vision fallback ("open the LLM's eyes"): page/slide images for image-only docs.
 VISION_MAX_PAGES = 12   # per file
 VISION_MAX_TOTAL = 16   # per summarize call
@@ -127,10 +126,7 @@ def FnExtractText(path: str) -> Dict[str, Any]:
             import csv as _csv
             _rows = []
             with open(path, "r", encoding="utf-8-sig", errors="replace", newline="") as f:
-                for i, row in enumerate(_csv.reader(f)):
-                    if i >= CSV_MAX_ROWS:
-                        _rows.append("…（僅取前 %d 列）" % CSV_MAX_ROWS)
-                        break
+                for row in _csv.reader(f):
                     _rows.append("| " + " | ".join((c or "").strip() for c in row) + " |")
             text = "\n".join(_rows)
         elif ext in (".html", ".htm"):
