@@ -811,6 +811,17 @@ def FnCrawlRefresh(repo, name, max_files=MAX_FILES_PER_RUN):
             "SELECT file, mention FROM staged_items"
             " WHERE repo = ? AND concept = ? AND status IN ('kept', 'applied')",
             (repo, name)).fetchall()}
+        # Also include existing wiki_link edges in this repository
+        try:
+            for (s_id,) in con.execute(
+                "SELECT source FROM edges WHERE kind = 'wiki_link' AND (target = ? OR target = ?)",
+                (f"concept::{name}", name)).fetchall():
+                clean_f = s_id.replace("heading::", "").replace("file::", "").split("::")[0].strip()
+                if clean_f:
+                    existing.add((clean_f, name))
+                    existing.add((os.path.basename(clean_f), name))
+        except Exception:
+            pass
         added = 0
         new_items = []
         for k in kept:

@@ -171,7 +171,7 @@ def FnMineCorpus(repo_paths, min_tf=1, refresh=False):
                         seen_here.add(term)
                         df[term] = df.get(term, 0) + 1
                         ev = evidence.setdefault(term, [])
-                        if len(ev) < 5:
+                        if len(ev) < 50:
                             s0 = max(0, pos - 24)
                             ev.append({"rel": rel,
                                        "snippet": text[s0:s0 + 60].replace("\n", " ")})
@@ -399,7 +399,7 @@ def FnRecountOneTerm(repo_paths, db_path, term):
     if not term:
         return {"ok": False, "error": "term required"}
     FnEnsureScanTables(db_path)
-    mined = FnMineCorpus(repo_paths)
+    mined = FnMineCorpus(repo_paths, refresh=True)
     c = {x["term"]: x for x in mined}.get(_FnNorm(term))
     now = time.strftime("%Y-%m-%d %H:%M:%S")
     con = _sq.connect(db_path)
@@ -419,11 +419,14 @@ def FnRecountOneTerm(repo_paths, db_path, term):
             except Exception:
                 pass
 
-            # Only propose files that do NOT already link to this concept!
+            # Only propose files that do NOT already link to this concept and are not system files!
             unlinked_files = []
             for f_item in c["files"]:
                 f_rel = (f_item.get("rel") or "").replace("\\", "/").strip()
                 f_base = os.path.basename(f_rel)
+                f_low = f_base.lower()
+                if f_low in ("doc_catalog.md", "log.md") or ".docgraph" in f_rel.lower():
+                    continue
                 if f_rel not in linked_files and f_base not in linked_files:
                     unlinked_files.append(f_item)
 
