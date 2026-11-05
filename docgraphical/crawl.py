@@ -846,9 +846,10 @@ def FnCrawlRefresh(repo, name, max_files=MAX_FILES_PER_RUN):
         con.close()
 
     # For official concept refresh, do NOT auto-apply! Application is controlled by the user's interactive review dialog.
-
-    return {"ok": True, "title": name, "added": added,
-            "new_items": new_items, "all_items": kept,
+    # Default to 10 unlinked items beyond existing list (or all remaining if fewer than 10)
+    capped_new = new_items[:10]
+    return {"ok": True, "title": name, "added": len(capped_new),
+            "new_items": capped_new, "all_items": kept,
             "kept": len(kept), "spent": res.get("spent", 0),
             "model": res.get("model") or ""}
 
