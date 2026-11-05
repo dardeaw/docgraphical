@@ -8369,6 +8369,10 @@ function updateGlobalUIElementsI18n() {
   const set = (id, txt) => { const el = document.getElementById(id); if (el) el.textContent = txt; };
   const setAttr = (id, attr, txt) => { const el = document.getElementById(id); if (el) el.setAttribute(attr, txt); };
 
+  // App Logo & Document Title
+  set('app-logo', 'OmniPedia 3D');
+  document.title = zh ? 'OmniPedia 3D - 全知百科知識庫' : (ja ? 'OmniPedia 3D - 全知ナレッジスタジオ' : 'OmniPedia 3D - AI Knowledge Studio');
+
   // Top toolbar buttons
   set('btn-rotate', zh ? '🔄 自動旋轉' : (ja ? '🔄 自動回転' : '🔄 Auto Rotate'));
   setAttr('btn-rotate', 'title', zh ? '切換 3D 圖自動環繞旋轉' : (ja ? '3D自動回転のオン/オフ' : 'Toggle 3D Auto-Rotation'));
