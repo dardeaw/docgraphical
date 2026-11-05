@@ -5364,7 +5364,7 @@ function resolveMarkdownImages(container, docFilePath) {
 
 // ─── KaTeX Mathematics Formula Auto-Renderer ───
 // Pre-processing markdown text BEFORE marked.parse:
-// 1. Removes empty lines / double newlines inside $$ ... $$ blocks so marked won't split math into multiple <p> tags
+// 1. Removes newlines inside $$ ... $$ blocks so marked won't mistakenly interpret lines like "=" as Setext headings (<h1>), nor split math into broken <p> tags
 // 2. Normalizes [ \text{...} ] or [ \frac... ] into $$ ... $$
 function normalizeMarkdownMath(mdText) {
   if (!mdText || typeof mdText !== 'string') return mdText || '';
@@ -5374,11 +5374,11 @@ function normalizeMarkdownMath(mdText) {
     return `\n\n$$ ${inner.trim()} $$\n\n`;
   });
 
-  // Repair $$ ... $$ blocks that contain blank lines: replace blank lines inside math with LaTeX line breaks ' \\ '
+  // Repair $$ ... $$ blocks: compress multi-line formula content into a clean single-line expression
+  // and ensure surrounding blank lines so marked parses it as a standalone paragraph block.
   res = res.replace(/\$\$([\s\S]*?)\$\$/g, (match, formula) => {
-    // If formula has consecutive newlines (empty lines), marked would split it into <p>...</p>
-    const cleaned = formula.replace(/\n\s*\n+/g, ' \\\\ \n');
-    return `$$${cleaned}$$`;
+    const oneline = formula.replace(/[\r\n]+/g, ' ').trim();
+    return `\n\n$$ ${oneline} $$\n\n`;
   });
 
   return res;
@@ -10424,6 +10424,9 @@ async function sendChatMessage() {
 
     if (fullAssistantText) {
       chatMessagesHistory.push({ role: 'assistant', content: fullAssistantText });
+      if (assistantBubble && typeof renderKaTeXMath === 'function') {
+        renderKaTeXMath(assistantBubble);
+      }
     }
   } catch (err) {
     console.error('Chat error:', err);
