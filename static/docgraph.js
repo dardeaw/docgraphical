@@ -10387,10 +10387,20 @@ async function sendChatMessage() {
   }
   if (statusEl) statusEl.textContent = zh ? 'MCP 檢索中...' : (ja ? 'MCP 検索中...' : 'Executing MCP tools...');
 
-  // Prepare Assistant stream container
+  // Prepare Assistant stream container & TTFS thinking state
   let assistantBubble = null;
   let assistantContentEl = null;
   let fullAssistantText = '';
+  const startTime = Date.now();
+  let firstTokenTime = null;
+
+  // Immediately append a Thinking / TTFS indicator bubble
+  const thinkingTipText = zh ? 'AI 正在深入思考中' : (ja ? 'AI が思考中' : 'AI is thinking');
+  assistantBubble = appendChatMessageBubble('assistant', '');
+  assistantContentEl = assistantBubble.querySelector('.chat-content');
+  if (assistantContentEl) {
+    assistantContentEl.innerHTML = `<div class="chat-thinking-indicator"><div class="spinner-icon"></div><span>${thinkingTipText}</span><div class="chat-thinking-dots"><span></span><span></span><span></span></div></div>`;
+  }
 
   try {
     const payload = {
@@ -10432,6 +10442,11 @@ async function sendChatMessage() {
           if (ev.type === 'tool_call') {
             currentToolCard = appendMcpToolCallCard(ev.name, ev.arguments);
             if (statusEl) statusEl.textContent = `[MCP] ${ev.name}...`;
+            // Keep thinking indicator in bubble or update status
+            if (assistantContentEl && !fullAssistantText) {
+              const mcpTip = zh ? `正在呼叫工具：${ev.name}` : (ja ? `ツール呼び出し中: ${ev.name}` : `Executing ${ev.name}...`);
+              assistantContentEl.innerHTML = `<div class="chat-thinking-indicator"><div class="spinner-icon"></div><span>${mcpTip}</span><div class="chat-thinking-dots"><span></span><span></span><span></span></div></div>`;
+            }
           } else if (ev.type === 'tool_result') {
             if (currentToolCard) {
               const resBox = currentToolCard.querySelector('.tool-result-box');
@@ -10441,6 +10456,13 @@ async function sendChatMessage() {
               }
             }
           } else if (ev.type === 'delta') {
+            if (!firstTokenTime) {
+              firstTokenTime = Date.now();
+              const ttfsSec = ((firstTokenTime - startTime) / 1000).toFixed(1);
+              if (statusEl) {
+                statusEl.textContent = zh ? `回答中 (TTFS: ${ttfsSec}s)` : (ja ? `回答中 (TTFS: ${ttfsSec}秒)` : `Streaming (TTFS: ${ttfsSec}s)`);
+              }
+            }
             if (!assistantBubble) {
               assistantBubble = appendChatMessageBubble('assistant', '');
               assistantContentEl = assistantBubble.querySelector('.chat-content');
@@ -10452,9 +10474,9 @@ async function sendChatMessage() {
             if (container) container.scrollTop = container.scrollHeight;
           } else if (ev.type === 'error') {
             showToast('❌ ' + (ev.error || 'Chat error'));
-            if (!assistantBubble) {
+            if (assistantContentEl) {
               const errPrefix = zh ? '⚠️ 錯誤: ' : (ja ? '⚠️ エラー: ' : '⚠️ Error: ');
-              assistantBubble = appendChatMessageBubble('assistant', `${errPrefix}${ev.error}`);
+              assistantContentEl.innerHTML = `<span style="color:#ff7b72;">${errPrefix}${escapeHtml(ev.error)}</span>`;
             }
           }
         } catch (e) {
@@ -10468,19 +10490,31 @@ async function sendChatMessage() {
       if (assistantBubble && typeof renderKaTeXMath === 'function') {
         renderKaTeXMath(assistantBubble);
       }
+    } else if (assistantContentEl && !fullAssistantText) {
+      // In case stream ended without tokens
+      assistantContentEl.innerHTML = `<span style="color:#8b949e;">${zh ? '（無回傳內容）' : (ja ? '（応答なし）' : '(No response)')}</span>`;
     }
   } catch (err) {
     console.error('Chat error:', err);
     showToast('❌ Chat network error: ' + err.message);
     const connErr = zh ? `⚠️ 無法完成連線: ${err.message}` : (ja ? `⚠️ 接続できませんでした: ${err.message}` : `⚠️ Connection failed: ${err.message}`);
-    appendChatMessageBubble('assistant', connErr);
+    if (assistantContentEl) {
+      assistantContentEl.innerHTML = `<span style="color:#ff7b72;">${connErr}</span>`;
+    } else {
+      appendChatMessageBubble('assistant', connErr);
+    }
   } finally {
     isChatStreaming = false;
     if (sendBtn) {
       sendBtn.disabled = false;
       sendBtn.textContent = zh ? '送出' : (ja ? '送信' : 'Send');
     }
-    if (statusEl) statusEl.textContent = 'Ready';
+    const totalSec = ((Date.now() - startTime) / 1000).toFixed(1);
+    if (statusEl) {
+      statusEl.textContent = firstTokenTime 
+        ? (zh ? `完成 (${totalSec}s)` : (ja ? `完了 (${totalSec}秒)` : `Done (${totalSec}s)`))
+        : 'Ready';
+    }
   }
 }
 

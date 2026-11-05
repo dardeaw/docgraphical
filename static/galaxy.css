@@ -3729,6 +3729,63 @@ select.modal-input:focus,
   padding: 0 18px !important;
 }
 
+/* Chat TTFS / Thinking State Animation */
+.chat-thinking-indicator {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: #8b949e;
+  font-size: 13px;
+  user-select: none;
+}
+
+.chat-thinking-indicator .spinner-icon {
+  width: 14px;
+  height: 14px;
+  border: 2px solid rgba(88, 166, 255, 0.2);
+  border-top-color: #58a6ff;
+  border-radius: 50%;
+  animation: chatSpin 0.8s linear infinite;
+}
+
+@keyframes chatSpin {
+  to { transform: rotate(360deg); }
+}
+
+.chat-thinking-dots {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: 2px;
+}
+
+.chat-thinking-dots span {
+  width: 5px;
+  height: 5px;
+  background: #58a6ff;
+  border-radius: 50%;
+  display: inline-block;
+  opacity: 0.4;
+  animation: chatDotPulse 1.4s infinite ease-in-out both;
+}
+
+.chat-thinking-dots span:nth-child(1) { animation-delay: -0.32s; }
+.chat-thinking-dots span:nth-child(2) { animation-delay: -0.16s; }
+.chat-thinking-dots span:nth-child(3) { animation-delay: 0s; }
+
+@keyframes chatDotPulse {
+  0%, 80%, 100% {
+    transform: scale(0.6);
+    opacity: 0.3;
+  }
+  40% {
+    transform: scale(1.15);
+    opacity: 1;
+    background: #79c0ff;
+    box-shadow: 0 0 6px rgba(88, 166, 255, 0.6);
+  }
+}
+
 #floating-chat-card #chat-status-indicator {
   font-size: 13px !important;
 }
