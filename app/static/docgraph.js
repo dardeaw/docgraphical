@@ -2179,6 +2179,9 @@ function renderMarkdown(mdText, extraSources) {
   updateDocTagsBar(mdText, curFile);
 
   let processedMd = mdText || '';
+  if (typeof normalizeMarkdownMath === 'function') {
+    processedMd = normalizeMarkdownMath(processedMd);
+  }
   const zhLang = (typeof currentLanguage !== 'undefined' && currentLanguage === 'zh');
   const openConceptPrefix = zhLang ? '開啟概念頁：' : 'Open concept page: ';
   processedMd = processedMd.replace(/\[\[([^\]|#\n]+)(?:#[^\]|\n]+)?(?:\|([^\]\n]+))?\]\]/g, (m, cName, alias) => {
@@ -3751,6 +3754,9 @@ function ingShowTab(which) {
     }
     try {
       let processed = txt;
+      if (typeof normalizeMarkdownMath === 'function') {
+        processed = normalizeMarkdownMath(processed);
+      }
       // Convert [[Concept]] links if any
       const zhLang = (typeof currentLanguage !== 'undefined' && currentLanguage === 'zh');
       const openConceptPrefix = zhLang ? '開啟概念頁：' : 'Open concept page: ';
@@ -5357,9 +5363,63 @@ function resolveMarkdownImages(container, docFilePath) {
 }
 
 // ─── KaTeX Mathematics Formula Auto-Renderer ───
+// Pre-processing markdown text BEFORE marked.parse:
+// 1. Removes empty lines / double newlines inside $$ ... $$ blocks so marked won't split math into multiple <p> tags
+// 2. Normalizes [ \text{...} ] or [ \frac... ] into $$ ... $$
+function normalizeMarkdownMath(mdText) {
+  if (!mdText || typeof mdText !== 'string') return mdText || '';
+  
+  // Replace standalone bracketed formulas [ \text{...} ] with $$ ... $$
+  let res = mdText.replace(/(?:^|\n)\s*\[\s*(\\text\{.*?|\\frac\{.*?)\s*\]\s*(?:\n|$)/g, (m, inner) => {
+    return `\n\n$$ ${inner.trim()} $$\n\n`;
+  });
+
+  // Repair $$ ... $$ blocks that contain blank lines: replace blank lines inside math with LaTeX line breaks ' \\ '
+  res = res.replace(/\$\$([\s\S]*?)\$\$/g, (match, formula) => {
+    // If formula has consecutive newlines (empty lines), marked would split it into <p>...</p>
+    const cleaned = formula.replace(/\n\s*\n+/g, ' \\\\ \n');
+    return `$$${cleaned}$$`;
+  });
+
+  return res;
+}
+
 // Converts standard LaTeX ($$...$$, \(...\), \[...\], etc.) and fixes broken [ \text{...} ] brackets
 function renderKaTeXMath(container) {
   if (!container) return;
+
+  // Post-markdown DOM Tolerance normalization:
+  // If marked already generated <p> tags containing orphaned math fragments like <p>$$ \text{...}</p> and <p>\frac{...} $$</p>,
+  // merge and repair them so KaTeX auto-render can process them smoothly.
+  try {
+    const paragraphs = Array.from(container.querySelectorAll('p'));
+    for (let i = 0; i < paragraphs.length; i++) {
+      const p = paragraphs[i];
+      const pText = p.innerHTML.trim();
+      // Case: paragraph starts with $$ but has no closing $$
+      if (pText.startsWith('$$') && (pText.match(/\$\$/g) || []).length % 2 === 1) {
+        let j = i + 1;
+        let mergedHtml = p.innerHTML;
+        const toRemove = [];
+        while (j < paragraphs.length) {
+          const nextP = paragraphs[j];
+          toRemove.push(nextP);
+          mergedHtml += ' \\\\ ' + nextP.innerHTML;
+          if (nextP.innerHTML.includes('$$')) {
+            break;
+          }
+          j++;
+        }
+        if (toRemove.length > 0 && mergedHtml.includes('$$')) {
+          p.innerHTML = mergedHtml;
+          toRemove.forEach(el => el.remove());
+          i = j; // skip forward
+        }
+      }
+    }
+  } catch (e) {
+    /* ignore DOM normalization error */
+  }
 
   // Tolerance normalization: if LLM outputted [ \text{...} ] or [ \frac... ], convert to $$ ... $$
   const walker = document.createTreeWalker(container, NodeFilter.SHOW_TEXT, null, false);
@@ -5411,7 +5471,7 @@ function renderKaTeXMath(container) {
       if (typeof renderMathInElement === 'function') {
         clearInterval(interval);
         doRender();
-      } else if (attempts >= 10) {
+      } else if (attempts >= 20) {
         clearInterval(interval);
       }
     }, 150);
