@@ -780,7 +780,7 @@ def FnCrawlRun(repo, seed_text="", max_starts=MAX_STARTS, max_files=MAX_FILES_PE
             "model": fin.get("model") or st.get("model") or ""}
 
 
-def FnCrawlRefresh(repo, name, max_files=MAX_FILES_PER_RUN):
+def FnCrawlRefresh(repo, name, max_files=25):
     """Pure Vine refresh: re-crawl seeded by an EXISTING candidate title,
     merge fresh kept rows into ITS draft (concept=name). Never creates a
     candidate - the dialog's confirm path is not touched. Pairs already
@@ -800,7 +800,7 @@ def FnCrawlRefresh(repo, name, max_files=MAX_FILES_PER_RUN):
         con.close()
     is_candidate = (row and (row[0] or "") == "candidate")
     res = FnCrawlRun(repo, seed_text=name,
-                     max_files=max(1, min(50, max_files or MAX_FILES_PER_RUN)))
+                     max_files=max(1, min(50, max_files or 25)))
     if not res.get("ok"):
         return res
     run_id = res.get("run_id", "")
