@@ -15,7 +15,7 @@ import os
 import re
 from typing import Any, Dict, List, Optional
 
-MAX_TEXT_CHARS = 12000  # per-file truncation budget for the LLM prompt
+MAX_TEXT_CHARS = 120000  # per-file truncation budget for the LLM prompt (supports large CSV / reports up to ~120K chars)
 ALLOWED_EXTS = {".pptx", ".ppt", ".docx", ".doc", ".pdf",
                 ".txt", ".md", ".markdown", ".csv", ".html", ".htm",
                 ".eml", ".jpg", ".jpeg", ".png", ".webp", ".bmp",
@@ -25,7 +25,7 @@ PARSEABLE_EXTS = {".pptx", ".docx", ".pdf"}
 IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".webp", ".bmp", ".tiff", ".tif"}
 # Plain-text readable without special libs.
 TEXT_EXTS = {".txt", ".md", ".markdown", ".csv", ".html", ".htm", ".eml"}
-CSV_MAX_ROWS = 200  # spreadsheet rows kept before truncation note
+CSV_MAX_ROWS = 1000  # spreadsheet rows kept before truncation note (supports large datasets)
 # Vision fallback ("open the LLM's eyes"): page/slide images for image-only docs.
 VISION_MAX_PAGES = 12   # per file
 VISION_MAX_TOTAL = 16   # per summarize call

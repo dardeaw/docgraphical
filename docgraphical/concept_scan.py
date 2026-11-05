@@ -405,6 +405,28 @@ def FnRecountOneTerm(repo_paths, db_path, term):
     con = _sq.connect(db_path)
     try:
         if c:
+            # Query all files already linked to this concept (wiki_link edge source)
+            linked_files = set()
+            try:
+                rows = con.execute(
+                    "SELECT source FROM edges WHERE kind = 'wiki_link' AND (target = ? OR target = ?)",
+                    (f"concept::{term}", term)).fetchall()
+                for (s_id,) in rows:
+                    clean_f = s_id.replace("heading::", "").replace("file::", "").split("::")[0].strip()
+                    if clean_f:
+                        linked_files.add(clean_f.replace("\\", "/"))
+                        linked_files.add(os.path.basename(clean_f))
+            except Exception:
+                pass
+
+            # Only propose files that do NOT already link to this concept!
+            unlinked_files = []
+            for f_item in c["files"]:
+                f_rel = (f_item.get("rel") or "").replace("\\", "/").strip()
+                f_base = os.path.basename(f_rel)
+                if f_rel not in linked_files and f_base not in linked_files:
+                    unlinked_files.append(f_item)
+
             con.execute(
                 "INSERT OR REPLACE INTO scan_evidence"
                 "(term, sources_json, score, model, created_at, df, tf)"
@@ -414,7 +436,7 @@ def FnRecountOneTerm(repo_paths, db_path, term):
                  c["score"], term, now, c["df"], c["tf"]))
             con.commit()
             return {"ok": True, "term": term, "df": c["df"], "tf": c["tf"],
-                    "files": c["files"][:50]}
+                    "files": unlinked_files[:50]}
         con.execute(
             "INSERT OR REPLACE INTO scan_evidence"
             "(term, sources_json, score, model, created_at, df, tf)"
