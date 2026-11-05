@@ -2091,11 +2091,12 @@ html, body {
   color: #6e7681;
 }
 
-/* Ingest dialog: rotating busy indicator + resizable preview */
+/* Rotating busy indicators */
+@keyframes spin { to { transform: rotate(360deg); } }
 @keyframes ingSpin { to { transform: rotate(360deg); } }
 .ing-spin {
   display: inline-block;
-  animation: ingSpin 0.9s linear infinite;
+  animation: spin 0.9s linear infinite;
   color: #58a6ff;
   font-weight: 700;
 }

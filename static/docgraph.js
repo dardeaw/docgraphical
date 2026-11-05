@@ -7998,7 +7998,7 @@ function cardRefreshGo(how, term) {
     const isVine = how === 'vine';
     o.innerHTML = `
       <div style="width:440px;max-width:92vw;background:#0d1117;border:1px solid #30363d;border-radius:12px;padding:24px 20px;color:#e6edf3;display:flex;flex-direction:column;align-items:center;text-align:center;gap:14px;box-shadow:0 16px 48px rgba(0,0,0,0.85);">
-        <div style="width:36px;height:36px;border:3px solid #30363d;border-top-color:${isVine ? '#3fb950' : '#e3b341'};border-radius:50%;animation:spin 0.8s linear infinite;"></div>
+        <div style="width:38px;height:38px;border:3px solid rgba(255,255,255,0.08);border-top:3px solid ${isVine ? '#3fb950' : '#e3b341'};border-right:3px solid ${isVine ? 'rgba(63,185,80,0.4)' : 'rgba(227,179,65,0.4)'};border-radius:50%;animation:spin 0.8s linear infinite;box-shadow:0 0 16px ${isVine ? 'rgba(63,185,80,0.3)' : 'rgba(227,179,65,0.3)'};"></div>
         <div>
           <div style="font-weight:700;font-size:15px;color:${isVine ? '#3fb950' : '#e3b341'};">
             ${isVine ? (zh ? `🌿 順藤深挖中：「${escapeHtml(term)}」` : `🌿 Digging "${escapeHtml(term)}"...`)
