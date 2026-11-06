@@ -84,10 +84,22 @@ def is_already_linked(file_rel: str, heading: str, signatures: Set[Any]) -> bool
     if not h_clean:
         return (f_clean in signatures or f_base in signatures)
     
+    h_sub30 = h_clean[:30].strip()
     if (f_clean, h_clean) in signatures or (f_base, h_clean) in signatures:
+        return True
+    if (f_clean, h_sub30) in signatures or (f_base, h_sub30) in signatures:
         return True
     if f"heading::{f_clean}::{h_clean}" in signatures or f"heading::{f_base}::{h_clean}" in signatures:
         return True
+    if f"heading::{f_clean}::{h_sub30}" in signatures or f"heading::{f_base}::{h_sub30}" in signatures:
+        return True
+    
+    # Substring / prefix match against tuple signatures
+    for sig in signatures:
+        if isinstance(sig, tuple) and len(sig) == 2:
+            sig_f, sig_h = sig
+            if sig_f in (f_clean, f_base) and (sig_h == h_clean or sig_h == h_sub30 or sig_h.startswith(h_clean) or h_clean.startswith(sig_h)):
+                return True
     return False
 
 
@@ -220,6 +232,17 @@ def scan_candidate_sections(repo_path: str, rel_file: str, terms: List[str], sig
     cur_lines = []
 
     def flush(h_title, h_lvl, h_ln, h_body):
+        # Discard line 1 heading if it is purely the document file title (e.g. # 13_指示器運用 濕度指示卡)
+        # Because line 1 heading represents the whole document, which is already represented by level 0 (md)
+        f_basename = os.path.basename(clean_f)
+        f_no_ext = f_basename[:-3] if f_basename.lower().endswith(".md") else f_basename
+        c_base = re.sub(r"^[0-9_\-\s]+", "", f_no_ext).lower().strip()
+        c_h1 = re.sub(r"^[0-9_\-\s]+", "", h_title).lower().strip()
+        c_base = re.sub(r"^\d{8}_[^\s_]+_", "", c_base).strip()
+        c_h1 = re.sub(r"^\d{8}_[^\s_]+_", "", c_h1).strip()
+        if h_ln <= 3 and (h_title.strip() == f_no_ext.strip() or c_base == c_h1 or (c_base and c_base in c_h1) or (c_h1 and c_h1 in c_base)):
+            return
+
         body_text = "".join(h_body)
         matched = [t for t in terms if t.lower() in (h_title.lower() + " " + body_text.lower())]
         if matched:
