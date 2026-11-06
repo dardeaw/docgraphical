@@ -5941,13 +5941,18 @@ function renderLinkedFilesHtml(conceptName, files, zh) {
   if (!files || files.length === 0) {
     return `<div style="font-size:13px; color:#8b949e; padding:4px 0;">${zh ? '尚無文檔引用此標籤' : 'No files reference this concept'}</div>`;
   }
-  let h = `<div style="font-size:13px; color:#58a6ff; font-weight:600; margin-bottom:4px;">📄 ${zh ? '引用文件清單' : 'Referenced Documents'} (${files.length}):</div>`;
+  const distinctDocs = new Set(files.map(f => f.cleanPath || (f.filePath && f.filePath.split('::')[1]) || f.filePath)).size;
+  const metricsLabel = (distinctDocs !== files.length && distinctDocs > 0)
+    ? `${distinctDocs} 檔 · ${files.length} 處引用`
+    : `${files.length} ${zh ? '處引用' : 'refs'}`;
+  let h = `<div style="font-size:13px; color:#58a6ff; font-weight:600; margin-bottom:4px;">📄 ${zh ? '引用文件清單' : 'Referenced Documents'} (${metricsLabel}):</div>`;
   h += '<div style="display:flex; flex-direction:column; gap:4px; max-height:160px; overflow-y:auto;">';
   files.forEach(f => {
+    const fRepo = f.repoPath || '';
     h += `
       <div style="background:#0d1117; border:1px solid #30363d; border-radius:4px; padding:4px 8px; font-size:13px; display:flex; justify-content:space-between; align-items:center;">
         <span style="color:#c9d1d9; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:180px; display:flex; align-items:center;" title="${escapeHtml(refCrumbText(f.filePath))}">${(f.filePath || '').startsWith('heading::') ? '<span style="color:#58a6ff; font-weight:700; margin-right:4px;">#</span>' : getDocIconSvg('#f0883e')} <span style="margin-left:3px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${refCrumbHtml(f.filePath)}</span></span>
-        <button class="mini-btn" style="color:#f85149; border-color:#da3633; padding:1px 4px; font-size:10px;" onclick="unlinkConcept('${escapeHtml(conceptName)}', '${escapeHtml(f.filePath)}', event)" title="${zh ? '解除關聯並永久排除' : 'Unlink & Exclude'}">✕</button>
+        <button class="mini-btn" style="color:#f85149; border-color:#da3633; padding:1px 4px; font-size:10px;" onclick="unlinkConcept('${escapeHtml(conceptName)}', '${escapeHtml(f.filePath)}', event, '${escapeHtml(fRepo)}')" title="${zh ? '解除此處關聯' : 'Unlink reference'}">✕</button>
       </div>
     `;
   });
@@ -6124,7 +6129,7 @@ function renderConceptsDrawerList(filterKw = '') {
         <div class="concept-card" id="cpt-card-${escapeHtml(c.name)}" data-concept-name="${escapeHtml(c.name)}" style="border:1px solid ${isSelected ? '#388bfd' : '#21262d'}; background:${isSelected ? '#131d2e' : '#161b22'}; box-shadow:${isSelected ? '0 0 10px rgba(56,139,253,0.35)' : 'none'}; border-radius:6px; padding:8px; cursor:pointer;" onclick="onConceptCardClick('${escapeHtml(c.name)}', event)">
           <div style="display:flex; justify-content:space-between; align-items:center;">
             <span style="font-weight:600; color:#e2e8f0; font-size:14.5px; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">🏷️ ${escapeHtml(c.name)}</span>
-            <span class="concept-status-pill official" style="background:#1f6feb22; color:#58a6ff; border:1px solid #388bfd44; font-size:12px; padding:2px 8px; border-radius:10px; flex-shrink:0;">${c.refs} ${zh ? '引用' : 'Refs'}</span>
+            <span class="concept-status-pill official" style="background:#1f6feb22; color:#58a6ff; border:1px solid #388bfd44; font-size:12px; padding:2px 8px; border-radius:10px; flex-shrink:0;" title="${c.docs ? `${c.docs} 篇文檔 · ${c.refs} 處段落引用` : ''}">${(c.docs && c.docs !== c.refs) ? `${c.docs} 檔 · ${c.refs} 引用` : `${c.refs} ${zh ? '引用' : 'Refs'}`}</span>
           </div>
           <div style="font-size:13px; color:#8b949e; margin-top:4px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">
             ${zh ? '別名' : 'Aliases'}: ${escapeHtml(c.aliases || (zh ? '無' : 'None'))}
@@ -6395,15 +6400,15 @@ function treeRenameFile(absPath, oldName) {
   });
 }
 
-// ─── Concept Unlink Controller (Clean & Elegant) ────────────────────
-function unlinkConcept(conceptName, filePath, event) {
+// ─── Concept Unlink Controller (Clean & Robust) ────────────────────
+function unlinkConcept(conceptName, filePath, event, targetRepo = '') {
   if (event) {
     event.stopPropagation();
     event.preventDefault();
   }
   const zh = currentLanguage === 'zh';
   const ja = currentLanguage === 'ja';
-  const repo = getActiveRepoPath();
+  const repo = targetRepo || (viewCtx && viewCtx.repo) || getActiveRepoPath();
 
   const title = zh ? '⚠ 解除概念標籤關聯確認' : '⚠ Unlink Concept Confirmation';
   const msg = zh
@@ -6422,17 +6427,29 @@ function unlinkConcept(conceptName, filePath, event) {
       body: JSON.stringify({ repo, name: conceptName, filePath, rewriteDisk: true })
     })
       .then(res => res.json())
-      .then(data => {
+      .then(async data => {
         if (data.ok) {
           showToast(zh ? `✅ 已成功為「${filePath}」解除「${conceptName}」標籤關聯！` : `✅ Unlinked '${conceptName}'!`);
+          
+          // Guarantee canonical backend reload of the tag-page and drawer list
+          if (selectedConceptName === conceptName) {
+            try {
+              const tpRes = await fetch(`/api/concepts/tag-page?name=${encodeURIComponent(conceptName)}&repo=${encodeURIComponent(repo)}`);
+              const tpData = await tpRes.json();
+              if (tpData && tpData.ok) {
+                activeConceptLinkedFiles[conceptName] = tpData.files || [];
+                renderConceptTagPageInViewer(tpData);
+                renderConceptsDrawerList();
+              }
+            } catch (e) { }
+          }
+          
           fetchConceptsData();
           loadMasterGraphAndFilter();
           setTimeout(() => {
             buildProjectTree();
           }, 120);
-          if (selectedConceptName === conceptName) {
-            onConceptCardClick(conceptName);
-          }
+
           // Refresh active document editor if currently open
           let cleanDoc = filePath;
           if (cleanDoc.startsWith('heading::')) {
@@ -6629,7 +6646,8 @@ function renderConceptTagPageInViewer(tagData) {
     fullMd += zh ? '\n| 序號 | 引用檔案路徑 | 提及段落摘要 | 操作 |\n| :--- | :--- | :--- | :--- |\n'
       : '\n| # | File | Snippet | Action |\n| :--- | :--- | :--- | :--- |\n';
     tagData.files.forEach((f, idx) => {
-      fullMd += `| ${idx + 1} | ${refCrumbHtml(f.filePath)} | ${f.snippet ? f.snippet.replace(/\|/g, '/') : (zh ? '(章節內文)' : '(Section body)')} | <button class="mini-btn" style="color:#f85149; border-color:#da3633; padding:3px 12px; font-weight:600; white-space:nowrap; min-width:54px; display:inline-block;" onclick="unlinkConcept('${tagData.concept}', '${f.filePath}', event)">${zh ? '解除' : (ja ? '解除' : 'Unlink')}</button> |\n`;
+      const fRepo = f.repoPath || tagData.repo || '';
+      fullMd += `| ${idx + 1} | ${refCrumbHtml(f.filePath)} | ${f.snippet ? f.snippet.replace(/\|/g, '/') : (zh ? '(章節內文)' : '(Section body)')} | <button class="mini-btn" style="color:#f85149; border-color:#da3633; padding:3px 12px; font-weight:600; white-space:nowrap; min-width:54px; display:inline-block;" onclick="unlinkConcept('${tagData.concept}', '${f.filePath}', event, '${escapeHtml(fRepo)}')">${zh ? '解除' : (ja ? '解除' : 'Unlink')}</button> |\n`;
     });
   }
 
@@ -7909,6 +7927,7 @@ function openRefreshResultReviewDialog(how, term, items, extraInfo = {}) {
         heading: h,
         line: line,
         level: it.level || 0,
+        type: it.type || (it.level === 0 ? 'md' : ('h' + it.level)),
         refId: refId,
         snippets: snip ? [snip] : [],
         checked: true
@@ -7916,7 +7935,19 @@ function openRefreshResultReviewDialog(how, term, items, extraInfo = {}) {
     }
   });
 
-  const normalized = Array.from(sectionMap.values()).map(item => ({
+  // Preserve hierarchical sort order: md level 0 -> h1 level 1 -> h2 level 2 -> h3 level 3
+  const rawList = Array.from(sectionMap.values());
+  rawList.sort((a, b) => {
+    const lvlA = a.level != null ? a.level : 0;
+    const lvlB = b.level != null ? b.level : 0;
+    if (lvlA !== lvlB) return lvlA - lvlB;
+    if (a.file !== b.file) return (a.file || '').localeCompare(b.file || '');
+    return (a.line || 0) - (b.line || 0);
+  });
+
+  const cappedList = rawList.slice(0, 20);
+
+  const normalized = cappedList.map(item => ({
     ...item,
     snippet: item.snippets.join(' ｜ ')
   }));

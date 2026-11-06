@@ -438,9 +438,9 @@ def FnRecountOneTerm(repo_paths, db_path, term):
                 (term, json.dumps(c["files"], ensure_ascii=False),
                  c["score"], term, now, c["df"], c["tf"]))
             con.commit()
-            # As user instructed: default to 10 unlinked items beyond existing list (or all remaining if fewer than 10)
+            # Default to 20 unlinked items beyond existing list (or all remaining if fewer than 20)
             return {"ok": True, "term": term, "df": c["df"], "tf": c["tf"],
-                    "files": unlinked_files[:10]}
+                    "files": unlinked_files[:20]}
         con.execute(
             "INSERT OR REPLACE INTO scan_evidence"
             "(term, sources_json, score, model, created_at, df, tf)"

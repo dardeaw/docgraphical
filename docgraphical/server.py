@@ -1451,12 +1451,20 @@ def create_app(initial_paths: Optional[List[str]] = None, search_roots: Optional
 
     # ─── Concepts Registry RESTful Endpoints ──────────────────────────
 
+    def _clean_repo_path(p: str) -> str:
+        if not p: return ""
+        p = str(p).strip()
+        m = re.match(r"^([a-zA-Z]):([^\\/].*)$", p)
+        if m:
+            p = f"{m.group(1)}:/{m.group(2)}"
+        return p
+
     def _resolve_repo(repo_val: str, target_file: str = "", target_concept: str = "") -> str:
         repos = scan_doc_repositories(get_search_roots())
         repo_list = []
         if repo_val and repo_val.strip():
             # If comma-separated, split candidates
-            parts = [p.strip() for p in repo_val.split(",") if p.strip()]
+            parts = [_clean_repo_path(p.strip()) for p in repo_val.split(",") if p.strip()]
             for p in parts:
                 if os.path.isdir(p):
                     repo_list.append(os.path.realpath(p))
@@ -1514,7 +1522,7 @@ def create_app(initial_paths: Optional[List[str]] = None, search_roots: Optional
         for all fan-out endpoints (was copy-pasted ~10 times)."""
         out = []
         if repo_val and repo_val.strip():
-            for p in (x.strip() for x in repo_val.split(",") if x.strip()):
+            for p in (_clean_repo_path(x.strip()) for x in repo_val.split(",") if x.strip()):
                 if os.path.isdir(p):
                     rp = os.path.realpath(p)
                     if rp not in out:
@@ -1824,7 +1832,9 @@ def create_app(initial_paths: Optional[List[str]] = None, search_roots: Optional
             return jsonify({"ok": False, "error": "term required"}), 400
         try:
             from .db import get_db_path as _FnDbPath
-            res = FnRecountOneTerm([repo], _FnDbPath(repo), term)
+            from .pipeline import run_prospect_pipeline
+            target_quota = int(data.get("quota", 20))
+            res = run_prospect_pipeline([repo], _FnDbPath(repo), term, target_quota=target_quota)
         except Exception as e:
             res = {"ok": False, "error": "%s: %s" % (type(e).__name__, e)}
         if not res.get("ok"):
@@ -2377,18 +2387,18 @@ def create_app(initial_paths: Optional[List[str]] = None, search_roots: Optional
         title; fresh kept rows merge into ITS draft (concept bound).
         Never creates a candidate. Long call (minutes, LLM per file).
         Body: {repo?, name, max_files?}."""
-        from .crawl import FnCrawlRefresh
+        from .pipeline import run_vine_pipeline
         data = request.get_json(silent=True) or {}
         name = (data.get("name") or "").strip()
         repo = _resolve_repo(data.get("repo") or "", target_concept=name)
         if not repo or not name:
             return jsonify({"ok": False, "error": "repo and name required"}), 400
         try:
-            max_files = int(data.get("max_files", 10))
+            target_quota = int(data.get("quota", data.get("max_files", 20)))
         except (TypeError, ValueError):
-            max_files = 10
+            target_quota = 20
         try:
-            res = FnCrawlRefresh(repo, name, max_files=max_files)
+            res = run_vine_pipeline(repo, name, target_quota=target_quota)
         except Exception as e:
             res = {"ok": False, "error": "%s: %s" % (type(e).__name__, e)}
         if not res.get("ok"):

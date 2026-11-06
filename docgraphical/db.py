@@ -137,19 +137,21 @@ def _FnWalkDocFiles(repo_path: str) -> List[str]:
 
 def _FnDeleteFileRows(cur: sqlite3.Connection, rel_path: str) -> None:
     """Remove every row belonging to one document (nodes/fts/files/its edges)."""
-    cur.execute("SELECT id FROM nodes WHERE file_path = ?", (rel_path,))
+    cur.execute("SELECT id FROM nodes WHERE file_path = ? AND kind != 'concept'", (rel_path,))
     vIds = [r[0] for r in cur.fetchall()]
     for i in range(0, len(vIds), 400):
         vChunk = vIds[i:i + 400]
         strPh = ",".join("?" * len(vChunk))
-        cur.execute(f"DELETE FROM edges WHERE source IN ({strPh}) OR target IN ({strPh})",
+        cur.execute(f"DELETE FROM edges WHERE source IN ({strPh}) OR (target IN ({strPh}) AND kind != 'wiki_link')",
                     vChunk + vChunk)
+    # Delete edges where the file's own headings/file node was the source of a wiki_link
+    cur.execute("DELETE FROM edges WHERE source LIKE ? OR source = ?", (f"heading::{rel_path}::%", f"file::{rel_path}"))
     if vIds:
         for i in range(0, len(vIds), 400):
             vChunk = vIds[i:i + 400]
             strPh = ",".join("?" * len(vChunk))
             cur.execute(f"DELETE FROM nodes_fts WHERE id IN ({strPh})", vChunk)
-    cur.execute("DELETE FROM nodes WHERE file_path = ?", (rel_path,))
+    cur.execute("DELETE FROM nodes WHERE file_path = ? AND kind != 'concept'", (rel_path,))
     cur.execute("DELETE FROM files WHERE path = ?", (rel_path,))
 
 
@@ -901,34 +903,39 @@ def get_concepts_tree(repo_path: str) -> dict:
             )
         """)
 
-        # 2. Count live references in edges
+        # 2. Count live references (both distinct files and distinct section citations)
         cur.execute("""
-            SELECT target, COUNT(DISTINCT source) 
+            SELECT target, source 
             FROM edges 
-            WHERE kind = 'wiki_link' 
-            GROUP BY target
+            WHERE kind = 'wiki_link'
         """)
         ref_counts = {}
-        for tgt, cnt in cur.fetchall():
-            cname = tgt.replace("concept::", "")
-            ref_counts[cname] = cnt
+        doc_counts = {}
+        for tgt, src in cur.fetchall():
+            cname = tgt.replace("concept::", "").strip()
+            ref_counts.setdefault(cname, set()).add(src)
+            clean_f = src.replace("heading::", "").replace("file::", "").split("::")[0].strip()
+            if clean_f:
+                doc_counts.setdefault(cname, set()).add(clean_f)
 
         # 3. Fetch concepts
         cur.execute("SELECT name, category, aliases, status, created_at FROM concepts")
         rows = cur.fetchall()
 
-        official_tree = {} # { category: [ { name, aliases, refs, createdAt } ] }
+        official_tree = {} # { category: [ { name, aliases, refs, docs, createdAt } ] }
         candidates = []
 
         for name, category, aliases, status, created_at in rows:
             raw_c = (category or "").strip()
             cat = "Uncategorized" if (not raw_c or raw_c in ("未分類", "Uncategorized")) else raw_c
-            refs = ref_counts.get(name, 0)
+            refs = len(ref_counts.get(name, set()))
+            docs = len(doc_counts.get(name, set()))
             item = {
                 "name": name,
                 "category": cat,
                 "aliases": aliases or "",
                 "refs": refs,
+                "docs": docs,
                 "status": status,
                 "createdAt": created_at
             }
@@ -995,13 +1002,21 @@ def get_concepts_tree(repo_path: str) -> dict:
 
 def resolve_all_doc_repos(repo_path=None) -> List[str]:
     """Resolve all repositories: explicit input + all scanned repositories."""
+    def _norm(p: str) -> str:
+        if not p: return ""
+        p = str(p).strip()
+        m = re.match(r"^([a-zA-Z]):([^\\/].*)$", p)
+        if m:
+            p = f"{m.group(1)}:/{m.group(2)}"
+        return os.path.abspath(p)
+
     repos = []
     if isinstance(repo_path, list):
-        repos = [os.path.abspath(r) for r in repo_path if r and str(r).strip()]
+        repos = [_norm(r) for r in repo_path if r and str(r).strip()]
     elif isinstance(repo_path, str) and repo_path.strip():
         for p in repo_path.split(","):
             p = p.strip()
-            if p: repos.append(os.path.abspath(p))
+            if p: repos.append(_norm(p))
 
     try:
         from .config import get_search_roots
@@ -1341,35 +1356,27 @@ def unlink_concept_file(repo_path: str, concept_name: str, rel_file_path: str, r
                                 continue
                     new_lines.append(l)
 
-                # Fallback: if not found within section, locate by heading title or scan without section boundary
-                if not removed:
-                    fallback_lines = []
-                    for l in new_lines:
-                        if not removed:
+                # If not removed in the targeted section, do NOT aggressively strip tags from random other sections!
+                pass
+            else:
+                # File-level removal: scan first 40 lines for document-level tags (> 🏷️ 概念標籤:)
+                for idx, l in enumerate(lines):
+                    if not removed and idx <= 40:
+                        m_pref = tagline_prefix_pat.match(l)
+                        if m_pref:
                             res_line, did_remove = clean_tag_from_line(l)
                             if did_remove:
                                 removed = True
                                 if res_line is not None:
-                                    fallback_lines.append(res_line)
+                                    new_lines.append(res_line)
                                 continue
-                        fallback_lines.append(l)
-                    new_lines = fallback_lines
-            else:
-                # File-level removal: scan first 40 lines
-                for idx, l in enumerate(lines):
-                    if not removed and idx <= 40:
-                        res_line, did_remove = clean_tag_from_line(l)
-                        if did_remove:
-                            removed = True
-                            if res_line is not None:
-                                new_lines.append(res_line)
-                            continue
                     new_lines.append(l)
 
+                # Fallback: if not found in dedicated tagline, check top lines for standalone inline tag
                 if not removed:
                     final_lines = []
-                    for l in new_lines:
-                        if not removed:
+                    for idx, l in enumerate(new_lines):
+                        if not removed and idx <= 20 and tag_link_pat.search(l):
                             res_line, did_remove = clean_tag_from_line(l)
                             if did_remove:
                                 removed = True
@@ -1397,8 +1404,8 @@ def unlink_concept_file(repo_path: str, concept_name: str, rel_file_path: str, r
         else:
             cur.execute("""
                 DELETE FROM edges 
-                WHERE (source = ? OR source = ?) AND target = ? AND kind = 'wiki_link'
-            """, (f"file::{clean_file}", clean_file, cid))
+                WHERE (source = ? OR source = ? OR source LIKE ?) AND target = ? AND kind = 'wiki_link'
+            """, (f"file::{clean_file}", clean_file, f"heading::{clean_file}::%", cid))
 
         cur.execute("DELETE FROM concept_exclusions WHERE concept_name = ? AND file_path = ?", (concept_name, clean_file))
         conn.commit()
@@ -1515,7 +1522,8 @@ def attach_concept_to_file(repo_path: str, concept_name: str, rel_file_path: str
             for next_idx in range(matched_idx + 1, len(lines)):
                 next_line = lines[next_idx].strip()
                 nm = re.match(r"^(#{1,6})\s+", next_line)
-                if nm and len(nm.group(1)) <= h_level:
+                if nm:
+                    # Stop at any subsequent heading: tags belong strictly to their direct heading!
                     break
                 if check_pat.search(next_line):
                     already_tagged = True

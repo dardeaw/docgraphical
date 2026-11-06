@@ -33,7 +33,7 @@ from .ingest import FnLinkifyConcepts
 from .vine import FnVineGuide, FnResolveSeed, FnVineNeighbors
 
 _RUNS = {}
-MAX_FILES_PER_RUN = 10
+MAX_FILES_PER_RUN = 20
 MAX_STARTS = 3
 MAX_PUSH = 5
 CONTENT_CAP = 5000
@@ -334,8 +334,8 @@ def FnCrawlStart(repo, seed_text="", max_starts=MAX_STARTS, lang="zh"):
     for _verb, name, why in picks:
         for st in _norm_target(db_path, name, repo)[:2]:
             starts.append({"seed": name, "why": why, "kind": st["kind"], "id": st["id"]})
-    if not starts and lit:
-        for s in lit[:3]:
+    if lit:
+        for s in lit[:2]:
             if s.get("kind") == "file" and os.path.basename(s.get("id") or "").upper() == "DOC_CATALOG.MD":
                 continue
             starts.append({"seed": seed, "why": "字面落點起手", "kind": s["kind"], "id": s["id"]})
@@ -682,7 +682,7 @@ def FnCrawlFinish(run_id):
         _RUNS.pop(run_id, None)
         return {"ok": True, "done": True, "title": "", "kept": [],
                 "note": "nothing staged this round", "spent": run["spent"]}
-    lines = "\n".join("檔 %s 念 %s" % (f, m) for f, m in rows[:60])
+    lines = "\n".join("檔 %s 念 %s" % (f, m) for f, m in rows[:150])
     from .prompts import FnGetPrompt
     cfg = FnGetPrompt("crawl_finish")
     template = cfg.get("template") or ""
@@ -758,7 +758,8 @@ def FnCrawlRun(repo, seed_text="", max_starts=MAX_STARTS, max_files=MAX_FILES_PE
                 "guide_text": st.get("guide_text") or ""}
     run_id = st["run_id"]
     files, capped = 0, False
-    for _ in range(max(1, max_files or MAX_FILES_PER_RUN) + 8):
+    loop_limit = max(1, max_files or MAX_FILES_PER_RUN) * 2 + 15
+    for _ in range(loop_limit):
         nx = FnCrawlNext(run_id, max_files=max_files)
         if not nx.get("ok"):
             return {"ok": False, "error": nx.get("error") or "next failed",
@@ -820,11 +821,28 @@ def FnCrawlRefresh(repo, name, max_files=25):
             for (s_id,) in con.execute(
                 "SELECT source FROM edges WHERE kind = 'wiki_link' AND (target = ? OR target = ?)",
                 (f"concept::{name}", name)).fetchall():
-                linked_sections.add(s_id.strip())
-                clean_f = s_id.replace("heading::", "").replace("file::", "").split("::")[0].strip()
+                sid_raw = (s_id or "").strip()
+                if not sid_raw:
+                    continue
+                linked_sections.add(sid_raw)
+                clean_f = sid_raw.replace("heading::", "").replace("file::", "").split("::")[0].strip()
                 if clean_f:
                     linked_sections.add(clean_f)
                     linked_sections.add(os.path.basename(clean_f))
+                # Also store tuple (clean_basename, heading) and (file, heading) for exact lookup
+                # Format of s_id: heading::<rel_file>::L<line>::<heading_text>
+                if sid_raw.startswith("heading::") and "::" in sid_raw[9:]:
+                    parts = sid_raw[9:].split("::")
+                    if len(parts) >= 3:
+                        f_part = parts[0]
+                        h_part = "::".join(parts[2:]).strip()
+                        linked_sections.add((f_part, h_part))
+                        linked_sections.add((os.path.basename(f_part), h_part))
+                    elif len(parts) == 2:
+                        f_part = parts[0]
+                        h_part = parts[1].strip()
+                        linked_sections.add((f_part, h_part))
+                        linked_sections.add((os.path.basename(f_part), h_part))
         except Exception:
             pass
 
@@ -846,8 +864,13 @@ def FnCrawlRefresh(repo, name, max_files=25):
                 continue
             if not h and (f in linked_sections or os.path.basename(f) in linked_sections):
                 continue
-            if h and (f"heading::{f}::" in str(linked_sections) and h in str(linked_sections)):
-                continue
+            if h:
+                # Exact match against stored representations
+                f_base = os.path.basename(f)
+                if (f, h) in linked_sections or (f_base, h) in linked_sections:
+                    continue
+                if f"heading::{f}::{h}" in linked_sections or f"heading::{f_base}::{h}" in linked_sections:
+                    continue
 
             seen_targets.add(target_key)
             added += 1
@@ -1071,12 +1094,18 @@ def _locate_mention(repo, rel, mention):
     if not hit:
         return {}
     heading, level = "", 0
-    for ln in reversed(lines[max(0, hit - 501):hit - 1]):
-        m = _re.match(r"^(#{1,6})\s+(.*?)\s*#*\s*$", ln or "")
-        if m:
-            level = len(m.group(1))
-            heading = (m.group(2) or "").strip()
-            break
+    # If the hit line itself is a heading line, use it directly!
+    m_self = _re.match(r"^(#{1,6})\s+(.*?)\s*#*\s*$", lines[hit - 1] or "")
+    if m_self:
+        level = len(m_self.group(1))
+        heading = (m_self.group(2) or "").strip()
+    else:
+        for ln in reversed(lines[max(0, hit - 501):hit - 1]):
+            m = _re.match(r"^(#{1,6})\s+(.*?)\s*#*\s*$", ln or "")
+            if m:
+                level = len(m.group(1))
+                heading = (m.group(2) or "").strip()
+                break
     out = {"line": hit}
     if heading:
         out["heading"] = heading[:60]

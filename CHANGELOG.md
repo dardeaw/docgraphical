@@ -7,6 +7,16 @@ All notable changes to the DocGraphical project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.0.5] - 2026-11-06
+
+### Added & Improved
+- **Prospect Pipeline Upgraded to Hierarchical AST Section Mining**:
+  - Expanded candidate discovery beyond root markdown files (`md`) to full AST headings (`md` level 0 -> `h1` level 1 -> `h2` level 2 -> subheadings).
+  - **Hierarchical Priority Sorting & Capped Quota**: Discovered candidate sections are sorted strictly by `md -> h1 -> h2` hierarchy and capped at a maximum of 20 items.
+  - **Surgical Unlink & Windows Drive Letter Normalization**: Unlinking a document cleanly removes all child `heading::` edge links in SQLite graph and ensures immediate cache-busting and drawer count synchronization; fixed Windows drive letter path resolution (`D:repo` -> `D:/repo`).
+
+---
+
 ## [3.0.4] - 2026-11-03
 
 ### Added
