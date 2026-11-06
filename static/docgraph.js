@@ -24,7 +24,7 @@ let activeNode = null;
 let selectedTreeNodeEl = null;
 let isTreeOpen = true;
 let isRotating = false;
-let currentLanguage = (function() {
+let currentLanguage = (function () {
   try {
     const saved = localStorage.getItem('docgraph_language');
     if (saved && ['zh', 'en', 'ja'].includes(saved)) return saved;
@@ -34,7 +34,7 @@ let currentLanguage = (function() {
     if (lower.startsWith('zh')) return 'zh';
     if (lower.startsWith('ja')) return 'ja';
     return 'en';
-  } catch(e) {
+  } catch (e) {
     return 'zh'; // Fallback to zh for the localized deployment
   }
 })();
@@ -374,7 +374,7 @@ function createCustomNodeObject(n) {
     if (typeof SpriteText !== 'undefined') {
       try {
         // 純標籤牌直接作為 3D 本體實體！完全移除 3D 方塊與 Halo，居中對齊連線
-         const sprite = new SpriteText(`🏷️ ${stripMdLinks(n.name)}`);
+        const sprite = new SpriteText(`🏷️ ${stripMdLinks(n.name)}`);
         sprite.color = '#ffffff';
         sprite.textHeight = 2.4;
         sprite.backgroundColor = 'rgba(10, 14, 22, 0.92)';
@@ -962,13 +962,13 @@ function loadProjects(opts = {}) {
       if (allProjectsList.length === 0) {
         buildProjectTree();
         if (typeof updateOnboardingGuidance === 'function') updateOnboardingGuidance();
-        
+
         // Prevent toast from flickering repeatedly when empty
         if (!window._hasShownEmptyRepoToast) {
           window._hasShownEmptyRepoToast = true;
           showToast(currentLanguage === 'zh' ? '👋 知識庫是空的 — 先加入文件目錄吧' : '👋 Knowledge base is empty — add a directory to begin');
         }
-        
+
         const m = document.getElementById('settings-modal') || document.getElementById('path-modal');
         if (!m || !m.classList.contains('show')) {
           openPathModal(false);
@@ -1377,7 +1377,7 @@ function paintShowSourceBtn() {
   const on = isShowSource();
   el.textContent = on ? '👁 Source' : '🚫 Source';
   el.title = zh ? (on ? '隱藏來源檔案（ppt／pdf／word）' : '顯示來源檔案（ppt／pdf／word）')
-                : (on ? 'Hide source files (ppt/pdf/word)' : 'Show source files (ppt/pdf/word)');
+    : (on ? 'Hide source files (ppt/pdf/word)' : 'Show source files (ppt/pdf/word)');
 }
 // Recursive file count under a tree dir node (md docs only — sources excluded).
 function countDirFiles(d) {
@@ -1939,7 +1939,7 @@ function selectActiveNode(node, bSkipDelegates = false) {
 
   const dName = document.getElementById('d-name');
   const dSub = document.getElementById('d-sub');
-   if (dName) dName.innerText = stripMdLinks(node.name) || 'Unnamed';
+  if (dName) dName.innerText = stripMdLinks(node.name) || 'Unnamed';
   if (dSub) dSub.innerText = `${node.file || ''} · Line ${node.line || 1}`;
 
   const badge = document.getElementById('d-kind-badge');
@@ -1998,7 +1998,7 @@ function selectActiveNode(node, bSkipDelegates = false) {
         // server hiccuped — say so instead of silently showing full text.
         const zh = (typeof currentLanguage !== 'undefined' && currentLanguage === 'zh');
         showToast(zh ? '⚠ 後端讀不到檔案（可能已刪除），顯示的是快取全文 — 請 Sync 更新'
-                     : '⚠ File unreadable server-side (may be deleted), showing cached full text — Sync to refresh');
+          : '⚠ File unreadable server-side (may be deleted), showing cached full text — Sync to refresh');
       }
     });
 
@@ -2008,10 +2008,12 @@ function selectActiveNode(node, bSkipDelegates = false) {
   try {
     if (node && typeof navRecord === 'function') navRecord({
       view: 'node', id: node.id || ((node.file || '') + '::L' + (node.line || 1)),
-      node: { id: node.id, name: node.name, file: node.file,
-              abs_path: node.abs_path, kind: node.kind, line: node.line }
+      node: {
+        id: node.id, name: node.name, file: node.file,
+        abs_path: node.abs_path, kind: node.kind, line: node.line
+      }
     });
-  } catch (e) {}
+  } catch (e) { }
 }
 
 
@@ -2130,7 +2132,7 @@ function updateDocTagsBar(mdText, filePath) {
   let tlMatch;
   while ((tlMatch = tagLinkPat.exec(mdText || '')) !== null) {
     let cName = (tlMatch[3] || '').trim();
-    try { cName = decodeURIComponent(cName); } catch (e) {}
+    try { cName = decodeURIComponent(cName); } catch (e) { }
     if (cName && cName.length <= 60) {
       concepts.add(cName);
     }
@@ -2348,10 +2350,12 @@ function openViewCtxMenu(e) {
     items.push({ label: prefix + base, fn: () => window.open(url, '_blank', 'noopener') });
   });
   if (viewCtx.sources.length) {
-    items.push({ label: zh ? '📁 複製來源絕對路徑' : (ja ? '📁 ソースの絶対パスをコピー' : '📁 Copy source absolute path'), fn: () => {
-      const abs = viewCtx.sources.map(r => `${viewCtx.repo}\\${r.replace(/\//g, '\\')}`).join('\n');
-      copyTextToClipboard(abs, zh ? '📁 已複製來源路徑' : (ja ? '📁 ソースパスをコピーしました' : '📁 Source path copied'));
-    }});
+    items.push({
+      label: zh ? '📁 複製來源絕對路徑' : (ja ? '📁 ソースの絶対パスをコピー' : '📁 Copy source absolute path'), fn: () => {
+        const abs = viewCtx.sources.map(r => `${viewCtx.repo}\\${r.replace(/\//g, '\\')}`).join('\n');
+        copyTextToClipboard(abs, zh ? '📁 已複製來源路徑' : (ja ? '📁 ソースパスをコピーしました' : '📁 Source path copied'));
+      }
+    });
   }
   if (!items.length) return;
   closeViewCtxMenu();
@@ -2474,7 +2478,7 @@ function buildLegends() {
   const nodesList = document.getElementById('legend-nodes-list');
   if (!nodesList) return;
   nodesList.innerHTML = '';
-  
+
   const lang = currentLanguage;
   const zh = lang === 'zh';
   const ja = lang === 'ja';
@@ -2804,20 +2808,20 @@ function scanDirectory() {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ path })
   })
-  .then(res => res.json())
-  .then(res => {
-    if (res.success) {
-      input.value = '';
-      loadProjects();
-      const lang = (typeof currentLanguage !== 'undefined') ? currentLanguage : 'zh';
-      const msg = lang === 'zh' ? '✅ 目錄已加入專案儲存庫！' : '✅ Directory added successfully!';
-      if (typeof showToast === 'function') showToast(msg);
-      else alert(msg);
-    } else {
-      alert('Error: ' + res.error);
-    }
-  })
-  .catch(err => alert('Request failed: ' + err));
+    .then(res => res.json())
+    .then(res => {
+      if (res.success) {
+        input.value = '';
+        loadProjects();
+        const lang = (typeof currentLanguage !== 'undefined') ? currentLanguage : 'zh';
+        const msg = lang === 'zh' ? '✅ 目錄已加入專案儲存庫！' : '✅ Directory added successfully!';
+        if (typeof showToast === 'function') showToast(msg);
+        else alert(msg);
+      } else {
+        alert('Error: ' + res.error);
+      }
+    })
+    .catch(err => alert('Request failed: ' + err));
 }
 
 function submitAddPath() {
@@ -2860,14 +2864,14 @@ function renderRepoTable(projects) {
           <button class="act-btn" onclick="syncRepo('${escapedPath}', this)">${strSyncLabel}</button>
           <button class="act-btn" onclick="rebuildRepo('${escapedPath}', this)">${T.rebuild}</button>
           <button class="act-btn" style="color:#d29922; border-color:#9e6a03;" onclick="uninitRepo('${escapedPath}', this)">${T.uninit}</button>
-          <button class="act-btn danger" onclick="excludeRepo('${escapedPath}', '${(p.name||'').replace(/\\/g, '\\\\').replace(/'/g, "\\'")}')" title="${zh ? '從專案清單移除此專案（非實體刪除硬碟檔案）' : 'Remove repository from project list (does not delete disk files)'}">✕ ${T.exclude}</button>
+          <button class="act-btn danger" onclick="excludeRepo('${escapedPath}', '${(p.name || '').replace(/\\/g, '\\\\').replace(/'/g, "\\'")}')" title="${zh ? '從專案清單移除此專案（非實體刪除硬碟檔案）' : 'Remove repository from project list (does not delete disk files)'}">✕ ${T.exclude}</button>
         </div>
       `;
     } else {
       actionsHtml = `
         <div class="action-btn-group">
           <button class="act-btn green" onclick="initRepo('${escapedPath}', this)">${T.create}</button>
-          <button class="act-btn danger" onclick="excludeRepo('${escapedPath}', '${(p.name||'').replace(/\\/g, '\\\\').replace(/'/g, "\\'")}')" title="${zh ? '從專案清單移除此專案（非實體刪除硬碟檔案）' : 'Remove repository from project list (does not delete disk files)'}">✕ ${T.exclude}</button>
+          <button class="act-btn danger" onclick="excludeRepo('${escapedPath}', '${(p.name || '').replace(/\\/g, '\\\\').replace(/'/g, "\\'")}')" title="${zh ? '從專案清單移除此專案（非實體刪除硬碟檔案）' : 'Remove repository from project list (does not delete disk files)'}">✕ ${T.exclude}</button>
         </div>
       `;
     }
@@ -2927,18 +2931,18 @@ function syncRepo(path, btn) {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ path })
   })
-  .then(res => res.json())
-  .then(res => {
-    if (res.success) {
-      showToast(`✅ Synced: ${res.files} files, ${res.nodes} nodes, ${res.edges} links!`);
-      loadProjects();
-      setBusy(btn, false);
-    } else {
-      setBusy(btn, false);
-      alert('Sync failed: ' + res.error);
-    }
-  })
-  .catch(err => { setBusy(btn, false); alert('Sync error: ' + err); });
+    .then(res => res.json())
+    .then(res => {
+      if (res.success) {
+        showToast(`✅ Synced: ${res.files} files, ${res.nodes} nodes, ${res.edges} links!`);
+        loadProjects();
+        setBusy(btn, false);
+      } else {
+        setBusy(btn, false);
+        alert('Sync failed: ' + res.error);
+      }
+    })
+    .catch(err => { setBusy(btn, false); alert('Sync error: ' + err); });
 }
 
 function promptToIndexFile(projName, fileName) {
@@ -2996,18 +3000,18 @@ function rebuildRepo(path, btn) {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ path })
   })
-  .then(res => res.json())
-  .then(res => {
-    if (res.success) {
-      showToast(`✅ Rebuilt: ${res.files} files, ${res.nodes} nodes, ${res.edges} links!`);
-      loadProjects();
-      setBusy(btn, false);
-    } else {
-      setBusy(btn, false);
-      alert('Rebuild failed: ' + res.error);
-    }
-  })
-  .catch(err => { setBusy(btn, false); alert('Rebuild error: ' + err); });
+    .then(res => res.json())
+    .then(res => {
+      if (res.success) {
+        showToast(`✅ Rebuilt: ${res.files} files, ${res.nodes} nodes, ${res.edges} links!`);
+        loadProjects();
+        setBusy(btn, false);
+      } else {
+        setBusy(btn, false);
+        alert('Rebuild failed: ' + res.error);
+      }
+    })
+    .catch(err => { setBusy(btn, false); alert('Rebuild error: ' + err); });
 }
 
 function uninitRepo(path, btn) {
@@ -3019,18 +3023,18 @@ function uninitRepo(path, btn) {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ path })
   })
-  .then(res => res.json())
-  .then(res => {
-    if (res.success) {
-      showToast('🗑️ Repository uninitialized.');
-      loadProjects();
-      setBusy(btn, false);
-    } else {
-      setBusy(btn, false);
-      alert('Uninit failed: ' + res.error);
-    }
-  })
-  .catch(err => { setBusy(btn, false); alert('Uninit error: ' + err); });
+    .then(res => res.json())
+    .then(res => {
+      if (res.success) {
+        showToast('🗑️ Repository uninitialized.');
+        loadProjects();
+        setBusy(btn, false);
+      } else {
+        setBusy(btn, false);
+        alert('Uninit failed: ' + res.error);
+      }
+    })
+    .catch(err => { setBusy(btn, false); alert('Uninit error: ' + err); });
 }
 
 function initRepo(path, btn) {
@@ -3041,18 +3045,18 @@ function initRepo(path, btn) {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ path })
   })
-  .then(res => res.json())
-  .then(res => {
-    if (res.success) {
-      showToast(`✅ Index created: ${res.files} files, ${res.nodes} nodes, ${res.edges} links!`);
-      loadProjects();
-      setBusy(btn, false);
-    } else {
-      setBusy(btn, false);
-      alert('Index failed: ' + res.error);
-    }
-  })
-  .catch(err => { setBusy(btn, false); alert('Index error: ' + err); });
+    .then(res => res.json())
+    .then(res => {
+      if (res.success) {
+        showToast(`✅ Index created: ${res.files} files, ${res.nodes} nodes, ${res.edges} links!`);
+        loadProjects();
+        setBusy(btn, false);
+      } else {
+        setBusy(btn, false);
+        alert('Index failed: ' + res.error);
+      }
+    })
+    .catch(err => { setBusy(btn, false); alert('Index error: ' + err); });
 }
 
 // Expandable pending-file list under a repo row (lightweight SyncReview).
@@ -3088,21 +3092,21 @@ function syncAllRepos(btn) {
   setBusy(btn, true, zh ? '⏳ 全域同步中…' : (ja ? '⏳ 一括同期中…' : '⏳ Syncing all…'));
   showToast(zh ? `⏳ 正在同步 ${indexed.length} 個已索引 repo…` : (ja ? `⏳ ${indexed.length} 件のリポジトリを同期中…` : `⏳ Syncing ${indexed.length} indexed repos…`));
   fetch('/api/sync_all', { method: 'POST' })
-  .then(res => res.json())
-  .then(res => {
-    if (res.success) {
-      const t = res.totals || {};
-      showToast(currentLanguage === 'zh'
-        ? `⚡ 全域同步完成：${res.synced} 個 repo，解析 ${t.parsed || 0}，跳過 ${t.skipped || 0}，移除 ${t.removed || 0}`
-        : `⚡ Synced ${res.synced} repos: ${t.parsed || 0} parsed, ${t.skipped || 0} skipped, ${t.removed || 0} removed`);
-      loadProjects();
-      setBusy(btn, false);
-    } else {
-      setBusy(btn, false);
-      alert('Sync all failed: ' + (res.error || 'unknown'));
-    }
-  })
-  .catch(err => { setBusy(btn, false); alert('Sync all error: ' + err); });
+    .then(res => res.json())
+    .then(res => {
+      if (res.success) {
+        const t = res.totals || {};
+        showToast(currentLanguage === 'zh'
+          ? `⚡ 全域同步完成：${res.synced} 個 repo，解析 ${t.parsed || 0}，跳過 ${t.skipped || 0}，移除 ${t.removed || 0}`
+          : `⚡ Synced ${res.synced} repos: ${t.parsed || 0} parsed, ${t.skipped || 0} skipped, ${t.removed || 0} removed`);
+        loadProjects();
+        setBusy(btn, false);
+      } else {
+        setBusy(btn, false);
+        alert('Sync all failed: ' + (res.error || 'unknown'));
+      }
+    })
+    .catch(err => { setBusy(btn, false); alert('Sync all error: ' + err); });
 }
 
 // ─── Document ingest dialog (dir-node "New document": ppt/word/pdf -> LLM -> md) ───
@@ -3467,34 +3471,34 @@ function ingFetchUrl() {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ url })
   })
-  .then(r => r.json())
-  .then(res => {
-    if (res.success && res.data) {
-      const d = res.data;
-      const cleanTitle = (d.title || 'WebPage').replace(/[\\/:*?"<>|]/g, '_').trim();
-      const customFilename = `${cleanTitle}.md`;
-      ingState.picked.push({
-        type: 'url',
-        name: d.title,
-        url: d.url,
-        text: d.text,
-        customFilename,
-        size: d.chars || d.text.length,
-        status: 'picked',
-        summary: '',
-        model: '',
-        error: '',
-        compounding: null
-      });
-      if (inp) inp.value = '';
-      if (ingState.sel < 0) ingState.sel = ingState.picked.length - 1;
-      ingRenderPicked();
-      showToast('✅ ' + (ingState.zh ? `已收錄網址：${d.title}` : `Fetched: ${d.title}`));
-    } else {
-      showToast('❌ ' + (res.error || 'Fetch failed'));
-    }
-  })
-  .catch(err => showToast('❌ ' + err));
+    .then(r => r.json())
+    .then(res => {
+      if (res.success && res.data) {
+        const d = res.data;
+        const cleanTitle = (d.title || 'WebPage').replace(/[\\/:*?"<>|]/g, '_').trim();
+        const customFilename = `${cleanTitle}.md`;
+        ingState.picked.push({
+          type: 'url',
+          name: d.title,
+          url: d.url,
+          text: d.text,
+          customFilename,
+          size: d.chars || d.text.length,
+          status: 'picked',
+          summary: '',
+          model: '',
+          error: '',
+          compounding: null
+        });
+        if (inp) inp.value = '';
+        if (ingState.sel < 0) ingState.sel = ingState.picked.length - 1;
+        ingRenderPicked();
+        showToast('✅ ' + (ingState.zh ? `已收錄網址：${d.title}` : `Fetched: ${d.title}`));
+      } else {
+        showToast('❌ ' + (res.error || 'Fetch failed'));
+      }
+    })
+    .catch(err => showToast('❌ ' + err));
 }
 
 function ingClearPicked() {
@@ -3677,7 +3681,7 @@ function renderIngCompoundTray(comp) {
   tray.innerHTML = html;
 }
 
-window.ingBatchMatched = function(selectAll) {
+window.ingBatchMatched = function (selectAll) {
   const cur = ingCurEntry();
   if (!cur || !cur.compounding) return;
   const matched = cur.compounding.matched || (cur.compounding.matched_concepts || []).map(m => m.name) || [];
@@ -3685,7 +3689,7 @@ window.ingBatchMatched = function(selectAll) {
   renderIngCompoundTray(cur.compounding);
 };
 
-window.ingToggleCompoundPill = function(type, val) {
+window.ingToggleCompoundPill = function (type, val) {
   const cur = ingCurEntry();
   if (!cur) return;
   if (type === 'matched') {
@@ -3826,25 +3830,25 @@ function ingStageAll(done) {
   });
 
   fetch('/api/ingest/upload', { method: 'POST', body: fd })
-  .then(r => r.json())
-  .then(d => {
-    if (d.success && d.files) {
-      const fileMap = {};
-      d.files.forEach(f => { fileMap[f.name] = f.path; });
-      needStage.forEach(e => {
-        if (fileMap[e.name]) { e.stagedPath = fileMap[e.name]; e.status = 'staged'; }
-      });
-      needClipStage.forEach(e => {
-        e.stagedImagePaths = e.images.map(im => fileMap[im.name]).filter(Boolean);
-      });
-      ingRenderPicked();
-      done();
-    } else {
-      if (st._stop) st._stop();
-      ingMsg('❌ ' + ((d && d.error) || 'Upload staging failed'), true);
-    }
-  })
-  .catch(err => { if (st._stop) st._stop(); ingMsg('❌ ' + err, true); });
+    .then(r => r.json())
+    .then(d => {
+      if (d.success && d.files) {
+        const fileMap = {};
+        d.files.forEach(f => { fileMap[f.name] = f.path; });
+        needStage.forEach(e => {
+          if (fileMap[e.name]) { e.stagedPath = fileMap[e.name]; e.status = 'staged'; }
+        });
+        needClipStage.forEach(e => {
+          e.stagedImagePaths = e.images.map(im => fileMap[im.name]).filter(Boolean);
+        });
+        ingRenderPicked();
+        done();
+      } else {
+        if (st._stop) st._stop();
+        ingMsg('❌ ' + ((d && d.error) || 'Upload staging failed'), true);
+      }
+    })
+    .catch(err => { if (st._stop) st._stop(); ingMsg('❌ ' + err, true); });
 }
 
 // Batch: summarize file-by-file / url-by-url / clip-by-clip
@@ -3902,63 +3906,63 @@ function ingSummarizeAll(btn) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(summarizePayload)
       })
-      .then(r => r.json().then(d => ({ status: r.status, body: d })))
-      .then(({ status, body }) => {
-        if (status === 200 && body.success) {
-          e.status = 'done';
-          e.summary = body.summary || '';
-          e.model = body.model || '';
-          e.candidate_images = body.candidate_images || [];
+        .then(r => r.json().then(d => ({ status: r.status, body: d })))
+        .then(({ status, body }) => {
+          if (status === 200 && body.success) {
+            e.status = 'done';
+            e.summary = body.summary || '';
+            e.model = body.model || '';
+            e.candidate_images = body.candidate_images || [];
 
-          // Auto-derive filename from LLM H1 if title was untitled or clipboard
-          const h1Match = e.summary.match(/^#\s+(.+)$/m);
-          if (h1Match && h1Match[1] && (e.type === 'clipboard' || !e.customFilename)) {
-            let h1Clean = h1Match[1].replace(/[\/:*?"<>|]/g, '_').trim();
-            if (h1Clean.toLowerCase().endsWith('.md')) h1Clean = h1Clean.slice(0, -3).trim();
-            e.customFilename = h1Clean;
-          }
-
-          const k = st.picked.indexOf(e);
-          if (k >= 0) { st.sel = k; }
-          const ed0 = document.getElementById('ing-edit');
-          if (ed0) ed0.value = e.summary;
-          paintIngSelName();
-          ingShowTab('prev');
-          ingRenderPicked();
-
-          // Trigger Compound Preview
-          fetch('/api/ingest/compound_preview', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ summary_md: e.summary, repo: st.repo })
-          })
-          .then(cr => cr.json())
-          .then(cd => {
-            if (cd.success && cd.compounding) {
-              e.compounding = cd.compounding;
-              if (st.sel === k) renderIngCompoundTray(e.compounding);
+            // Auto-derive filename from LLM H1 if title was untitled or clipboard
+            const h1Match = e.summary.match(/^#\s+(.+)$/m);
+            if (h1Match && h1Match[1] && (e.type === 'clipboard' || !e.customFilename)) {
+              let h1Clean = h1Match[1].replace(/[\/:*?"<>|]/g, '_').trim();
+              if (h1Clean.toLowerCase().endsWith('.md')) h1Clean = h1Clean.slice(0, -3).trim();
+              e.customFilename = h1Clean;
             }
-          }).catch(() => {});
 
-          ingMsg((zh ? `✅ ${e.name}（${body.model || ''}）` : `✅ ${e.name} (${body.model || ''})`));
-        } else {
+            const k = st.picked.indexOf(e);
+            if (k >= 0) { st.sel = k; }
+            const ed0 = document.getElementById('ing-edit');
+            if (ed0) ed0.value = e.summary;
+            paintIngSelName();
+            ingShowTab('prev');
+            ingRenderPicked();
+
+            // Trigger Compound Preview
+            fetch('/api/ingest/compound_preview', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ summary_md: e.summary, repo: st.repo })
+            })
+              .then(cr => cr.json())
+              .then(cd => {
+                if (cd.success && cd.compounding) {
+                  e.compounding = cd.compounding;
+                  if (st.sel === k) renderIngCompoundTray(e.compounding);
+                }
+              }).catch(() => { });
+
+            ingMsg((zh ? `✅ ${e.name}（${body.model || ''}）` : `✅ ${e.name} (${body.model || ''})`));
+          } else {
+            e.status = 'error';
+            e.error = (body && body.error) || String(status);
+            ingRenderPicked();
+            if (pv0) pv0.textContent = zh ? '（摘要會顯示在這裡）' : '(summary appears here)';
+            ingMsg(`❌ ${e.name}：` + e.error, true);
+          }
+          i++;
+          step();
+        })
+        .catch(err => {
           e.status = 'error';
-          e.error = (body && body.error) || String(status);
+          e.error = String(err);
           ingRenderPicked();
-          if (pv0) pv0.textContent = zh ? '（摘要會顯示在這裡）' : '(summary appears here)';
-          ingMsg(`❌ ${e.name}：` + e.error, true);
-        }
-        i++;
-        step();
-      })
-      .catch(err => {
-        e.status = 'error';
-        e.error = String(err);
-        ingRenderPicked();
-        ingMsg(`❌ ${e.name}：` + err, true);
-        i++;
-        step();
-      });
+          ingMsg(`❌ ${e.name}：` + err, true);
+          i++;
+          step();
+        });
     };
     step();
   });
@@ -4019,32 +4023,32 @@ function ingSave(btn) {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(savePayload)
     })
-    .then(r => r.json().then(d => ({ status: r.status, body: d })))
-    .then(({ status, body }) => {
-      if (status === 200 && body.success) {
-        okCount++;
-        outs.push(outFilename);
-        if (body.compounding) {
-          e.compounding = body.compounding;
-          renderIngCompoundTray(e.compounding);
+      .then(r => r.json().then(d => ({ status: r.status, body: d })))
+      .then(({ status, body }) => {
+        if (status === 200 && body.success) {
+          okCount++;
+          outs.push(outFilename);
+          if (body.compounding) {
+            e.compounding = body.compounding;
+            renderIngCompoundTray(e.compounding);
+          }
+        } else {
+          e.status = 'error';
+          e.error = (body && body.error) || String(status);
+          ingRenderPicked();
+          ingMsg(`❌ ${e.name}：` + e.error, true);
         }
-      } else {
+        i++;
+        step();
+      })
+      .catch(err => {
         e.status = 'error';
-        e.error = (body && body.error) || String(status);
+        e.error = String(err);
         ingRenderPicked();
-        ingMsg(`❌ ${e.name}：` + e.error, true);
-      }
-      i++;
-      step();
-    })
-    .catch(err => {
-      e.status = 'error';
-      e.error = String(err);
-      ingRenderPicked();
-      ingMsg(`❌ ${e.name}：` + err, true);
-      i++;
-      step();
-    });
+        ingMsg(`❌ ${e.name}：` + err, true);
+        i++;
+        step();
+      });
   };
   step();
 }
@@ -4056,16 +4060,16 @@ function excludeRepo(path) {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ path })
   })
-  .then(res => res.json())
-  .then(res => {
-    if (res.success) {
-      showToast('🚫 Repository excluded from view.');
-      loadProjects();
-    } else {
-      alert('Exclude failed: ' + res.error);
-    }
-  })
-  .catch(err => alert('Exclude error: ' + err));
+    .then(res => res.json())
+    .then(res => {
+      if (res.success) {
+        showToast('🚫 Repository excluded from view.');
+        loadProjects();
+      } else {
+        alert('Exclude failed: ' + res.error);
+      }
+    })
+    .catch(err => alert('Exclude error: ' + err));
 }
 
 
@@ -4114,7 +4118,7 @@ function resolveTreeAbsPath(projName, treePath) {
   const root = proj.path.replace(/\\/g, '/').replace(/\/+$/, '');
   if (/^[a-zA-Z]:\//.test(rel)) return rel.replace(/\//g, '\\');
   if (rel.toLowerCase() === root.toLowerCase() ||
-      rel.toLowerCase().startsWith(root.toLowerCase() + '/')) {
+    rel.toLowerCase().startsWith(root.toLowerCase() + '/')) {
     return rel.replace(/\//g, '\\');
   }
   if (rel === projName) rel = '';
@@ -4203,11 +4207,13 @@ function openTreeCtxMenu(e) {
 
   const items = [];
   const addCopyAbs = (label) => {
-    items.push({ label, fn: () => {
-      if (!absPath) { showToast(zh ? '❌ 無路徑可複製' : '❌ No path to copy'); return; }
-      const short = absPath.length > 70 ? '…' + absPath.slice(-69) : absPath;
-      copyTextToClipboard(absPath, `${zh ? '📋 已複製：' : '📋 Copied: '}${short}`);
-    }});
+    items.push({
+      label, fn: () => {
+        if (!absPath) { showToast(zh ? '❌ 無路徑可複製' : '❌ No path to copy'); return; }
+        const short = absPath.length > 70 ? '…' + absPath.slice(-69) : absPath;
+        copyTextToClipboard(absPath, `${zh ? '📋 已複製：' : '📋 Copied: '}${short}`);
+      }
+    });
   };
   if (kind === 'project') {
     if (bIndexed) {
@@ -4218,17 +4224,21 @@ function openTreeCtxMenu(e) {
     }
     // Project root is the only ingest entry when the repo has no subdirs yet
     // (e.g. a freshly added empty directory) — same dialog as dir nodes.
-    items.push({ label: zh ? '＋ 新增文件…' : '＋ New document…', fn: () => {
-      if (typeof openIngestDialog === 'function') openIngestDialog(absPath);
-      else showToast(zh ? '⏳ 文件匯入即將推出' : '⏳ Document ingest coming soon');
-    }});
+    items.push({
+      label: zh ? '＋ 新增文件…' : '＋ New document…', fn: () => {
+        if (typeof openIngestDialog === 'function') openIngestDialog(absPath);
+        else showToast(zh ? '⏳ 文件匯入即將推出' : '⏳ Document ingest coming soon');
+      }
+    });
     items.push({ label: zh ? '📁 新增資料夾…' : '📁 New folder…', fn: () => treeNewFolder(absPath) });
     addCopyAbs(zh ? '📋 複製絕對路徑' : '📋 Copy absolute path');
   } else if (kind === 'dir') {
-    items.push({ label: zh ? '＋ 新增文件…' : (ja ? '＋ 新規ドキュメント…' : '＋ New document…'), fn: () => {
-      if (typeof openIngestDialog === 'function') openIngestDialog(absPath);
-      else showToast(zh ? '⏳ 文件匯入即將推出' : (ja ? '⏳ ドキュメント取り込みは準備中' : '⏳ Document ingest coming soon'));
-    }});
+    items.push({
+      label: zh ? '＋ 新增文件…' : (ja ? '＋ 新規ドキュメント…' : '＋ New document…'), fn: () => {
+        if (typeof openIngestDialog === 'function') openIngestDialog(absPath);
+        else showToast(zh ? '⏳ 文件匯入即將推出' : (ja ? '⏳ ドキュメント取り込みは準備中' : '⏳ Document ingest coming soon'));
+      }
+    });
     items.push({ label: zh ? '📁 新增資料夾…' : (ja ? '📁 新規フォルダ…' : '📁 New folder…'), fn: () => treeNewFolder(absPath) });
     items.push({ label: zh ? '✏️ 重新命名…' : (ja ? '✏️ 名前の変更…' : '✏️ Rename…'), fn: () => treeRenameFile(absPath, treePath.split('/').pop() || treePath) });
     items.push({ label: zh ? '🗑️ 刪除此資料夾…' : (ja ? '🗑️ このフォルダを削除…' : '🗑️ Delete folder…'), fn: () => treeDeleteDir(absPath, treePath.split('/').pop() || treePath) });
@@ -4409,11 +4419,11 @@ function toggleControlsHelp(forceState) {
   } else {
     isControlsHelpOpen = !isControlsHelpOpen;
   }
-  
+
   if (isControlsHelpOpen) {
     modal.classList.remove('hidden');
     updateControlsHelpI18n();
-  updateActivityBarI18n();
+    updateActivityBarI18n();
   } else {
     modal.classList.add('hidden');
   }
@@ -4425,9 +4435,9 @@ function init3DNavControls() {
   if (!pane3D || !canvasElem) return;
 
   pane3D.addEventListener('mouseenter', () => { isMouseIn3DPane = true; });
-  pane3D.addEventListener('mouseleave', () => { 
-    isMouseIn3DPane = false; 
-    navKeys = {}; 
+  pane3D.addEventListener('mouseleave', () => {
+    isMouseIn3DPane = false;
+    navKeys = {};
   });
 
   window.addEventListener('keydown', (e) => {
@@ -4517,7 +4527,7 @@ function navFlightLoop() {
 
       // WASD fly along the view axis & strafe, E up / Q down (screen-relative)
       const hasMovement = navKeys['KeyW'] || navKeys['KeyS'] || navKeys['KeyA'] || navKeys['KeyD'] ||
-                          navKeys['KeyQ'] || navKeys['KeyE'];
+        navKeys['KeyQ'] || navKeys['KeyE'];
 
       if (hasMovement && (isMouseIn3DPane || document.activeElement === document.body)) {
         const isBoost = navKeys['ShiftLeft'] || navKeys['ShiftRight'];
@@ -4533,16 +4543,16 @@ function navFlightLoop() {
         //  with the camera when pitched, horizontal pan at top-down (no zoom-out).
         const right = new THREE.Vector3().crossVectors(dir, camera.up);
         if (right.lengthSq() < 1e-10) {
-            right.copy(lastFlightRight);
+          right.copy(lastFlightRight);
         } else {
-            right.normalize();
-            lastFlightRight.copy(right);
+          right.normalize();
+          lastFlightRight.copy(right);
         }
         const up = new THREE.Vector3().crossVectors(right, dir);
         if (up.lengthSq() < 1e-10) {
-            up.set(0, 1, 0);
+          up.set(0, 1, 0);
         } else {
-            up.normalize();
+          up.normalize();
         }
 
         // Forward / Backward (W / S)
@@ -4715,7 +4725,7 @@ function updateControlsHelpI18n() {
   }
   if (typeof updatePromptsI18n === 'function') {
     updatePromptsI18n();
-  if (typeof updateLintI18n === 'function') updateLintI18n();
+    if (typeof updateLintI18n === 'function') updateLintI18n();
   }
 }
 
@@ -4731,8 +4741,8 @@ function provT(key) {
   const dic = {
     prov_title: lang === 'zh' ? 'LLM 模型供應商' : (lang === 'ja' ? 'LLM プロバイダー' : 'LLM Providers'),
     prov_note: lang === 'zh' ? '此供應商為整支 APP 共用（ingest 摘要、對話與所有 LLM 功能）。'
-              : (lang === 'ja' ? 'このプロバイダーはアプリ全体（Ingest要約、チャット、全LLM機能）で共有されます。'
-              : 'This provider is used by the whole app (ingest, chat, and all LLM features).'),
+      : (lang === 'ja' ? 'このプロバイダーはアプリ全体（Ingest要約、チャット、全LLM機能）で共有されます。'
+        : 'This provider is used by the whole app (ingest, chat, and all LLM features).'),
     prov_cur: lang === 'zh' ? '啟用模型' : (lang === 'ja' ? 'アクティブモデル' : 'Active model'),
     prov_add: lang === 'zh' ? '設定供應商與金鑰' : (lang === 'ja' ? 'プロバイダーとキーの設定' : 'Configure Provider & Key'),
     prov_f_label: lang === 'zh' ? '供應商名稱' : (lang === 'ja' ? 'プロバイダー名' : 'Provider Name'),
@@ -4814,7 +4824,7 @@ function renderProvPresets() {
         cachedOpencodePresets = list;
         rebuildProviderNameDropdown();
       }
-    }).catch(() => {});
+    }).catch(() => { });
 
   rebuildProviderNameDropdown();
 }
@@ -5081,7 +5091,7 @@ function refreshProviderList() {
       for (const p of providers) {
         const row = document.createElement('div');
         row.style.cssText = 'display:flex; gap:8px; align-items:center; border:1px solid #30363d; border-radius:6px; padding:6px 10px; background:#0d1117;';
-        
+
         const label = document.createElement('span');
         label.style.flex = '1';
         label.style.cssText += ' overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:13px; font-weight:500; color:#e6edf3;';
@@ -5117,8 +5127,8 @@ function refreshProviderList() {
             const confirmMsg = (currentLanguage === 'zh' ? `確定要刪除供應商「${p.label || p.id}」嗎？` : `Delete provider "${p.label || p.id}"?`);
             if (!confirm(confirmMsg)) return;
             fetch(`/api/llm/providers/${encodeURIComponent(p.id)}?strLang=${encodeURIComponent(lang)}`, { method: 'DELETE' })
-              .then(() => { 
-                refreshProviderList(); 
+              .then(() => {
+                refreshProviderList();
                 loadProvActiveModel();
                 showToast(currentLanguage === 'zh' ? '🗑️ 已刪除供應商' : '🗑️ Provider deleted');
               })
@@ -5219,7 +5229,7 @@ function loadProvActiveModel() {
         sel.appendChild(group);
       }
       if (!sel.value && sel.options.length) sel.selectedIndex = 0;
-      
+
       const activeVal = sel.value || '';
       const hasModel = !!(activeVal && activeVal.includes(':'));
       gCachedLlmState = { checked: true, hasModel: hasModel, modelInfo: activeVal };
@@ -5271,7 +5281,7 @@ function bindMarkdownInternalLinks(container) {
     if (/\.docgraphical\/tags\//i.test(href)) return;
     // Intercept internal markdown links (.md or #anchor)
     let dec = href;
-    try { dec = decodeURIComponent(href); } catch (e) {}
+    try { dec = decodeURIComponent(href); } catch (e) { }
     if (dec.toLowerCase().endsWith('.md') || dec.includes('.md#') || dec.startsWith('#')) {
       a.style.cursor = 'pointer';
 
@@ -5287,7 +5297,7 @@ function bindMarkdownInternalLinks(container) {
       a.style.color = ballColor;
       a.style.fontWeight = matchedKind === 'file' ? '600' : '500';
 
-      a.onclick = function(e) {
+      a.onclick = function (e) {
         e.preventDefault();
         navigateToMarkdownTarget(dec);
       };
@@ -5300,7 +5310,7 @@ function bindMarkdownInternalLinks(container) {
     const headingText = hEl.textContent.replace(/🔍.*$/, '').trim();
     if (!headingText) return;
     hEl.title = `🎯 Click to drill down into section: "${headingText}"`;
-    hEl.onclick = function(e) {
+    hEl.onclick = function (e) {
       e.stopPropagation();
       const curFile = (viewCtx && viewCtx.file) ? viewCtx.file : (activeNode ? (activeNode.file || activeNode.abs_path || '') : '');
       dispatchUnifiedSelection({ file: curFile, heading: headingText });
@@ -5317,7 +5327,7 @@ function resolveMarkdownImages(container, docFilePath) {
     if (!src) return;
 
     let cleanSrc = src;
-    try { cleanSrc = decodeURIComponent(src); } catch (_) {}
+    try { cleanSrc = decodeURIComponent(src); } catch (_) { }
     cleanSrc = cleanSrc.replace(/^[<"']+|[>"']+$/g, '').trim();
 
     let resolvedUrl = src;
@@ -5328,7 +5338,7 @@ function resolveMarkdownImages(container, docFilePath) {
     }
 
     const caption = (img.getAttribute('alt') || cleanSrc || '查看附圖').trim();
-    
+
     // Create dedicated figure card wrapper
     const fig = document.createElement('figure');
     fig.className = 'doc-image-figure';
@@ -5368,7 +5378,7 @@ function resolveMarkdownImages(container, docFilePath) {
 // 2. Normalizes [ \text{...} ] or [ \frac... ] into $$ ... $$
 function normalizeMarkdownMath(mdText) {
   if (!mdText || typeof mdText !== 'string') return mdText || '';
-  
+
   // Replace standalone bracketed formulas [ \text{...} ] with $$ ... $$
   let res = mdText.replace(/(?:^|\n)\s*\[\s*(\\text\{.*?|\\frac\{.*?)\s*\]\s*(?:\n|$)/g, (m, inner) => {
     return `\n\n$$ ${inner.trim()} $$\n\n`;
@@ -5901,7 +5911,7 @@ function refCrumbHtml(src, optLevel) {
       if (nd.level) nodeLevel = nd.level;
       if (nd.project) proj = nd.project;
     }
-  } catch (e) {}
+  } catch (e) { }
 
   if (p.kind === 'heading') {
     if (nodeLevel != null && nodeLevel > 0) {
@@ -5936,7 +5946,7 @@ function renderLinkedFilesHtml(conceptName, files, zh) {
   files.forEach(f => {
     h += `
       <div style="background:#0d1117; border:1px solid #30363d; border-radius:4px; padding:4px 8px; font-size:13px; display:flex; justify-content:space-between; align-items:center;">
-        <span style="color:#c9d1d9; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:180px; display:flex; align-items:center;" title="${escapeHtml(refCrumbText(f.filePath))}">${(f.filePath||'').startsWith('heading::') ? '<span style="color:#58a6ff; font-weight:700; margin-right:4px;">#</span>' : getDocIconSvg('#f0883e')} <span style="margin-left:3px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${refCrumbHtml(f.filePath)}</span></span>
+        <span style="color:#c9d1d9; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:180px; display:flex; align-items:center;" title="${escapeHtml(refCrumbText(f.filePath))}">${(f.filePath || '').startsWith('heading::') ? '<span style="color:#58a6ff; font-weight:700; margin-right:4px;">#</span>' : getDocIconSvg('#f0883e')} <span style="margin-left:3px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${refCrumbHtml(f.filePath)}</span></span>
         <button class="mini-btn" style="color:#f85149; border-color:#da3633; padding:1px 4px; font-size:10px;" onclick="unlinkConcept('${escapeHtml(conceptName)}', '${escapeHtml(f.filePath)}', event)" title="${zh ? '解除關聯並永久排除' : 'Unlink & Exclude'}">✕</button>
       </div>
     `;
@@ -6263,7 +6273,7 @@ function showCyberPrompt(titleOrOpts, msg, defaultValue, onSubmit, options = {})
     }
   }, 60);
 
-  iEl.onkeydown = function(ev) {
+  iEl.onkeydown = function (ev) {
     if (ev.key === 'Enter') {
       ev.preventDefault();
       closeCyberPrompt(true);
@@ -6365,22 +6375,22 @@ function treeRenameFile(absPath, oldName) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ old_path: absPath, new_name: trimmed })
       })
-      .then(async r => {
-        const data = await r.json();
-        if (r.ok && data.success) {
-          const sCount = (data.renamed_sources || []).length;
-          const sMsg = sCount ? (zh ? `（同步更名 ${sCount} 個關聯檔案）` : ` (${sCount} linked files renamed)`) : '';
-          showToast((zh ? `✅ 檔案已成功更名為「${data.new_name}」` : `✅ Renamed to "${data.new_name}"`) + sMsg);
-          // Immediate in-place refresh of project tree and graph (zero reload needed!)
-          if (typeof loadProjects === 'function') loadProjects({ preserve: true });
-          if (typeof fetchGraphData === 'function') fetchGraphData();
-        } else {
-          showToast(`❌ ${data.error || '重新命名失敗'}`);
-        }
-      })
-      .catch(err => {
-        showToast(`❌ ${err.message}`);
-      });
+        .then(async r => {
+          const data = await r.json();
+          if (r.ok && data.success) {
+            const sCount = (data.renamed_sources || []).length;
+            const sMsg = sCount ? (zh ? `（同步更名 ${sCount} 個關聯檔案）` : ` (${sCount} linked files renamed)`) : '';
+            showToast((zh ? `✅ 檔案已成功更名為「${data.new_name}」` : `✅ Renamed to "${data.new_name}"`) + sMsg);
+            // Immediate in-place refresh of project tree and graph (zero reload needed!)
+            if (typeof loadProjects === 'function') loadProjects({ preserve: true });
+            if (typeof fetchGraphData === 'function') fetchGraphData();
+          } else {
+            showToast(`❌ ${data.error || '重新命名失敗'}`);
+          }
+        })
+        .catch(err => {
+          showToast(`❌ ${err.message}`);
+        });
     }
   });
 }
@@ -6396,7 +6406,7 @@ function unlinkConcept(conceptName, filePath, event) {
   const repo = getActiveRepoPath();
 
   const title = zh ? '⚠ 解除概念標籤關聯確認' : '⚠ Unlink Concept Confirmation';
-  const msg = zh 
+  const msg = zh
     ? `確定要解除「${filePath}」與標籤「${conceptName}」的關聯嗎？
 （僅會解除此文件的關聯，不會影響其他引用檔案）`
     : `Unlink '${filePath}' from tag '${conceptName}'? (Other documents will remain untouched)`;
@@ -6560,7 +6570,7 @@ function onConceptCardClick(name, event) {
         break;
       }
     }
-  } catch (e) {}
+  } catch (e) { }
 
   // 3. Fetch Tag Markdown Page across all active repos!
   fetch(`/api/concepts/tag-page?name=${encodeURIComponent(name)}&repo=${encodeURIComponent(repo)}`)
@@ -6593,7 +6603,7 @@ function renderConceptTagPageInViewer(tagData) {
     if (tagData && tagData.concept && typeof navRecord === 'function') {
       navRecord({ view: 'tag', name: tagData.concept });
     }
-  } catch (e) {}
+  } catch (e) { }
   const dName = document.getElementById('d-name');
   const dSub = document.getElementById('d-sub');
   const badge = document.getElementById('d-kind-badge');
@@ -6614,10 +6624,10 @@ function renderConceptTagPageInViewer(tagData) {
   let fullMd = tagData.content + '\n\n---\n\n### 🔗 關聯文檔引用管理 (Referenced Documents)\n';
   if (!tagData.files || tagData.files.length === 0) {
     fullMd += zh ? '\n*(目前尚無任何文檔引用此概念標籤。可在閱讀文檔時點選頂部「🏷️ + 貼標籤」或於 3D 圖右鍵貼上)*\n'
-                 : '\n*(No documents cite this tag yet. Click "🏷️ + Tag" at the top while reading, or right-click → paste in 3D.)*\n';
+      : '\n*(No documents cite this tag yet. Click "🏷️ + Tag" at the top while reading, or right-click → paste in 3D.)*\n';
   } else {
     fullMd += zh ? '\n| 序號 | 引用檔案路徑 | 提及段落摘要 | 操作 |\n| :--- | :--- | :--- | :--- |\n'
-                 : '\n| # | File | Snippet | Action |\n| :--- | :--- | :--- | :--- |\n';
+      : '\n| # | File | Snippet | Action |\n| :--- | :--- | :--- | :--- |\n';
     tagData.files.forEach((f, idx) => {
       fullMd += `| ${idx + 1} | ${refCrumbHtml(f.filePath)} | ${f.snippet ? f.snippet.replace(/\|/g, '/') : (zh ? '(章節內文)' : '(Section body)')} | <button class="mini-btn" style="color:#f85149; border-color:#da3633; padding:3px 12px; font-weight:600; white-space:nowrap; min-width:54px; display:inline-block;" onclick="unlinkConcept('${tagData.concept}', '${f.filePath}', event)">${zh ? '解除' : (ja ? '解除' : 'Unlink')}</button> |\n`;
     });
@@ -6685,7 +6695,7 @@ function openAttachDocumentToConceptModal(conceptName) {
     sel.innerHTML = '';
     const nodes = (rawData && rawData.nodes) ? rawData.nodes : [];
     const docNodes = nodes.filter(n => n.kind === 'file' || n.kind === 'heading_1' || n.kind === 'heading_2');
-    
+
     // Group by file
     const fileGroups = {};
     docNodes.forEach(n => {
@@ -6868,7 +6878,7 @@ function submitTaggerModal() {
       }
       if (data.ok) {
         closeTaggerModal();
-        const msg = heading 
+        const msg = heading
           ? (zh ? `✅ 已成功為「${heading}」貼上「${chosenConcept}」！` : `✅ Attached '${chosenConcept}' to '${heading}'!`)
           : (zh ? `✅ 已成功為「${filePath}」貼上「${chosenConcept}」！` : `✅ Attached '${chosenConcept}' to '${filePath}'!`);
         showToast(msg);
@@ -6965,9 +6975,9 @@ function renderScanScopeBox() {
     const total = indexedMd.length + pendingMd.length;
     h += `<div style="border:1px solid ${isOn ? '#1f6feb' : '#21262d'};border-radius:8px;padding:9px 10px;background:${isOn ? '#0d1a2e' : '#161b22'};">`;
     h += `<div style="display:flex;align-items:center;gap:8px;font-size:14px;font-weight:700;color:${isOn ? '#58a6ff' : '#c9d1d9'};">`
-       + `<input type="checkbox" data-scope-proj="${escapeHtml(p.name)}" ${isOn ? 'checked' : ''} disabled style="margin:0;flex-shrink:0;width:15px;height:15px;opacity:0.85;" />`
-       + `<span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escapeHtml(p.name)}</span>`
-       + `<span style="margin-left:auto;font-size:13px;color:#8b949e;font-weight:500;flex-shrink:0;">${total} ${zh ? '個 md' : (ja ? '件のmd' : 'md')}</span></div>`;
+      + `<input type="checkbox" data-scope-proj="${escapeHtml(p.name)}" ${isOn ? 'checked' : ''} disabled style="margin:0;flex-shrink:0;width:15px;height:15px;opacity:0.85;" />`
+      + `<span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escapeHtml(p.name)}</span>`
+      + `<span style="margin-left:auto;font-size:13px;color:#8b949e;font-weight:500;flex-shrink:0;">${total} ${zh ? '個 md' : (ja ? '件のmd' : 'md')}</span></div>`;
     if (!total) {
       h += `<div style="font-size:13px;color:#8b949e;margin-top:6px;">${zh ? '（無 .md 檔案）' : (ja ? '（.md ファイルなし）' : '(no .md files)')}</div>`;
     } else {
@@ -7122,7 +7132,7 @@ function scanPaintConfirm() {
   btn.textContent = zh ? '確認收錄' : 'Confirm';
 }
 // Fires one dry-run round; results APPEND below previous rounds.
-  function conceptScanStart() {
+function conceptScanStart() {
   const zh = (typeof currentLanguage !== 'undefined' && currentLanguage === 'zh');
   const o = document.getElementById('scan-opt-overlay');
   if (!o || !scanDlg || scanDlg.busy) return;
@@ -7186,7 +7196,7 @@ function scanPaintConfirm() {
       if (prog) prog.style.display = 'none';
     };
     const snap = (extra) => {
-      try { window.__crawlLast = Object.assign({ run: CS.run, spent: CS.spent, files: CS.files, title: CS.title || '' }, extra || {}); } catch (e) {}
+      try { window.__crawlLast = Object.assign({ run: CS.run, spent: CS.spent, files: CS.files, title: CS.title || '' }, extra || {}); } catch (e) { }
     };
     const fail = (msg) => {
       restore();
@@ -7246,7 +7256,7 @@ function scanPaintConfirm() {
           if (CS.steps > 0 && CS.pushed === 0) facts.push(zh ? '沿邊 0 新節點' : '0 new nodes from expansion');
           if (CS.files > 0) facts.push(zh ? `讀 ${CS.files} 檔都判無關` : `${CS.files} file(s) read, all unrelated`);
           const why0 = zh ? `種子「${seedText}」：${facts.join('，') || '無暫存'}。換段種子再摸。`
-                          : `Seed "${seedText}": ${facts.join(', ') || 'nothing staged'}. Try another seed.`;
+            : `Seed "${seedText}": ${facts.join(', ') || 'nothing staged'}. Try another seed.`;
           line(`<b style="color:#e3b341;">${zh ? '◇ 本輪沒挖到：' : '◇ Empty round: '}</b>${escapeHtml(why0)}`);
           // Empty round: no title, no confirm (bottom bar stays clean).
           scanDlg.vineKept = []; scanDlg.vineRun = null;
@@ -7368,8 +7378,10 @@ function scanPaintConfirm() {
     // Explorer tree + the dialog's scope panel). Empty selection falls
     // back to the active repo; the server fans out over the comma list
     // with the shared budget.
-    body: JSON.stringify({ mode, max_new: maxNew, min_tf: minTf, dry_run: true, exclude: seen,
-      repo: (typeof getActiveReposParam === 'function') ? getActiveReposParam() : '' })
+    body: JSON.stringify({
+      mode, max_new: maxNew, min_tf: minTf, dry_run: true, exclude: seen,
+      repo: (typeof getActiveReposParam === 'function') ? getActiveReposParam() : ''
+    })
   })
     .then(r => r.json())
     .then(d => {
@@ -7381,9 +7393,11 @@ function scanPaintConfirm() {
       if (d && d.ok && got.length) {
         got.forEach(x => {
           if (!scanDlg.items.some(e => e.term === x.term)) {
-            scanDlg.items.push({ term: x.term, df: x.df || 0, tf: x.tf || 0,
+            scanDlg.items.push({
+              term: x.term, df: x.df || 0, tf: x.tf || 0,
               files: x.files || [], reason: x.reason || '', repo: x.repo || '',
-              checked: true, rejected: false });
+              checked: true, rejected: false
+            });
           }
         });
       } else if (d && d.ok) {
@@ -7447,7 +7461,7 @@ function vineConfirmGo() {
   }).then(r => r.json()).then(d => {
     if (d && d.ok) {
       showToast(zh ? `已進候選池：${d.title}` : `Candidate: ${d.title}`);
-      try { window.__crawlLast = Object.assign(window.__crawlLast || {}, { confirmed: d.title }); } catch (e) {}
+      try { window.__crawlLast = Object.assign(window.__crawlLast || {}, { confirmed: d.title }); } catch (e) { }
       o.remove();
       scanDlg = null;
       if (typeof fetchConceptsData === 'function') fetchConceptsData();
@@ -7495,7 +7509,7 @@ function conceptScanConfirm() {
         scanDlg = null;
         const nApproved = new Set(d.approved || []).size;
         showToast(zh ? `已收錄 ${nApproved} 個，黑名單 ${d.rejected.length} 個`
-                     : `Approved ${nApproved}, blacklisted ${d.rejected.length}`);
+          : `Approved ${nApproved}, blacklisted ${d.rejected.length}`);
         if (typeof fetchConceptsData === 'function') fetchConceptsData();
         if (typeof switchConceptSubTab === 'function') switchConceptSubTab('candidates');
       } else {
@@ -7506,12 +7520,22 @@ function conceptScanConfirm() {
 }
 
 function openEditConceptModal(name, category, aliases, event) {
-  if (event) event.stopPropagation();
+  if (event) {
+    try { event.stopPropagation(); } catch (e) {}
+  }
+  if (name && typeof onConceptCardClick === 'function') {
+    onConceptCardClick(name);
+  }
   openConceptActionModal('edit', { name, category, aliases });
 }
 
 function openMergeConceptModal(sourceName, event) {
-  if (event) event.stopPropagation();
+  if (event) {
+    try { event.stopPropagation(); } catch (e) {}
+  }
+  if (sourceName && typeof onConceptCardClick === 'function') {
+    onConceptCardClick(sourceName);
+  }
   openConceptActionModal('merge', { sourceName });
 }
 
@@ -7554,7 +7578,7 @@ function openCandidatePage(name, source, ev) {
     window.__candName = name;
     window.__candSource = source || '';
     window.__candGroups = [];
-  } catch (e) {}
+  } catch (e) { }
 
   // 1. Ensure left drawer is on Concepts tab and 'candidates' subtab
   if (typeof switchActivityTab === 'function') switchActivityTab('concepts', true);
@@ -7575,7 +7599,7 @@ function openCandidatePage(name, source, ev) {
   const draftUrl = `/api/concepts/candidates/draft?repo=${encodeURIComponent(repo)}&name=${encodeURIComponent(name)}`;
   const evP = !isVine
     ? fetch(repo ? `/api/concepts/scan/evidence?repo=${encodeURIComponent(repo)}` : '/api/concepts/scan/evidence')
-        .then(r => r.json()).then(ev => ((ev && ev.evidence) || {})[name] || null).catch(() => null)
+      .then(r => r.json()).then(ev => ((ev && ev.evidence) || {})[name] || null).catch(() => null)
     : Promise.resolve(null);
   fetch(draftUrl)
     .then(r => r.json()).then(d => {
@@ -7596,7 +7620,7 @@ function openCandidatePage(name, source, ev) {
           if (!g.head && r.heading && r.line) g.head = r;
         });
         try { window.__candGroups = groups.map(g => ({ file: g.file, mention: g.mention })); }
-        catch (e) {}
+        catch (e) { }
         renderCandidatePageInViewer({ concept: name, source: source, repo: repo, groups, evd });
       });
     }).catch(err => {
@@ -7623,7 +7647,7 @@ function renderCandidatePageInViewer(p) {
     if (name && typeof navRecord === 'function') {
       navRecord({ view: 'candidate', name: name, source: isVine ? 'vine' : 'prospect' });
     }
-  } catch (e) {}
+  } catch (e) { }
   if (dName) dName.innerText = zh ? `🏷️ ${name}（候選審核）` : (ja ? `🏷️ ${name}（候補プレビュー）` : `🏷️ ${name} (Candidate)`);
   if (dSub) dSub.innerText = `${repoTail} · ${p.groups === null ? '…' : groups.length} ${zh ? '處落點' : 'spots'} · ${zh ? '來源' : 'Source'} ${srcLabel}`;
   if (badge) {
@@ -7667,7 +7691,7 @@ function renderCandidatePageInViewer(p) {
       + `<div style="font-size:12px;color:#c9d1d9;"><code>&gt; 🏷️ ${zh ? '標籤' : 'tag'}： [${escName}](.docgraphical/tags/${escName}.md)</code></div>`
       + `</div>\n`;
     fullMd += zh ? '\n| 引用檔案路徑 | 提及段落摘要 | 操作 |\n| :--- | :--- | :--- |\n'
-                 : '\n| File | Snippet | Action |\n| :--- | :--- | :--- |\n';
+      : '\n| File | Snippet | Action |\n| :--- | :--- | :--- |\n';
     groups.forEach((g, gi) => {
       const h = g.head || {};
       const crumb = (h.heading && h.line)
@@ -7784,49 +7808,6 @@ function openCardRefresh(term) {
   document.body.appendChild(o);
   o.addEventListener('click', (ev) => { if (ev.target === o) o.remove(); });
 }
-
-// Interactive Dialog when Prospect or Vine discovers 0 new spots
-function openEmptyResultDialog(how, term, detail = {}) {
-  const zh = currentLanguage === 'zh';
-  const existing = document.getElementById('refresh-empty-modal');
-  if (existing) existing.remove();
-
-  const o = document.createElement('div');
-  o.id = 'refresh-empty-modal';
-  o.className = 'modal-overlay';
-  o.style.cssText = 'position:fixed;inset:0;z-index:1000007;background:rgba(0,0,0,0.75);display:flex;align-items:center;justify-content:center;backdrop-filter:blur(3px);';
-
-  const typeName = how === 'prospect' ? (zh ? '⛏ 探礦重算' : 'Prospect Recount') : (zh ? '🌿 順藤深挖' : 'Vine Deep Crawl');
-  const spentText = detail.spent ? (zh ? `（本次深度分析共呼叫 LLM ${detail.spent} 次）` : ` (${detail.spent} LLM calls used)`) : '';
-  const msgTitle = zh ? `${typeName}探索報告` : `${typeName} Report`;
-  
-  const msgBody = zh 
-    ? `已完成對概念「<b>${escapeHtml(term)}</b>」的全庫探測掃描。<br><br>` +
-      `<span style="color:#8b949e;">全庫所有文檔中出現的該詞彙或相關章節，<b>均已存在於當前的引用關聯或標籤中</b>，本次未發現額外的全新落點。${spentText}</span>`
-    : `Completed repository inspection for concept "<b>${escapeHtml(term)}</b>".<br><br>` +
-      `<span style="color:#8b949e;">All mentions and related sections are <b>already linked</b>. No additional unlinked references found.${spentText}</span>`;
-
-  o.innerHTML = `
-    <div style="background:#161b22;border:1px solid #30363d;border-radius:12px;width:480px;max-width:92vw;box-shadow:0 24px 60px rgba(0,0,0,0.85);display:flex;flex-direction:column;overflow:hidden;">
-      <div style="padding:14px 20px;border-bottom:1px solid #30363d;display:flex;justify-content:space-between;align-items:center;background:#0d1117;">
-        <div style="display:flex;align-items:center;gap:8px;">
-          <span style="font-size:17px;">ℹ️</span>
-          <span style="font-weight:600;font-size:15px;color:#e6edf3;">${msgTitle}</span>
-        </div>
-        <button onclick="document.getElementById('refresh-empty-modal').remove()" style="background:transparent;border:none;color:#8b949e;cursor:pointer;font-size:16px;">✕</button>
-      </div>
-      <div style="padding:22px 20px;font-size:14px;line-height:1.6;color:#c9d1d9;">
-        ${msgBody}
-      </div>
-      <div style="padding:12px 20px;border-top:1px solid #30363d;background:#0d1117;display:flex;justify-content:flex-end;">
-        <button onclick="document.getElementById('refresh-empty-modal').remove()" style="background:#238636;color:#fff;border:none;padding:7px 18px;border-radius:6px;font-weight:600;font-size:13px;cursor:pointer;">${zh ? '知道了' : 'Got it'}</button>
-      </div>
-    </div>
-  `;
-  document.body.appendChild(o);
-  o.addEventListener('click', (ev) => { if (ev.target === o) o.remove(); });
-}
-
 // Interactive Review Dialog for Prospect recount and Vine dig results
 function openRefreshResultReviewDialog(how, term, items, extraInfo = {}) {
   const zh = currentLanguage === 'zh';
@@ -7872,7 +7853,7 @@ function openRefreshResultReviewDialog(how, term, items, extraInfo = {}) {
     existingCount = (typeof activeConceptLinkedFiles !== 'undefined' && activeConceptLinkedFiles[term])
       ? activeConceptLinkedFiles[term].length
       : existingTargets.size;
-  } catch(e) {}
+  } catch (e) { }
 
   // Filter out internal system and tag files defensively
   const filtered = (items || []).filter(it => {
@@ -7907,10 +7888,10 @@ function openRefreshResultReviewDialog(how, term, items, extraInfo = {}) {
     const h = (it.heading || '').trim();
     const line = it.line || 1;
     const snip = (it.snippet || it.term || it.mention || '').trim();
-    
+
     // Group key: each heading under a file is ONE distinct link target
     const targetKey = h ? `${f}::${h}` : `${f}::L${line}`;
-    
+
     if (sectionMap.has(targetKey)) {
       const existing = sectionMap.get(targetKey);
       if (snip && !existing.snippets.includes(snip)) {
@@ -7941,15 +7922,15 @@ function openRefreshResultReviewDialog(how, term, items, extraInfo = {}) {
   }));
 
   if (normalized.length === 0) {
-    if (o) o.remove();
-    openEmptyResultDialog(how, term, { ...extraInfo, existingCount });
+    showToast(zh ? `「${term}」：目前所有挖掘落點均已存在於引用關聯中，無額外新落點！`
+      : `"${term}": All references are already linked!`);
     return;
   }
 
   const subHeaderNote = zh
     ? (existingCount > 0
-        ? `本次發掘 <b>${normalized.length}</b> 處新引用落點（目前文檔已存在 <b>${existingCount}</b> 處關聯）。請勾選欲套用的新落點：`
-        : `本次共發掘 <b>${normalized.length}</b> 處引用落點。請勾選欲建立關聯的項目：`)
+      ? `本次發掘 <b>${normalized.length}</b> 處新引用落點（目前文檔已存在 <b>${existingCount}</b> 處關聯）。請勾選欲套用的新落點：`
+      : `本次共發掘 <b>${normalized.length}</b> 處引用落點。請勾選欲建立關聯的項目：`)
     : `Discovered <b>${normalized.length}</b> references${existingCount > 0 ? ` (${existingCount} existing links)` : ''}. Choose items to link:`;
 
   o.innerHTML = `
@@ -8005,7 +7986,7 @@ function openRefreshResultReviewDialog(how, term, items, extraInfo = {}) {
   o.addEventListener('click', (ev) => { if (ev.target === o) o.remove(); });
 }
 
-window.updateRefreshReviewCount = function() {
+window.updateRefreshReviewCount = function () {
   const zh = currentLanguage === 'zh';
   const all = document.querySelectorAll('.rf-item-check');
   const checked = document.querySelectorAll('.rf-item-check:checked');
@@ -8015,7 +7996,7 @@ window.updateRefreshReviewCount = function() {
   }
 };
 
-window.confirmRefreshReviewSelection = function(how, term) {
+window.confirmRefreshReviewSelection = function (how, term) {
   const zh = currentLanguage === 'zh';
   const checked = [...document.querySelectorAll('.rf-item-check:checked')].map(cb => ({
     refId: cb.dataset.refid,
@@ -8044,7 +8025,7 @@ window.confirmRefreshReviewSelection = function(how, term) {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ repo, name: term, filePath: targetPath, rewriteDisk: true })
         });
-      } catch (e) {}
+      } catch (e) { }
     }
 
     // 2. Process checked attaches sequentially to prevent disk write collisions on the same file!
@@ -8055,7 +8036,7 @@ window.confirmRefreshReviewSelection = function(how, term) {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ repo, name: term, filePath: item.filePath, heading: item.heading })
         });
-      } catch (e) {}
+      } catch (e) { }
     }
 
     if (modal) modal.remove();
@@ -8087,11 +8068,11 @@ function cardRefreshGo(how, term) {
         <div>
           <div style="font-weight:700;font-size:15px;color:${isVine ? '#3fb950' : '#e3b341'};">
             ${isVine ? (zh ? `🌿 順藤深挖中：「${escapeHtml(term)}」` : `🌿 Digging "${escapeHtml(term)}"...`)
-                     : (zh ? `⛏ 探礦重算中：「${escapeHtml(term)}」` : `⛏ Recounting "${escapeHtml(term)}"...`)}
+        : (zh ? `⛏ 探礦重算中：「${escapeHtml(term)}」` : `⛏ Recounting "${escapeHtml(term)}"...`)}
           </div>
           <div style="font-size:12.5px;color:#8b949e;margin-top:5px;line-height:1.5;">
             ${isVine ? (zh ? '正在遍歷正文節點並呼叫 LLM 進行深度關聯探勘...<br>完成時將自動接續彈出審核清單，請稍候。' : 'Traversing document nodes with LLM calls...<br>Review dialog will pop up upon completion.')
-                     : (zh ? '正在重新統計詞頻並校驗落點...<br>完成時將自動接續彈出審核清單。' : 'Recounting frequencies and verifying references...')}
+        : (zh ? '正在重新統計詞頻並校驗落點...<br>完成時將自動接續彈出審核清單。' : 'Recounting frequencies and verifying references...')}
           </div>
         </div>
       </div>
@@ -8110,7 +8091,7 @@ function cardRefreshGo(how, term) {
         if (d && d.ok) {
           const files = d.files || [];
           const cntTxt = zh ? `「${term}」：出現 ${d.df || 0} 檔·${d.tf || 0} 次`
-                            : `"${term}": ${d.df || 0} docs·${d.tf || 0} hits`;
+            : `"${term}": ${d.df || 0} docs·${d.tf || 0} hits`;
           showToast(cntTxt);
           if (files.length > 0) {
             // Guarantee fresh activeConceptLinkedFiles before opening review dialog
@@ -8121,7 +8102,7 @@ function cardRefreshGo(how, term) {
                   activeConceptLinkedFiles[term] = tpData.files || [];
                 }
               })
-              .catch(() => {})
+              .catch(() => { })
               .finally(() => {
                 openRefreshResultReviewDialog('prospect', term, files, d);
               });
@@ -8142,7 +8123,7 @@ function cardRefreshGo(how, term) {
 
   // Vine: PURE refresh - re-crawl seeded by this title
   showToast(zh ? `🌿 深度探索「${term}」關聯中（需呼叫 LLM，完成時彈出審核清單）`
-               : `🌿 Digging "${term}" (LLM calls, review dialog pops up on done)`);
+    : `🌿 Digging "${term}" (LLM calls, review dialog pops up on done)`);
   fetch('/api/crawl/refresh', {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ repo, name: term })
@@ -8154,7 +8135,7 @@ function cardRefreshGo(how, term) {
         const items = d.new_items || d.all_items || [];
         if (items.length > 0) {
           showToast(zh ? `「${term}」深度探索完成！已挖出 ${items.length} 處落點`
-                       : `"${term}" dig completed! Found ${items.length} references`);
+            : `"${term}" dig completed! Found ${items.length} references`);
           openRefreshResultReviewDialog('vine', term, items, d);
         } else {
           openEmptyResultDialog('vine', term, d);
@@ -8321,7 +8302,7 @@ function loadImageSettings() {
         applyImageSettingsToForm(d.settings);
       }
     })
-    .catch(() => {});
+    .catch(() => { });
 }
 
 function applyImageSettingsToForm(s) {
@@ -8423,7 +8404,7 @@ function toggleLanguage() {
 }
 
 function applyAppLanguage() {
-  try { localStorage.setItem('docgraph_language', currentLanguage); } catch(e) {}
+  try { localStorage.setItem('docgraph_language', currentLanguage); } catch (e) { }
   const b = document.getElementById('btn-lang');
   if (b) {
     if (currentLanguage === 'en') b.textContent = 'Language: EN';
@@ -8453,7 +8434,7 @@ function applyAppLanguage() {
   }
 
   const msg = currentLanguage === 'zh' ? '語系切換：繁體中文'
-            : (currentLanguage === 'ja' ? '言語を切り替えました：日本語' : 'Language switched to English');
+    : (currentLanguage === 'ja' ? '言語を切り替えました：日本語' : 'Language switched to English');
   showToast(msg);
 }
 
@@ -8509,8 +8490,8 @@ function updateGlobalUIElementsI18n() {
   // Tagger Modal
   set('tagger-modal-title', zh ? '🏷️ 貼標籤 (Attach Concept Tag)' : (ja ? '🏷️ タグ付け (Attach Concept Tag)' : '🏷️ Attach Concept Tag'));
   set('tagger-hint', zh ? '為當前文件或指定章節貼上正式概念標籤，建立精確知識圖譜關聯。'
-                        : (ja ? '現在のファイルまたは見出しに公式概念タグを付与し、ナレッジグラフに関連付けます。'
-                        : 'Attach official concept tag to current document or section to link knowledge graph.'));
+    : (ja ? '現在のファイルまたは見出しに公式概念タグを付与し、ナレッジグラフに関連付けます。'
+      : 'Attach official concept tag to current document or section to link knowledge graph.'));
   set('lbl-tagger-target', zh ? '目標對象 (Target)' : (ja ? '対象 (Target)' : 'Target'));
   set('lbl-tagger-concept', zh ? '選擇要貼上的概念標籤 (Select Concept)' : (ja ? '付与する概念タグを選択 (Select Concept)' : 'Select Concept'));
   set('btn-tagger-cancel', zh ? '取消' : (ja ? 'キャンセル' : 'Cancel'));
@@ -8541,8 +8522,8 @@ function updateSettingsModalI18n() {
   // Repo Page
   set('lbl-modal-title', lang === 'zh' ? '專案儲存庫管理' : (lang === 'ja' ? 'リポジトリ管理' : 'Repository Management'));
   set('lbl-modal-sub', lang === 'zh' ? '掃描本機專案目錄，構建索引 (init)、增量同步 (sync)、全量重建 (index) 或反初始化 (uninit)。'
-                     : (lang === 'ja' ? 'ローカルプロジェクトをスキャンし、インデックス構築(init)、増分同期(sync)、完全再構築(index)を行います。'
-                     : 'Scan local project directories, build index (init), incremental sync (sync), full rebuild (index), or uninitialize (uninit).'));
+    : (lang === 'ja' ? 'ローカルプロジェクトをスキャンし、インデックス構築(init)、増分同期(sync)、完全再構築(index)を行います。'
+      : 'Scan local project directories, build index (init), incremental sync (sync), full rebuild (index), or uninitialize (uninit).'));
   set('lbl-add-dir', lang === 'zh' ? '掃描專案目錄：' : (lang === 'ja' ? 'プロジェクトディレクトリをスキャン：' : 'Scan Project Directory:'));
   set('lbl-repo-list', lang === 'zh' ? '已發現的專案儲存庫：' : (lang === 'ja' ? '検出されたリポジトリ：' : 'Discovered Repositories:'));
   set('btn-sync-all', lang === 'zh' ? '⚡ 全部同步' : (lang === 'ja' ? '⚡ すべて同期' : '⚡ Sync all'));
@@ -8558,8 +8539,8 @@ function updateSettingsModalI18n() {
   // Language Page
   set('lbl-lang-page-title', lang === 'zh' ? '顯示語言設定' : (lang === 'ja' ? '表示言語の設定' : 'Display Language'));
   set('lbl-lang-page-desc', lang === 'zh' ? '選擇您偏好的介面顯示語言，系統將即時動態刷新全部介面。'
-                          : (lang === 'ja' ? '希望するUI表示言語を選択してください。即座に適用されます。'
-                          : 'Select your preferred user interface language. System will update dynamically.'));
+    : (lang === 'ja' ? '希望するUI表示言語を選択してください。即座に適用されます。'
+      : 'Select your preferred user interface language. System will update dynamically.'));
 
   // LLM Page
   renderProvDialogLabels();
@@ -8569,8 +8550,8 @@ function updateSettingsModalI18n() {
   set('stg-lbl-image', lang === 'zh' ? '圖片擷取' : (lang === 'ja' ? '画像取り込み' : 'Image Ingest'));
   set('lbl-imgstg-title', lang === 'zh' ? '圖片附件擷取與過濾設定' : (lang === 'ja' ? '添付画像取り込み・フィルター設定' : 'Image Ingest & Noise Filtering'));
   set('lbl-imgstg-desc', lang === 'zh' ? '自訂 PDF、PPTX、Word 與圖片入庫時的硬體特徵與資訊量過濾漏斗，過濾裝飾線條與純色圖標。'
-                       : (lang === 'ja' ? 'PDF、PPTX、Word からの画像抽出時に、装飾線や単色アイコンを除外するフィルター閾値を設定します。'
-                       : 'Configure hardware-level feature & entropy filter thresholds for images extracted from PDF/PPTX/Word.'));
+    : (lang === 'ja' ? 'PDF、PPTX、Word からの画像抽出時に、装飾線や単色アイコンを除外するフィルター閾値を設定します。'
+      : 'Configure hardware-level feature & entropy filter thresholds for images extracted from PDF/PPTX/Word.'));
   set('lbl-imgstg-geom-title', lang === 'zh' ? '尺寸與長寬比過濾 (Geometry)' : (lang === 'ja' ? 'サイズ・アスペクト比フィルター (Geometry)' : 'Geometry & Aspect Ratio Filters'));
   set('lbl-imgstg-minw', lang === 'zh' ? '最小寬度 (Min Width px)' : (lang === 'ja' ? '最小幅 (Min Width px)' : 'Min Width (px)'));
   set('lbl-imgstg-minw-hint', lang === 'zh' ? '過濾小按鈕與圖標 (預設 200)' : (lang === 'ja' ? '小さなボタンやアイコンを除外 (初期値 200)' : 'Filter tiny buttons & icons (default 200)'));
@@ -8598,15 +8579,15 @@ function updateActivityBarI18n() {
   const setAttr = (id, attr, txt) => { const el = document.getElementById(id); if (el) el.setAttribute(attr, txt); };
 
   const tipExplorer = lang === 'zh' ? '文件瀏覽器 (Explorer)'
-                    : (lang === 'ja' ? 'ファイルエクスプローラー (Explorer)' : 'File Explorer (Explorer)');
+    : (lang === 'ja' ? 'ファイルエクスプローラー (Explorer)' : 'File Explorer (Explorer)');
   const tipConcepts = lang === 'zh' ? '概念標籤管理 (Concepts Registry)'
-                    : (lang === 'ja' ? 'コンセプト管理 (Concepts Registry)' : 'Concepts Registry (Concepts)');
+    : (lang === 'ja' ? 'コンセプト管理 (Concepts Registry)' : 'Concepts Registry (Concepts)');
   const tipLint = lang === 'zh' ? '文庫體檢與治理 (Linting & Governance)'
-                    : (lang === 'ja' ? 'ナレッジ検証とガバナンス (Linting & Governance)' : 'Knowledge Linting & Governance (Linting)');
+    : (lang === 'ja' ? 'ナレッジ検証とガバナンス (Linting & Governance)' : 'Knowledge Linting & Governance (Linting)');
   const tipPrompts = lang === 'zh' ? '提示詞管理 (Prompts Manager)'
-                    : (lang === 'ja' ? 'プロンプト管理 (Prompts Manager)' : 'Prompts Manager (Prompts)');
+    : (lang === 'ja' ? 'プロンプト管理 (Prompts Manager)' : 'Prompts Manager (Prompts)');
   const tipSettings = lang === 'zh' ? '系統設定 (Settings)'
-                    : (lang === 'ja' ? 'システム設定 (Settings)' : 'System Settings (Settings)');
+    : (lang === 'ja' ? 'システム設定 (Settings)' : 'System Settings (Settings)');
 
   setAttr('act-tab-explorer', 'title', tipExplorer);
   setAttr('act-tab-concepts', 'title', tipConcepts);
@@ -8628,7 +8609,7 @@ function checkLlmGuidanceState(callback) {
       try { saved = JSON.parse(localStorage.getItem('docgraphical-llm-model') || 'null'); } catch (e) { /* ignore */ }
       const model = (saved && saved.model) || current.model || '';
       const provider = (saved && saved.provider) || current.provider || '';
-      
+
       const hasModel = !!(model && model.trim() && model !== 'None' && model !== 'null');
       gCachedLlmState = {
         checked: true,
@@ -8650,7 +8631,7 @@ function updateOnboardingGuidance() {
 
   // 1. Repo Status: Has any repo been discovered / created?
   const hasRepos = Array.isArray(allProjectsList) && allProjectsList.length > 0;
-  
+
   // Count empty repos (repos with 0 effective markdown files, e.g. empty or only DOC_CATALOG.md)
   let emptyRepoCount = 0;
   if (hasRepos) {
@@ -8663,16 +8644,16 @@ function updateOnboardingGuidance() {
   // Update Settings Tab 1: Repo badge & Browse button
   const badgeStgRepo = document.getElementById('badge-stg-repo-alert');
   const btnBrowse = document.getElementById('btn-browse-folder');
-  
-  const repoAlertTip = zh 
+
+  const repoAlertTip = zh
     ? '尚未建立任何專案儲存庫！請於右側透過 Browse 選取目錄並 Scan'
     : (ja ? 'リポジトリが設定されていません！右側の Browse からフォルダを選択して Scan してください'
-          : 'No repository configured! Please Browse to select a folder and Scan');
-  
+      : 'No repository configured! Please Browse to select a folder and Scan');
+
   const browseAlertTip = zh
     ? '⚠️ 尚未設定儲存庫！請點擊此處選取本機專案目錄，選取後點擊 Scan 建立'
     : (ja ? '⚠️ リポジトリが未設定です！ここをクリックしてフォルダを選択し、Scan してください'
-          : '⚠️ No repository configured! Click here to select a project folder, then click Scan');
+      : '⚠️ No repository configured! Click here to select a project folder, then click Scan');
 
   if (badgeStgRepo) {
     if (!hasRepos) {
@@ -8702,7 +8683,7 @@ function updateOnboardingGuidance() {
   const llmAlertTip = zh
     ? '尚未設定預設 LLM 模型！請設定 Provider API Key 並選取預設模型'
     : (ja ? 'LLM モデルが設定されていません！Provider とデフォルトモデルを設定してください'
-          : 'Default LLM model not configured! Please configure Provider API Key & select model');
+      : 'Default LLM model not configured! Please configure Provider API Key & select model');
 
   const updateLlmBadgeUI = (llmState) => {
     if (badgeStgLlm) {
@@ -8731,7 +8712,7 @@ function updateOnboardingGuidance() {
       if (missingItems.length > 0) {
         badgeSettings.style.display = 'block';
         badgeSettings.textContent = '!';
-        const settingsAlertTip = (zh ? '⚠️ 系統尚未配置完成：\n• ' : (ja ? '⚠️ システム設定が未完了です：\n• ' : '⚠️ System setup incomplete:\n• ')) 
+        const settingsAlertTip = (zh ? '⚠️ 系統尚未配置完成：\n• ' : (ja ? '⚠️ システム設定が未完了です：\n• ' : '⚠️ System setup incomplete:\n• '))
           + missingItems.join(zh ? '\n• ' : (ja ? '\n• ' : '\n• '));
         badgeSettings.title = settingsAlertTip;
         if (actTabSettings) actTabSettings.title = settingsAlertTip;
@@ -8761,7 +8742,7 @@ function updateOnboardingGuidance() {
       const emptyTip = zh
         ? `⚠️ 有 ${emptyRepoCount} 個儲存庫尚未匯入文件（僅有目錄或為空），需要 Ingest！`
         : (ja ? `⚠️ ${emptyRepoCount} 件のリポジトリにドキュメントがありません。Ingest を実行してください！`
-              : `⚠️ ${emptyRepoCount} repository(ies) have no documents yet, Ingest needed!`);
+          : `⚠️ ${emptyRepoCount} repository(ies) have no documents yet, Ingest needed!`);
       badgeExplorer.title = emptyTip;
       if (actTabExplorer) actTabExplorer.title = emptyTip;
     } else {
@@ -8811,7 +8792,7 @@ function navRecord(snap) {
     if (navHist.length > 100) navHist.shift();
     navIdx = navHist.length - 1;
     navPaint();
-  } catch (e) {}
+  } catch (e) { }
 }
 function navRestore(snap) {
   if (!snap) return;
@@ -8846,7 +8827,7 @@ function navGo(dir) {
     navLock = true;
     try { navRestore(navHist[t]); } finally { navLock = false; }
     navPaint();
-  } catch (e) {}
+  } catch (e) { }
 }
 function navPaint() {
   try {
@@ -8855,7 +8836,7 @@ function navPaint() {
     const canBack = navIdx > 0, canFwd = navIdx >= 0 && navHist.length > 0 && navIdx < navHist.length - 1;
     if (pv) { pv.disabled = !canBack; pv.style.opacity = canBack ? '' : '0.4'; }
     if (nx) { nx.disabled = !canFwd; nx.style.opacity = canFwd ? '' : '0.4'; }
-  } catch (e) {}
+  } catch (e) { }
 }
 // Viewer back/forward button labels + tooltips (called from applyAppLanguage).
 function updateViewerNavI18n() {
@@ -8867,15 +8848,15 @@ function updateViewerNavI18n() {
     if (pv) {
       pv.textContent = zh ? '‹ 上一頁' : (ja ? '‹ 前へ' : '‹ Prev');
       pv.title = zh ? '回到上一個檢視（文件／段落／標籤／底稿）'
-                    : (ja ? '前の表示に戻る（ドキュメント／見出し／タグ／候補）'
-                          : 'Back to the previous view (document / section / tag / draft)');
+        : (ja ? '前の表示に戻る（ドキュメント／見出し／タグ／候補）'
+          : 'Back to the previous view (document / section / tag / draft)');
     }
     if (nx) {
       nx.textContent = zh ? '下一頁 ›' : (ja ? '次へ ›' : 'Next ›');
       nx.title = zh ? '前進到下一個檢視'
-                    : (ja ? '次の表示へ進む' : 'Forward to the next view');
+        : (ja ? '次の表示へ進む' : 'Forward to the next view');
     }
-  } catch (e) {}
+  } catch (e) { }
 }
 // Heading crumb (green › segment): open the SECTION, not the file top.
 // Breadcrumb carries file + line + title; the viewer has no line-scroll,
@@ -8901,7 +8882,7 @@ function openHeadingInEditor(filePath, targetLine = 1, encTitle = '') {
   }
 }
 
-window.browseFolderPath = function() { if (typeof openBrowsePicker === 'function') openBrowsePicker(); };
+window.browseFolderPath = function () { if (typeof openBrowsePicker === 'function') openBrowsePicker(); };
 
 function updateViewerTagToolbarI18n() {
   const lang = currentLanguage;
@@ -8922,21 +8903,31 @@ function updateViewerTagToolbarI18n() {
 // ─── Concept Action Modals (+ New, Edit, Merge) ─────────────────────
 let currentConceptActionState = null;
 
-window.openAddConceptModal = function() {
+window.openAddConceptModal = function () {
   openConceptActionModal('add');
 };
 
-window.openEditConceptModal = function(name, category, aliases, event) {
-  if (event) event.stopPropagation();
+window.openEditConceptModal = function (name, category, aliases, event) {
+  if (event) {
+    try { event.stopPropagation(); } catch (e) {}
+  }
+  if (name && typeof onConceptCardClick === 'function') {
+    onConceptCardClick(name);
+  }
   openConceptActionModal('edit', { name, category, aliases });
 };
 
-window.openMergeConceptModal = function(sourceName, event) {
-  if (event) event.stopPropagation();
+window.openMergeConceptModal = function (sourceName, event) {
+  if (event) {
+    try { event.stopPropagation(); } catch (e) {}
+  }
+  if (sourceName && typeof onConceptCardClick === 'function') {
+    onConceptCardClick(sourceName);
+  }
   openConceptActionModal('merge', { sourceName });
 };
 
-window.openConceptActionModal = function(mode, data = {}) {
+window.openConceptActionModal = function (mode, data = {}) {
   currentConceptActionState = { mode, data };
   const modal = document.getElementById('concept-action-modal');
   if (!modal) return;
@@ -9074,7 +9065,7 @@ window.openConceptActionModal = function(mode, data = {}) {
   modal.classList.add('show');
 };
 
-window.closeConceptActionModal = function() {
+window.closeConceptActionModal = function () {
   const modal = document.getElementById('concept-action-modal');
   if (modal) {
     modal.style.display = 'none';
@@ -9083,7 +9074,7 @@ window.closeConceptActionModal = function() {
   currentConceptActionState = null;
 };
 
-window.submitConceptActionModal = function() {
+window.submitConceptActionModal = function () {
   if (!currentConceptActionState) return;
   const { mode, data } = currentConceptActionState;
   const zh = currentLanguage === 'zh';
@@ -9156,7 +9147,7 @@ window.submitConceptActionModal = function() {
 
 
 
-window.deleteConcept = function(conceptName, event) {
+window.deleteConcept = function (conceptName, event) {
   if (event) {
     event.stopPropagation();
     event.preventDefault();
@@ -9166,9 +9157,9 @@ window.deleteConcept = function(conceptName, event) {
   const repo = getActiveRepoPath();
 
   const title = zh ? '⚠ 永久刪除概念標籤' : (ja ? '⚠ コンセプトタグの完全削除' : '⚠ Delete Concept Tag Permanently');
-  const msg = zh 
+  const msg = zh
     ? `確定要永久刪除概念標籤「${conceptName}」嗎？\n\n⚠ 此操作將：\n1. 從 SQLite 資料庫註冊表中徹底清除該概念。\n2. 自動搜尋並清除所有引用此標籤之 Markdown 文件的關聯標記！\n3. 刪除對應的標籤說明文件。`
-    : (ja 
+    : (ja
       ? `コンセプトタグ「${conceptName}」を完全に削除しますか？\n\n⚠ この操作により：\n1. SQLite データベースから完全に削除されます。\n2. 参照しているすべての Markdown ファイルから該当タグが削除されます。\n3. 対応するタグ定義ファイルも削除されます。`
       : `Are you sure you want to permanently delete concept tag '${conceptName}'?\n\n⚠ This action will:\n1. Completely remove it from the SQLite registry.\n2. Automatically wipe this tag mark from all referencing Markdown documents!\n3. Remove the corresponding tag document.`);
 
@@ -9487,10 +9478,10 @@ function resetPromptToDefault(key, safeKey) {
   const previewHtml = `
     <div style="font-size:13.5px; line-height:1.6; margin-bottom:12px;">
       ${zh
-        ? `確定要將提示詞 <strong>「${escapeHtml(promptName)}」</strong> 重設回 <strong>[${langLabel}]</strong> 官方預設範本嗎？`
-        : (ja
-          ? `プロンプト <strong>「${escapeHtml(promptName)}」</strong> を <strong>[${langLabel}]</strong> 公式既定テンプレートに戻しますか？`
-          : `Reset prompt <strong>"${escapeHtml(promptName)}"</strong> to official default template for <strong>[${langLabel}]</strong>?`)}
+      ? `確定要將提示詞 <strong>「${escapeHtml(promptName)}」</strong> 重設回 <strong>[${langLabel}]</strong> 官方預設範本嗎？`
+      : (ja
+        ? `プロンプト <strong>「${escapeHtml(promptName)}」</strong> を <strong>[${langLabel}]</strong> 公式既定テンプレートに戻しますか？`
+        : `Reset prompt <strong>"${escapeHtml(promptName)}"</strong> to official default template for <strong>[${langLabel}]</strong>?`)}
     </div>
     ${defItem ? `
       <div style="background:#090d13; border:1px solid #30363d; border-radius:6px; padding:10px 12px; max-height:220px; overflow-y:auto; font-size:12px; font-family:monospace; color:#c9d1d9; text-align:left;">
@@ -9628,7 +9619,7 @@ function updateLintBadgeOnly() {
         }
       }
     })
-    .catch(() => {});
+    .catch(() => { });
 }
 
 function renderLintResults(data) {
@@ -9966,8 +9957,8 @@ function updateChatWidgetI18n() {
   // Welcome box
   set('lbl-chat-welcome-title', zh ? 'DocGraphical MCP 智慧檢索' : (ja ? 'DocGraphical MCP 知能検索' : 'DocGraphical MCP Intelligent Search'));
   set('lbl-chat-welcome-desc', zh ? '向知識庫提問，中階由 MCP 工具精準檢索 TOC、章節與關聯圖，節省 97% Context Tokens 並附帶精準引用錨點。'
-                               : (ja ? 'ナレッジベースに質問します。MCPツールによりTOCや見出しを精密抽出してトークンを削減します。'
-                               : 'Ask questions to your knowledge base. MCP tools surgically slice TOC, sections, and topology.'));
+    : (ja ? 'ナレッジベースに質問します。MCPツールによりTOCや見出しを精密抽出してトークンを削減します。'
+      : 'Ask questions to your knowledge base. MCP tools surgically slice TOC, sections, and topology.'));
 
   // Input area
   setAttr('chat-input-box', 'placeholder', zh ? '輸入問題... (Enter 送出，Shift+Enter 換行)' : (ja ? '質問を入力... (Enter 送信、Shift+Enter 改行)' : 'Type a query... (Enter to send, Shift+Enter for newline)'));
@@ -10079,8 +10070,8 @@ function buildCitationPillHtml(cleanFile, cleanHeading, rawHeadingLevel = 0) {
   let headingBorder = 'rgba(63, 185, 80, 0.4)';
 
   if (cleanHeading) {
-    const allN = (masterGraphData.nodes && masterGraphData.nodes.length) 
-      ? masterGraphData.nodes 
+    const allN = (masterGraphData.nodes && masterGraphData.nodes.length)
+      ? masterGraphData.nodes
       : ((rawData && rawData.nodes && rawData.nodes.length) ? rawData.nodes : []);
     const targetBase = cleanFile.toLowerCase();
     const hText = cleanHeading.toLowerCase();
@@ -10135,8 +10126,8 @@ function buildCitationPillHtml(cleanFile, cleanHeading, rawHeadingLevel = 0) {
 
 function resolveHeadingColor(headingText, fallbackFile = '') {
   const cleanH = (headingText || '').trim().replace(/^#+\s*/, '').trim();
-  const allN = (masterGraphData.nodes && masterGraphData.nodes.length) 
-    ? masterGraphData.nodes 
+  const allN = (masterGraphData.nodes && masterGraphData.nodes.length)
+    ? masterGraphData.nodes
     : ((rawData && rawData.nodes && rawData.nodes.length) ? rawData.nodes : []);
   const hLower = cleanH.toLowerCase();
   const fLower = (fallbackFile || '').toLowerCase();
@@ -10624,7 +10615,7 @@ async function sendChatMessage() {
     }
     const totalSec = ((Date.now() - startTime) / 1000).toFixed(1);
     if (statusEl) {
-      statusEl.textContent = firstTokenTime 
+      statusEl.textContent = firstTokenTime
         ? (zh ? `完成 (${totalSec}s)` : (ja ? `完了 (${totalSec}秒)` : `Done (${totalSec}s)`))
         : 'Ready';
     }
@@ -10648,9 +10639,9 @@ function renderChatAttachmentsBar() {
     return `
       <div style="position:relative; display:inline-flex; align-items:center; gap:8px; background:#161b22; border:1px solid #30363d; border-radius:8px; padding:4px 10px; font-size:12px; max-width:260px; box-shadow:0 2px 6px rgba(0,0,0,0.3);">
         ${isImg
-          ? `<img src="${att.dataUrl}" onclick="openChatImagePreview('${att.dataUrl}', '${escapeHtml(att.name)}')" style="width:36px; height:36px; object-fit:cover; border-radius:6px; cursor:zoom-in; border:1px solid #388bfd88; transition:transform 0.15s ease;" onmouseover="this.style.transform='scale(1.08)'" onmouseout="this.style.transform='scale(1)'" title="點擊放大預覽圖片" />`
-          : `<span style="font-size:18px;">📄</span>`
-        }
+        ? `<img src="${att.dataUrl}" onclick="openChatImagePreview('${att.dataUrl}', '${escapeHtml(att.name)}')" style="width:36px; height:36px; object-fit:cover; border-radius:6px; cursor:zoom-in; border:1px solid #388bfd88; transition:transform 0.15s ease;" onmouseover="this.style.transform='scale(1.08)'" onmouseout="this.style.transform='scale(1)'" title="點擊放大預覽圖片" />`
+        : `<span style="font-size:18px;">📄</span>`
+      }
         <span style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:#e6edf3; font-weight:500;" title="${escapeHtml(att.name)}">${escapeHtml(att.name)}</span>
         <button onclick="removeChatAttachment(${idx})" style="background:none; border:none; color:#f85149; cursor:pointer; font-size:14px; padding:2px 4px; line-height:1; font-weight:700;" title="移除此附件">✕</button>
       </div>
