@@ -7783,6 +7783,8 @@ function openCardRefresh(term) {
   </div>`;
   document.body.appendChild(o);
   o.addEventListener('click', (ev) => { if (ev.target === o) o.remove(); });
+}
+
 // Interactive Dialog when Prospect or Vine discovers 0 new spots
 function openEmptyResultDialog(how, term, detail = {}) {
   const zh = currentLanguage === 'zh';
@@ -7940,7 +7942,7 @@ function openRefreshResultReviewDialog(how, term, items, extraInfo = {}) {
 
   if (normalized.length === 0) {
     if (o) o.remove();
-    openEmptyResultDialog(mode, term, { ...detail, existingCount });
+    openEmptyResultDialog(how, term, { ...extraInfo, existingCount });
     return;
   }
 
