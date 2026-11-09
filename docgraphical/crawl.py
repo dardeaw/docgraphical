@@ -1077,6 +1077,7 @@ def _locate_mention(repo, rel, mention):
         return {}
     if not lines:
         return {}
+    tagline_pat = _re.compile(r"^\s*>\s*🏷️?\s*(?:概念)?標籤\s*[:：]")
     keys = [mention] if mention else []
     if mention and len(mention) > 30:
         keys.append(mention[:30])
@@ -1086,6 +1087,9 @@ def _locate_mention(repo, rel, mention):
             continue
         kl = k.lower()
         for i, ln in enumerate(lines):
+            # Do NOT treat metadata tag lines (> 🏷️ 標籤: [[...]]) as mention hits!
+            if tagline_pat.match(ln or ""):
+                continue
             if k in ln or kl in (ln or "").lower():
                 hit = i + 1
                 break
