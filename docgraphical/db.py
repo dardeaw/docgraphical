@@ -1496,8 +1496,11 @@ def attach_concept_to_file(repo_path: str, concept_name: str, rel_file_path: str
         for i, l in enumerate(lines):
             m = re.match(r"^(#{1,6})\s+(.+)$", l.strip())
             if m:
-                htext = re.sub(r"\s+#+$", "", m.group(2).strip()).lower()
-                if htext == h_clean:
+                raw_htext = re.sub(r"\s+#+$", "", m.group(2).strip())
+                clean_h = re.sub(r"\[([^\]]+)\]\([^)]+\)", r"\1", raw_htext)
+                clean_h = re.sub(r"\[\[([^\]]+)\]\]", r"\1", clean_h).strip().lower()
+                htext = raw_htext.lower()
+                if clean_h == h_clean or htext == h_clean:
                     matched_idx = i
                     break
         # Pass 2: substring fallback if not exact matched
@@ -1505,8 +1508,11 @@ def attach_concept_to_file(repo_path: str, concept_name: str, rel_file_path: str
             for i, l in enumerate(lines):
                 m = re.match(r"^(#{1,6})\s+(.+)$", l.strip())
                 if m:
-                    htext = re.sub(r"\s+#+$", "", m.group(2).strip()).lower()
-                    if h_clean in htext:
+                    raw_htext = re.sub(r"\s+#+$", "", m.group(2).strip())
+                    clean_h = re.sub(r"\[([^\]]+)\]\([^)]+\)", r"\1", raw_htext)
+                    clean_h = re.sub(r"\[\[([^\]]+)\]\]", r"\1", clean_h).strip().lower()
+                    htext = raw_htext.lower()
+                    if h_clean in clean_h or h_clean in htext or clean_h in h_clean:
                         matched_idx = i
                         break
 

@@ -8167,7 +8167,18 @@ function cardRefreshGo(how, term) {
         if (items.length > 0) {
           showToast(zh ? `「${term}」深度探索完成！已挖出 ${items.length} 處落點`
             : `"${term}" dig completed! Found ${items.length} references`);
-          openRefreshResultReviewDialog('vine', term, items, d);
+          // Guarantee fresh activeConceptLinkedFiles before opening review dialog
+          fetch(`/api/concepts/tag-page?name=${encodeURIComponent(term)}&repo=${encodeURIComponent(repo)}`)
+            .then(res => res.json())
+            .then(tpData => {
+              if (tpData && tpData.ok) {
+                activeConceptLinkedFiles[term] = tpData.files || [];
+              }
+            })
+            .catch(() => { })
+            .finally(() => {
+              openRefreshResultReviewDialog('vine', term, items, d);
+            });
         } else {
           openEmptyResultDialog('vine', term, d);
         }

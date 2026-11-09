@@ -1108,7 +1108,10 @@ def _locate_mention(repo, rel, mention):
                 break
     out = {"line": hit}
     if heading:
-        out["heading"] = heading[:60]
+        # Strip markdown links and brackets e.g. [text](url) -> text, [[text]] -> text
+        c_head = _re.sub(r"\[([^\]]+)\]\([^)]+\)", r"\1", heading)
+        c_head = _re.sub(r"\[\[([^\]]+)\]\]", r"\1", c_head).strip()
+        out["heading"] = c_head if c_head else heading
         out["level"] = level
     return out
 

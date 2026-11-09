@@ -168,6 +168,17 @@ def run_vine_pipeline(repo_path: str, concept_name: str, target_quota: int = 20,
         if target_key in seen_keys:
             continue
         
+        # Check against redundant file-level heading (e.g. line 1 heading equals filename)
+        f_basename = os.path.basename(f)
+        f_no_ext = f_basename[:-3] if f_basename.lower().endswith(".md") else f_basename
+        c_base = re.sub(r"^[0-9_\-\s]+", "", f_no_ext).lower().strip()
+        c_h1 = re.sub(r"^[0-9_\-\s]+", "", h).lower().strip()
+        c_base = re.sub(r"^\d{8}_[^\s_]+_", "", c_base).strip()
+        c_h1 = re.sub(r"^\d{8}_[^\s_]+_", "", c_h1).strip()
+        ln = (k or {}).get("line") or 0
+        if ln <= 3 and (h.strip() == f_no_ext.strip() or c_base == c_h1 or (c_base and c_base in c_h1) or (c_h1 and c_h1 in c_base)):
+            continue
+
         # Check against existing knowledge base links
         if is_already_linked(f, h, signatures):
             continue
