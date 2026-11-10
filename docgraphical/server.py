@@ -722,10 +722,13 @@ def create_app(initial_paths: Optional[List[str]] = None, search_roots: Optional
         data = request.get_json(silent=True) or {}
         summary = (data.get("summary_md") or "").strip()
         repo = (data.get("repo") or "").strip()
+        concept_repo = data.get("concept_repo")
         if not summary or not repo:
             return jsonify({"success": False, "error": "缺少摘要內容或 repo"}), 400
         from .ingest import FnIngestCompoundTagging
-        res = FnIngestCompoundTagging(summary, repo)
+        # If concept_repo is provided (even empty string for All Repos), pass it; otherwise fallback to repo
+        target_concept_scope = concept_repo if concept_repo is not None else repo
+        res = FnIngestCompoundTagging(summary, target_concept_scope)
         return jsonify({"success": True, "compounding": res})
 
     @app.route("/api/ingest/summarize", methods=["POST"])
@@ -760,8 +763,20 @@ def create_app(initial_paths: Optional[List[str]] = None, search_roots: Optional
                                     "truncated": r["truncated"]})
                     if r["truncated"]:
                         notes.append("%s 超過 %d 字已截斷" % (name, r["chars"]))
+                else:
+                    # PDF or doc had no extractable text layer (scanned/vector/raster-only)
+                    # Automatically route to Vision OCR pipeline!
+                    if ext in (".pdf", ".pptx"):
+                        vision_paths.append(p)
+                        notes.append("%s 未偵測到文字層，自動轉由視覺 (Vision) 模型辨識" % name)
+                    else:
+                        notes.append(_FnFriendlyExtractError(name, Exception(r.get("error") or "無法提取文字")))
             except Exception as e:
-                notes.append(_FnFriendlyExtractError(name, e))
+                if ext in (".pdf", ".pptx"):
+                    vision_paths.append(p)
+                    notes.append("%s 文字解析異常，自動轉由視覺 (Vision) 模型辨識" % name)
+                else:
+                    notes.append(_FnFriendlyExtractError(name, e))
 
             # Also extract embedded figures/diagrams from PDF/PPTX
             if ext in (".pdf", ".pptx"):
@@ -781,6 +796,43 @@ def create_app(initial_paths: Optional[List[str]] = None, search_roots: Optional
                             "raw_bytes": im.get("raw_bytes"),
                             "source_doc": name
                         })
+
+                # If this PDF has hybrid pages (some pages have text, but some pages are pure images/scanned):
+                # Render those specific textless pages directly into extracted_images for Multimodal reading!
+                missing_pages = (r.get("missing_text_pages") or []) if (isinstance(r, dict) and r.get("ok")) else []
+                if ext == ".pdf" and missing_pages:
+                    try:
+                        import fitz
+                        from PIL import Image
+                        import io as _io
+                        from .ingest import _FnPilToDataUrl
+                        doc_m = fitz.open(p)
+                        base_stem = os.path.splitext(name)[0]
+                        safe_stem = re.sub(r"\s+", "_", base_stem.strip())
+                        added_pages = 0
+                        for p_num in missing_pages[:6]:  # Safeguard: render up to 6 missing pages
+                            if p_num <= len(doc_m):
+                                page_obj = doc_m[p_num - 1]
+                                pix = page_obj.get_pixmap(matrix=fitz.Matrix(1.5, 1.5), alpha=False)
+                                img_pil = Image.frombytes("RGB", (pix.width, pix.height), pix.samples)
+                                d_url = _FnPilToDataUrl(img_pil)
+                                if d_url:
+                                    buf = _io.BytesIO()
+                                    img_pil.save(buf, format="JPEG", quality=85)
+                                    im_fname = f"{safe_stem}_p{p_num}_scan.jpg"
+                                    extracted_images.append({
+                                        "name": im_fname,
+                                        "label": f"[第 {p_num} 頁圖片辨識]",
+                                        "data_url": d_url,
+                                        "raw_bytes": buf.getvalue(),
+                                        "source_doc": name
+                                    })
+                                    added_pages += 1
+                        doc_m.close()
+                        if added_pages:
+                            notes.append(f"{name}：第 {','.join(map(str, missing_pages[:6]))} 頁無文字層，已自動轉為視覺圖像混模辨識")
+                    except Exception:
+                        pass
 
         # Save extracted candidate images to a staged folder so they can be referenced or discarded
         staged_candidate_images = []
@@ -1547,33 +1599,103 @@ def create_app(initial_paths: Optional[List[str]] = None, search_roots: Optional
         if not repos_list:
             return jsonify({"ok": True, "tree": {}, "candidates": [], "counts": {"official": 0, "candidates": 0}})
 
-        # Aggregate concepts across repos
-        merged_tree = {}
-        merged_candidates = []
-        seen_names = set()
+        # Multi-repo aggregation with full repository federation
+        # Map: category -> { concept_name -> { ...merged info, repos: [ { name, path, refs, docs } ] } }
+        cat_map = {}
+        cand_map = {}
+        blk_map = {}
 
         for rp in repos_list:
             res = get_concepts_tree(rp)
             if not res or not res.get("ok"):
                 continue
+            r_name = os.path.basename(rp.rstrip("/\\")) or rp
+
+            # 1. Official concepts
             for cat, items in (res.get("tree") or {}).items():
-                if cat not in merged_tree:
-                    merged_tree[cat] = []
+                if cat not in cat_map:
+                    cat_map[cat] = {}
                 for it in items:
-                    if it["name"] not in seen_names:
-                        seen_names.add(it["name"])
-                        merged_tree[cat].append(it)
+                    cname = it["name"]
+                    entry = {
+                        "name": r_name,
+                        "path": rp,
+                        "refs": it.get("refs", 0),
+                        "docs": it.get("docs", 0)
+                    }
+                    if cname not in cat_map[cat]:
+                        c_dict = dict(it)
+                        c_dict["repo"] = rp
+                        c_dict["repo_name"] = r_name
+                        c_dict["repos"] = [entry]
+                        c_dict["total_refs"] = it.get("refs", 0)
+                        c_dict["total_docs"] = it.get("docs", 0)
+                        cat_map[cat][cname] = c_dict
+                    else:
+                        existing = cat_map[cat][cname]
+                        existing["repos"].append(entry)
+                        existing["total_refs"] = existing.get("total_refs", 0) + it.get("refs", 0)
+                        existing["total_docs"] = existing.get("total_docs", 0) + it.get("docs", 0)
+                        existing["refs"] = existing["total_refs"]
+                        existing["docs"] = existing["total_docs"]
+                        if not existing.get("aliases") and it.get("aliases"):
+                            existing["aliases"] = it["aliases"]
+
+            # 2. Candidate concepts
             for cand in (res.get("candidates") or []):
-                if cand["name"] not in seen_names:
-                    seen_names.add(cand["name"])
-                    merged_candidates.append(cand)
+                cname = cand["name"]
+                entry = {
+                    "name": r_name,
+                    "path": rp,
+                    "refs": cand.get("refs", 0),
+                    "docs": cand.get("docs", 0),
+                    "staged": cand.get("staged", 0)
+                }
+                if cname not in cand_map:
+                    c_dict = dict(cand)
+                    c_dict["repo"] = rp
+                    c_dict["repo_name"] = r_name
+                    c_dict["repos"] = [entry]
+                    c_dict["total_refs"] = cand.get("refs", 0)
+                    cand_map[cname] = c_dict
+                else:
+                    existing = cand_map[cname]
+                    existing["repos"].append(entry)
+                    existing["total_refs"] = existing.get("total_refs", 0) + cand.get("refs", 0)
+                    existing["refs"] = existing["total_refs"]
+                    if cand.get("staged"):
+                        existing["staged"] = existing.get("staged", 0) + cand["staged"]
+
+            # 3. Blacklist
+            for blk in (res.get("blacklist") or []):
+                term = blk.get("term")
+                if not term:
+                    continue
+                entry = {"name": r_name, "path": rp, "decided_at": blk.get("decided_at", "")}
+                if term not in blk_map:
+                    b_dict = dict(blk)
+                    b_dict["repo"] = rp
+                    b_dict["repo_name"] = r_name
+                    b_dict["repos"] = [entry]
+                    blk_map[term] = b_dict
+                else:
+                    blk_map[term]["repos"].append(entry)
+
+        merged_tree = {cat: list(items.values()) for cat, items in cat_map.items()}
+        merged_candidates = list(cand_map.values())
+        merged_blacklist = list(blk_map.values())
 
         total_official = sum(len(v) for v in merged_tree.values())
         return jsonify({
             "ok": True,
             "tree": merged_tree,
             "candidates": merged_candidates,
-            "counts": {"official": total_official, "candidates": len(merged_candidates)}
+            "blacklist": merged_blacklist,
+            "counts": {
+                "official": total_official,
+                "candidates": len(merged_candidates),
+                "blacklist": len(merged_blacklist)
+            }
         })
 
     @app.route("/api/concepts", methods=["POST"])
@@ -1848,6 +1970,69 @@ def create_app(initial_paths: Optional[List[str]] = None, search_roots: Optional
         except Exception:
             res["staged_added"] = 0
         return jsonify(res)
+
+    @app.route("/api/concepts/scan/recount-one/stream", methods=["GET", "POST"])
+    def api_scan_recount_one_stream():
+        """SSE streaming endpoint for Prospect recount supporting multi-repo."""
+        from .pipeline import run_prospect_pipeline_stream
+        from .db import get_db_path as _FnDbPath
+        from .crawl import FnRecountTopUpStaged
+        from flask import stream_with_context
+
+        if request.method == "POST":
+            data = request.get_json(silent=True) or {}
+            term = (data.get("term") or "").strip()
+            repo_arg = data.get("repo") or ""
+            target_quota = data.get("quota", 20)
+        else:
+            term = (request.args.get("term") or "").strip()
+            repo_arg = request.args.get("repo") or ""
+            target_quota = request.args.get("quota", 20)
+
+        repos_list = _resolve_repos(repo_arg)
+        if not repos_list and repo_arg:
+            single = _resolve_repo(repo_arg, target_concept=term)
+            if single:
+                repos_list = [single]
+        if not repos_list:
+            repos_list = _resolve_repos("")
+
+        if not repos_list or not term:
+            def err_gen():
+                yield "data: %s\n\n" % json.dumps({"event": "error", "error": "repo and term required"})
+            return Response(err_gen(), mimetype="text/event-stream")
+
+        try:
+            target_quota = int(target_quota)
+        except (TypeError, ValueError):
+            target_quota = 20
+
+        # Primary db path for storing metrics / metadata
+        primary_repo = repos_list[0]
+        db_path = _FnDbPath(primary_repo)
+
+        def event_stream():
+            for ev in run_prospect_pipeline_stream(repos_list, db_path, term, target_quota=target_quota):
+                if ev.get("event") == "done" and ev.get("data"):
+                    for rp in repos_list:
+                        try:
+                            rp_db = _FnDbPath(rp)
+                            if rp_db and os.path.isfile(rp_db):
+                                top = FnRecountTopUpStaged(rp_db, rp, term)
+                                ev["data"]["staged_added"] = ev["data"].get("staged_added", 0) + (top.get("added", 0) if top.get("ok") else 0)
+                        except Exception:
+                            pass
+                yield "data: %s\n\n" % json.dumps(ev, ensure_ascii=False)
+
+        return Response(
+            stream_with_context(event_stream()),
+            mimetype="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache",
+                "X-Accel-Buffering": "no",
+                "Connection": "keep-alive"
+            }
+        )
 
     @app.route("/api/concepts/scan/blacklist", methods=["GET"])
     def api_scan_blacklist():
@@ -2404,6 +2589,72 @@ def create_app(initial_paths: Optional[List[str]] = None, search_roots: Optional
         if not res.get("ok"):
             return jsonify(res), 400
         return jsonify(res)
+
+    @app.route("/api/crawl/refresh/stream", methods=["GET", "POST"])
+    def api_crawl_refresh_stream():
+        """SSE streaming endpoint for Pure Vine refresh supporting multi-repo."""
+        from .pipeline import run_vine_pipeline_stream
+        from flask import stream_with_context
+
+        if request.method == "POST":
+            data = request.get_json(silent=True) or {}
+            name = (data.get("name") or "").strip()
+            repo_arg = data.get("repo") or ""
+            target_quota = data.get("quota", data.get("max_files", 20))
+        else:
+            name = (request.args.get("name") or "").strip()
+            repo_arg = request.args.get("repo") or ""
+            target_quota = request.args.get("quota", request.args.get("max_files", 20))
+
+        repos_list = _resolve_repos(repo_arg)
+        if not repos_list and repo_arg:
+            single = _resolve_repo(repo_arg, target_concept=name)
+            if single:
+                repos_list = [single]
+        if not repos_list:
+            repos_list = _resolve_repos("")
+
+        if not repos_list or not name:
+            def err_gen():
+                yield "data: %s\n\n" % json.dumps({"event": "error", "error": "repo and name required"})
+            return Response(err_gen(), mimetype="text/event-stream")
+
+        try:
+            target_quota = int(target_quota)
+        except (TypeError, ValueError):
+            target_quota = 20
+
+        def event_stream():
+            total_hits = 0
+            for r_idx, rp in enumerate(repos_list, 1):
+                r_name = os.path.basename(rp.rstrip("/\\")) or rp
+                yield "data: %s\n\n" % json.dumps({
+                    "event": "progress",
+                    "status": f"正在深挖專案庫 [{r_idx}/{len(repos_list)}]：{r_name}",
+                    "repo": rp,
+                    "repo_name": r_name
+                }, ensure_ascii=False)
+                for ev in run_vine_pipeline_stream(rp, name, target_quota=target_quota):
+                    if ev.get("event") == "hit" and ev.get("item"):
+                        ev["item"]["repo"] = rp
+                        ev["item"]["repo_name"] = r_name
+                        total_hits += 1
+                        ev["count"] = total_hits
+                    yield "data: %s\n\n" % json.dumps(ev, ensure_ascii=False)
+                    if total_hits >= target_quota:
+                        break
+                if total_hits >= target_quota:
+                    break
+
+        return Response(
+            stream_with_context(event_stream()),
+            mimetype="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache",
+                "X-Accel-Buffering": "no",
+                "Connection": "keep-alive"
+            }
+        )
 
     @app.route("/api/crawl/sweep", methods=["POST"])
     def api_crawl_sweep():

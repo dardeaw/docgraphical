@@ -6,6 +6,20 @@
 
 格式遵循 [Keep a Changelog](https://keepachangelog.com/zh-TW/1.0.0/)，並嚴格遵循 [語意化版本 (Semantic Versioning)](https://semver.org/lang/zh-TW/) 規範。
 
+## [3.0.6] - 2026-11-10
+
+### 新增與優化
+- **概念庫來源多選與全域比對 (Multi-Repository Concept Scope)**：
+  - 在文件攝入 (Ingest) 面板新增概念庫來源下拉多選器，支援勾選單一專案庫、個別複選或一鍵全選（全域跨專案庫概念打通）。
+  - 勾選或切換專案庫時即時觸發官方概念智能比對，並完整支援繁體中文、日文、英文三語系介面。
+- **文件入庫確認狀態鎖定機制 (Save & Lock)**：
+  - 文件產出 Markdown 並完成索引入庫後，概念庫來源選單、官方概念膠囊與檔名輸入框立即灰階鎖定（`disabled` / `cursor: not-allowed`），清楚展示已建立之超連結並防止誤改或覆蓋。
+- **流式探索與跨庫挖掘架構加固 (SSE Streaming & Robust Multi-Repo Pipeline)**：
+  - 後端新增 `/api/crawl/refresh/stream` 與 `/api/concepts/scan/recount-one/stream` 即時事件流端點。
+  - 順藤摸瓜與探礦重算流程支援多專案庫聚合分析，並修復跨目錄落點偵測問題。
+
+---
+
 ## [3.0.5] - 2026-11-06
 
 ### 新增與優化

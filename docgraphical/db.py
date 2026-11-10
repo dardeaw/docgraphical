@@ -904,19 +904,22 @@ def get_concepts_tree(repo_path: str) -> dict:
         """)
 
         # 2. Count live references (both distinct files and distinct section citations)
-        cur.execute("""
-            SELECT target, source 
-            FROM edges 
-            WHERE kind = 'wiki_link'
-        """)
         ref_counts = {}
         doc_counts = {}
-        for tgt, src in cur.fetchall():
-            cname = tgt.replace("concept::", "").strip()
-            ref_counts.setdefault(cname, set()).add(src)
-            clean_f = src.replace("heading::", "").replace("file::", "").split("::")[0].strip()
-            if clean_f:
-                doc_counts.setdefault(cname, set()).add(clean_f)
+        try:
+            cur.execute("""
+                SELECT target, source 
+                FROM edges 
+                WHERE kind = 'wiki_link'
+            """)
+            for tgt, src in cur.fetchall():
+                cname = tgt.replace("concept::", "").strip()
+                ref_counts.setdefault(cname, set()).add(src)
+                clean_f = src.replace("heading::", "").replace("file::", "").split("::")[0].strip()
+                if clean_f:
+                    doc_counts.setdefault(cname, set()).add(clean_f)
+        except Exception:
+            pass
 
         # 3. Fetch concepts
         cur.execute("SELECT name, category, aliases, status, created_at FROM concepts")

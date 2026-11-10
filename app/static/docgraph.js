@@ -3282,15 +3282,28 @@ function openIngestDialog(absDir) {
         <div id="ing-preview" class="doc-content-viewer" style="background:#010409;border:1px solid #21262d;border-radius:6px;padding:18px 24px;font-size:14px;flex:1;min-height:180px;overflow-y:auto;color:#c9d1d9;word-break:break-word;line-height:1.7;">${emptyPrev}</div>
         <textarea id="ing-edit" oninput="ingOnEditorInput(this.value)" style="display:none;background:#010409;border:1px solid #1f6feb;border-radius:6px;padding:14px;font-size:13px;color:#e6edf3;flex:1;min-height:180px;overflow-y:auto;font-family:inherit;white-space:pre-wrap;line-height:1.6;"></textarea>
 
-        <!-- Compound Tagging Visualization Tray -->
-        <div id="ing-compound-tray" style="background:#161b22;border:1px solid #30363d;border-radius:8px;padding:8px 12px;display:flex;flex-direction:column;gap:6px;">
-          <div style="display:flex;align-items:center;justify-content:space-between;">
-            <span style="font-size:15px;font-weight:600;color:#e2e8f0;display:flex;align-items:center;gap:5px;">
+        <!-- Compound Tagging Visualization Tray with Concept Vocabulary Scope Selector -->
+        <div id="ing-compound-tray" style="background:#161b22;border:1px solid #30363d;border-radius:8px;padding:10px 14px;display:flex;flex-direction:column;gap:8px;">
+          <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;">
+            <div style="display:flex;align-items:center;gap:6px;">
               <span style="display:inline-block;width:7px;height:7px;border-radius:50%;background:#3fb950;"></span>
-              ${zh ? '知識庫官方概念比對 (Official Concepts Matching)' : 'Official Concepts Matching'}
-            </span>
-            <span id="ing-compound-status" style="font-size:13px;color:#8b949e;">${zh ? '摘要生成後自動比對命中之官方標籤' : 'Official concepts will appear here'}</span>
+              <span style="font-size:14px;font-weight:700;color:#e2e8f0;">${zh ? '知識庫官方概念比對' : (ja ? '公式概念の自動照合' : 'Official Concepts Matching')}</span>
+            </div>
+            
+            <!-- Multi-Select Concept Repositories Dropdown -->
+            <div id="ing-repo-multiselect-container" style="position:relative;display:flex;align-items:center;">
+              <button id="ing-repo-multiselect-btn" type="button" onclick="ingToggleRepoDropdown(event)" style="display:flex;align-items:center;gap:6px;background:#0d1117;border:1px solid #30363d;padding:4px 10px;border-radius:6px;color:#c9d1d9;font-size:12px;font-weight:600;cursor:pointer;">
+                <span>🏷️ ${zh ? '概念庫來源：' : (ja ? '概念ソース：' : 'Scope: ')}</span>
+                <span id="ing-repo-multiselect-label" style="color:#58a6ff;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;"></span>
+                <span style="font-size:10px;color:#8b949e;margin-left:2px;">▼</span>
+              </button>
+              <div id="ing-repo-dropdown-menu" style="display:none;position:absolute;top:100%;right:0;margin-top:4px;z-index:1000005;background:#161b22;border:1px solid #30363d;border-radius:8px;box-shadow:0 8px 24px rgba(0,0,0,0.6);padding:8px;min-width:260px;max-height:280px;overflow-y:auto;flex-direction:column;gap:5px;">
+                <!-- Populated dynamically by ingInitRepoDropdown() -->
+              </div>
+            </div>
           </div>
+          
+          <div id="ing-compound-status" style="font-size:12px;color:#8b949e;">${zh ? '摘要生成後將依所選概念庫進行實時智能比對' : (ja ? '要約生成後、選択した概念リポジトリに基づいて自動照合します' : 'Concepts will be matched against selected scope upon summarizing')}</div>
           <div id="ing-compound-pills" style="display:flex;flex-wrap:wrap;gap:8px;min-height:26px;align-items:center;">
             <span style="font-size:13px;color:#8b949e;">${zh ? '（產生摘要後將顯示比對命中之官方概念標籤）' : '(Official concepts will appear here)'}</span>
           </div>
@@ -3349,6 +3362,22 @@ function openIngestDialog(absDir) {
       }
     });
   }
+
+  // Initialize Repo Multiselect Dropdown
+  ingInitRepoDropdown();
+
+  // Close dropdown menu on outside click
+  document.addEventListener('click', function _onIngClickAway(ev) {
+    const menu = document.getElementById('ing-repo-dropdown-menu');
+    const btn = document.getElementById('ing-repo-multiselect-btn');
+    if (!menu) {
+      document.removeEventListener('click', _onIngClickAway);
+      return;
+    }
+    if (btn && (btn === ev.target || btn.contains(ev.target))) return;
+    if (menu && menu.contains(ev.target)) return;
+    menu.style.display = 'none';
+  });
 }
 
 function ingSwitchSourceTab(tab) {
@@ -3620,17 +3649,29 @@ function paintIngSelName() {
     let fn = e ? (e.customFilename || e.name || '') : '';
     if (fn.toLowerCase().endsWith('.md')) fn = fn.slice(0, -3).trim();
     fnInput.value = fn;
-    fnInput.disabled = !e;
+    fnInput.disabled = !e || !!(e && e.saved);
   }
 }
 
 function paintIngSaveBtn() {
   const btn = document.getElementById('ing-btn-save');
   if (!btn || !ingState) return;
-  const n = ingState.picked.filter(e => e.status === 'done').length;
-  btn.textContent = n
-    ? (ingState.zh ? `✅ 確認產出 ${n} 個 md 並入庫` : (ingState.ja ? `✅ ${n} 件の要約mdを作成して取り込む` : `✅ Confirm: write ${n} md & index`))
-    : (ingState.zh ? '✅ 確認產出 md 並入庫' : (ingState.ja ? '✅ 要約mdを作成して取り込む' : '✅ Confirm: write md & index'));
+  const unSavedDone = ingState.picked.filter(e => e.status === 'done' && !e.saved);
+  const n = unSavedDone.length;
+  const cur = ingCurEntry();
+  if (cur && cur.saved) {
+    btn.disabled = true;
+    btn.style.opacity = '0.6';
+    btn.style.cursor = 'not-allowed';
+    btn.textContent = ingState.zh ? '🔒 此項目已產出 md 入庫' : '🔒 Already Saved & Indexed';
+  } else {
+    btn.disabled = n === 0;
+    btn.style.opacity = n === 0 ? '0.6' : '1';
+    btn.style.cursor = n === 0 ? 'not-allowed' : 'pointer';
+    btn.textContent = n
+      ? (ingState.zh ? `✅ 確認產出 ${n} 個 md 並入庫` : (ingState.ja ? `✅ ${n} 件の要約mdを作成して取り込む` : `✅ Confirm: write ${n} md & index`))
+      : (ingState.zh ? '✅ 確認產出 md 並入庫' : (ingState.ja ? '✅ 要約mdを作成して取り込む' : '✅ Confirm: write md & index'));
+  }
 }
 
 function renderIngCompoundTray(comp) {
@@ -3638,9 +3679,30 @@ function renderIngCompoundTray(comp) {
   const statusEl = document.getElementById('ing-compound-status');
   if (!tray) return;
   const cur = ingCurEntry();
+  const isSaved = !!(cur && cur.saved);
+  const zh = ingState && ingState.zh;
+  const ja = ingState && ingState.ja;
+
+  // Disable or enable dropdown button based on saved state
+  const repoBtn = document.getElementById('ing-repo-multiselect-btn');
+  if (repoBtn) {
+    if (isSaved) {
+      repoBtn.disabled = true;
+      repoBtn.style.opacity = '0.5';
+      repoBtn.style.cursor = 'not-allowed';
+      repoBtn.title = zh ? '已確認產出 md 入庫，概念庫來源已鎖定' : (ja ? '取り込み完了のため、概念リポジトリ設定はロックされています' : 'Saved and indexed: Concept repository scope locked');
+    } else {
+      repoBtn.disabled = false;
+      repoBtn.style.opacity = '1';
+      repoBtn.style.cursor = 'pointer';
+      repoBtn.title = '';
+    }
+  }
+
   if (!comp || (!comp.matched && !comp.matched_concepts)) {
-    tray.innerHTML = `<span style="font-size:13px;color:#8b949e;">${ingState && ingState.zh ? '（產生摘要後將自動比對知識庫既有官方概念）' : '(Official concepts will appear here)'}</span>`;
-    if (statusEl) statusEl.textContent = ingState && ingState.zh ? '摘要生成後自動比對官方概念' : 'Ready';
+    const emptyHint = zh ? '（產生摘要後將自動比對知識庫既有官方概念）' : (ja ? '（要約生成後にナレッジベースの既存概念を自動照合します）' : '(Official concepts will appear here once summarized)');
+    tray.innerHTML = `<span style="font-size:13px;color:#8b949e;">${emptyHint}</span>`;
+    if (statusEl) statusEl.textContent = zh ? '摘要生成後自動比對官方概念' : (ja ? '要約生成後に公式概念を自動照合' : 'Ready');
     return;
   }
 
@@ -3654,15 +3716,20 @@ function renderIngCompoundTray(comp) {
   const selMatchedCount = cur.selectedMatched.size;
 
   if (statusEl) {
-    statusEl.innerHTML = `<span style="color:#3fb950;font-weight:600;">已選鏈接 ${selMatchedCount}/${matched.length} 個</span> <span style="font-size:11.5px;color:#8b949e;margin-left:6px;">(點擊膠囊切換選取，入庫自動建立實體跳轉超連結)</span>`;
+    if (isSaved) {
+      statusEl.innerHTML = `<span style="color:#3fb950;font-weight:700;">🔒 ${zh ? `已確認入庫（超鏈接已鎖定 ${selMatchedCount} 個，不可修改）` : (ja ? `取り込み完了（リンク ${selMatchedCount} 件ロック中・変更不可）` : `Saved & Indexed (links locked: ${selMatchedCount}, read-only)`)}</span>`;
+    } else {
+      const hintTxt = zh ? '(點擊膠囊切換選取，入庫自動建立實體跳轉超連結)' : (ja ? '(クリックで選択切替。取り込み時に実体リンクを自動作成)' : '(Click pill to toggle. Links will be embedded on save)');
+      statusEl.innerHTML = `<span style="color:#3fb950;font-weight:600;">${zh ? `已選鏈接 ${selMatchedCount}/${matched.length} 個` : (ja ? `リンク選択 ${selMatchedCount}/${matched.length} 件` : `Selected ${selMatchedCount}/${matched.length}`)}</span> <span style="font-size:11.5px;color:#8b949e;margin-left:6px;">${hintTxt}</span>`;
+    }
   }
 
   let html = '';
-  if (matched.length > 0) {
+  if (matched.length > 0 && !isSaved) {
     html += `<div style="display:flex;align-items:center;gap:6px;margin-bottom:6px;width:100%;">
-      <span style="font-size:12px;color:#58a6ff;font-weight:600;">命中官方概念：</span>
-      <button type="button" onclick="ingBatchMatched(true)" style="background:#21262d;border:1px solid #30363d;color:#c9d1d9;border-radius:4px;padding:2px 7px;font-size:11.5px;cursor:pointer;">全選</button>
-      <button type="button" onclick="ingBatchMatched(false)" style="background:#21262d;border:1px solid #30363d;color:#c9d1d9;border-radius:4px;padding:2px 7px;font-size:11.5px;cursor:pointer;">全清</button>
+      <span style="font-size:12px;color:#58a6ff;font-weight:600;">${zh ? '命中官方概念：' : (ja ? '一致した公式概念：' : 'Matched Concepts: ')}</span>
+      <button type="button" onclick="ingBatchMatched(true)" style="background:#21262d;border:1px solid #30363d;color:#c9d1d9;border-radius:4px;padding:2px 7px;font-size:11.5px;cursor:pointer;">${zh ? '全選' : (ja ? 'すべて選択' : 'Select All')}</button>
+      <button type="button" onclick="ingBatchMatched(false)" style="background:#21262d;border:1px solid #30363d;color:#c9d1d9;border-radius:4px;padding:2px 7px;font-size:11.5px;cursor:pointer;">${zh ? '全清' : (ja ? 'すべて解除' : 'Clear All')}</button>
     </div>`;
   }
   matched.forEach(name => {
@@ -3673,13 +3740,173 @@ function renderIngCompoundTray(comp) {
     const checkIcon = isSelected ? '✓ ' : '';
     const opacity = isSelected ? '1' : '0.6';
     const lineThrough = isSelected ? 'none' : 'line-through';
-    html += `<span onclick="ingToggleCompoundPill('matched', '${escapeHtml(name)}')" title="${isSelected ? '已選取入庫鏈接 (點擊取消)' : '已排除 (點擊啟用)'}" style="display:inline-flex;align-items:center;gap:4px;background:${bg};border:1px solid ${border};color:${color};padding:3px 9px;border-radius:6px;font-size:13px;font-weight:600;cursor:pointer;user-select:none;transition:all 0.15s ease;opacity:${opacity};text-decoration:${lineThrough};margin-right:6px;margin-bottom:6px;">🏷️ ${checkIcon}${escapeHtml(name)}</span>`;
+    const cursorStyle = isSaved ? 'cursor:not-allowed;' : 'cursor:pointer;';
+    const clickHandler = isSaved ? '' : `onclick="ingToggleCompoundPill('matched', '${escapeHtml(name)}')"`;
+    const pillTitle = isSaved
+      ? (zh ? '已產出 md 入庫（鎖定不可改）' : (ja ? '取り込み完了（ロック）' : 'Saved and indexed (Locked)'))
+      : (isSelected ? (zh ? '已選取入庫鏈接 (點擊取消)' : (ja ? '選択中 (クリックで除外)' : 'Selected link (Click to exclude)'))
+                    : (zh ? '已排除 (點擊啟用)' : (ja ? '除外中 (クリックで選択)' : 'Excluded (Click to select)')));
+    html += `<span ${clickHandler} title="${pillTitle}" style="display:inline-flex;align-items:center;gap:4px;background:${bg};border:1px solid ${border};color:${color};padding:3px 9px;border-radius:6px;font-size:13px;font-weight:600;${cursorStyle}user-select:none;transition:all 0.15s ease;opacity:${opacity};text-decoration:${lineThrough};margin-right:6px;margin-bottom:6px;">🏷️ ${checkIcon}${escapeHtml(name)}</span>`;
   });
   if (!matched.length) {
-    html = `<span style="font-size:13px;color:#8b949e;">（本文件摘要無命中任何既有官方概念）</span>`;
+    html = `<span style="font-size:13px;color:#8b949e;">${zh ? '（本文件摘要無命中任何既有官方概念）' : (ja ? '（本要約に一致する既存公式概念はありません）' : '(No matching official concepts found)')}</span>`;
   }
   tray.innerHTML = html;
 }
+
+window.ingToggleRepoDropdown = function(ev) {
+  if (ev) ev.stopPropagation();
+  const cur = ingCurEntry();
+  if (cur && cur.saved) return;
+  const menu = document.getElementById('ing-repo-dropdown-menu');
+  if (!menu) return;
+  const isShown = menu.style.display === 'flex';
+  menu.style.display = isShown ? 'none' : 'flex';
+};
+
+window.ingInitRepoDropdown = function() {
+  const st = ingState;
+  if (!st) return;
+  const menu = document.getElementById('ing-repo-dropdown-menu');
+  if (!menu) return;
+
+  const zh = st.zh;
+  const ja = st.ja;
+  // Initialize selected repos if not present: default to current repo
+  if (!st.selectedConceptRepos) {
+    st.selectedConceptRepos = new Set([st.repo]);
+  }
+
+  const allRepos = (allProjectsList || []).filter(p => p.path);
+  const isAllSelected = allRepos.length > 0 && allRepos.every(p => st.selectedConceptRepos.has(p.path));
+
+  let html = '';
+  // Option 1: "All Repos" checkbox
+  const allLabel = zh ? '全部專案庫 (全域打通)' : (ja ? '全リポジトリ (グローバル照合)' : 'All Repositories');
+  html += `
+    <label style="display:flex;align-items:center;gap:8px;padding:5px 8px;border-radius:4px;cursor:pointer;background:${isAllSelected ? '#1f6feb22' : 'transparent'};color:${isAllSelected ? '#58a6ff' : '#e6edf3'};font-size:12.5px;font-weight:600;user-select:none;">
+      <input type="checkbox" id="ing-repo-check-all" ${isAllSelected ? 'checked' : ''} onchange="ingOnRepoAllToggle(this.checked)" style="cursor:pointer;accent-color:#1f6feb;">
+      <span>🌐 ${allLabel}</span>
+    </label>
+    <div style="height:1px;background:#30363d;margin:2px 0;"></div>
+  `;
+
+  // Option 2+: Individual Repositories
+  allRepos.forEach((p, idx) => {
+    const isChecked = st.selectedConceptRepos.has(p.path);
+    const isCurrent = p.path === st.repo;
+    const badgeText = zh ? '本庫' : (ja ? '現在' : 'Current');
+    const badge = isCurrent ? ` <span style="font-size:11px;color:#3fb950;background:#23863622;padding:1px 5px;border-radius:3px;border:1px solid #2ea04344;">${badgeText}</span>` : '';
+    html += `
+      <label style="display:flex;align-items:center;gap:8px;padding:4px 8px;border-radius:4px;cursor:pointer;background:${isChecked ? '#1f6feb15' : 'transparent'};color:#c9d1d9;font-size:12px;user-select:none;">
+        <input type="checkbox" class="ing-repo-item-check" data-idx="${idx}" ${isChecked ? 'checked' : ''} onchange="ingOnRepoItemToggle(${idx}, this.checked)" style="cursor:pointer;accent-color:#1f6feb;">
+        <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${escapeHtml(p.path)}">📁 ${escapeHtml(p.name)}${badge}</span>
+      </label>
+    `;
+  });
+
+  menu.innerHTML = html;
+  ingUpdateRepoButtonLabel();
+};
+
+window.ingUpdateRepoButtonLabel = function() {
+  const st = ingState;
+  const labelEl = document.getElementById('ing-repo-multiselect-label');
+  if (!st || !labelEl) return;
+  const zh = st.zh;
+  const ja = st.ja;
+  const allRepos = (allProjectsList || []).filter(p => p.path);
+  const selCount = st.selectedConceptRepos ? st.selectedConceptRepos.size : 0;
+
+  if (selCount === 0) {
+    labelEl.textContent = zh ? '未選取 (無概念)' : (ja ? '未選択 (概念なし)' : 'None');
+    labelEl.style.color = '#8b949e';
+  } else if (allRepos.length > 0 && selCount >= allRepos.length) {
+    labelEl.textContent = zh ? '全部專案庫' : (ja ? '全リポジトリ' : 'All Repos');
+    labelEl.style.color = '#58a6ff';
+  } else if (selCount === 1) {
+    const singlePath = Array.from(st.selectedConceptRepos)[0];
+    const p = (allProjectsList || []).find(x => x.path === singlePath);
+    labelEl.textContent = p ? p.name : (zh ? '1 個專案庫' : (ja ? '1 リポジトリ' : '1 repo'));
+    labelEl.style.color = '#58a6ff';
+  } else {
+    labelEl.textContent = zh ? `已選 ${selCount} 個專案庫` : (ja ? `${selCount} リポジトリ選択中` : `${selCount} repos`);
+    labelEl.style.color = '#58a6ff';
+  }
+};
+
+window.ingOnRepoAllToggle = function(checked) {
+  const st = ingState;
+  if (!st) return;
+  const allRepos = (allProjectsList || []).filter(p => p.path);
+  if (checked) {
+    st.selectedConceptRepos = new Set(allRepos.map(p => p.path));
+  } else {
+    st.selectedConceptRepos = new Set();
+  }
+  ingInitRepoDropdown();
+  ingTriggerCompoundRefresh();
+};
+
+window.ingOnRepoItemToggle = function(repoIdxOrPath, checked) {
+  const st = ingState;
+  if (!st) return;
+  const allRepos = (allProjectsList || []).filter(p => p.path);
+  let repoPath = '';
+  if (typeof repoIdxOrPath === 'number') {
+    repoPath = allRepos[repoIdxOrPath] ? allRepos[repoIdxOrPath].path : '';
+  } else {
+    repoPath = repoIdxOrPath;
+  }
+  if (!repoPath) return;
+
+  if (!st.selectedConceptRepos) st.selectedConceptRepos = new Set();
+  if (checked) {
+    st.selectedConceptRepos.add(repoPath);
+  } else {
+    st.selectedConceptRepos.delete(repoPath);
+  }
+  ingInitRepoDropdown();
+  ingTriggerCompoundRefresh();
+};
+
+window.ingTriggerCompoundRefresh = function() {
+  const cur = ingCurEntry();
+  const st = ingState;
+  if (!cur || !st || !cur.summary) return;
+  const allRepos = (allProjectsList || []).filter(p => p.path);
+  let conceptRepoParam = '';
+  if (st.selectedConceptRepos && st.selectedConceptRepos.size > 0) {
+    if (st.selectedConceptRepos.size >= allRepos.length) {
+      conceptRepoParam = ''; // Empty string means all repos
+    } else {
+      conceptRepoParam = Array.from(st.selectedConceptRepos).join(',');
+    }
+  } else {
+    conceptRepoParam = '__NONE__';
+  }
+
+  const zh = st.zh;
+  const ja = st.ja;
+  const statusEl = document.getElementById('ing-compound-status');
+  if (statusEl) {
+    const matchingTxt = zh ? '比對概念中…' : (ja ? '概念照合中…' : 'Matching concepts…');
+    statusEl.innerHTML = `<span class="ing-spin">◌</span> ${matchingTxt}`;
+  }
+  fetch('/api/ingest/compound_preview', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ summary_md: cur.summary, repo: st.repo, concept_repo: conceptRepoParam })
+  })
+    .then(cr => cr.json())
+    .then(cd => {
+      if (cd.success && cd.compounding) {
+        cur.compounding = cd.compounding;
+        delete cur.selectedMatched; // Reset to new matched set
+        renderIngCompoundTray(cur.compounding);
+      }
+    }).catch(() => { });
+};
 
 window.ingBatchMatched = function (selectAll) {
   const cur = ingCurEntry();
@@ -3722,6 +3949,7 @@ function ingSelectFile(idx) {
   const e = st.picked[idx];
   if (ed) ed.value = e.summary || '';
   paintIngSelName();
+  paintIngSaveBtn();
   ingShowTab('prev');
   ingRenderPicked();
   renderIngCompoundTray(e.compounding);
@@ -3931,10 +4159,21 @@ function ingSummarizeAll(btn) {
             ingRenderPicked();
 
             // Trigger Compound Preview
+            const allRepos = (allProjectsList || []).filter(p => p.path);
+            let conceptRepoParam = '';
+            if (st.selectedConceptRepos && st.selectedConceptRepos.size > 0) {
+              if (st.selectedConceptRepos.size >= allRepos.length) {
+                conceptRepoParam = ''; // Empty string means all repos
+              } else {
+                conceptRepoParam = Array.from(st.selectedConceptRepos).join(',');
+              }
+            } else {
+              conceptRepoParam = '__NONE__';
+            }
             fetch('/api/ingest/compound_preview', {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ summary_md: e.summary, repo: st.repo })
+              body: JSON.stringify({ summary_md: e.summary, repo: st.repo, concept_repo: conceptRepoParam })
             })
               .then(cr => cr.json())
               .then(cd => {
@@ -4028,10 +4267,12 @@ function ingSave(btn) {
         if (status === 200 && body.success) {
           okCount++;
           outs.push(outFilename);
+          e.saved = true;
           if (body.compounding) {
             e.compounding = body.compounding;
-            renderIngCompoundTray(e.compounding);
           }
+          renderIngCompoundTray(e.compounding);
+          ingRenderPicked();
         } else {
           e.status = 'error';
           e.error = (body && body.error) || String(status);

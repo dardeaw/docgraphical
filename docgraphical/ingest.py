@@ -42,10 +42,12 @@ def FnSanitizeFilename(name: str) -> str:
 
 
 def FnIngestDirOk(target_dir: str, roots: List[str]) -> bool:
-    """Target must resolve inside one of the search roots (no arbitrary writes)."""
+    """Target must resolve inside one of the search roots or be a known registered repository."""
     try:
         t = os.path.abspath(target_dir)
     except Exception:
+        return False
+    if not os.path.isdir(t):
         return False
     for r in roots or []:
         try:
@@ -54,6 +56,18 @@ def FnIngestDirOk(target_dir: str, roots: List[str]) -> bool:
             continue
         if t == a or t.startswith(a + os.sep):
             return True
+    # Fallback: check if target_dir is a valid doc repo (contains .docgraph or markdown catalog)
+    if os.path.isdir(os.path.join(t, ".docgraph")) or os.path.isfile(os.path.join(t, "doc_catalog.md")):
+        return True
+    # Or parent has .docgraph
+    curr = t
+    while True:
+        parent = os.path.dirname(curr)
+        if os.path.isdir(os.path.join(curr, ".docgraph")):
+            return True
+        if parent == curr:
+            break
+        curr = parent
     return False
 
 
@@ -72,7 +86,18 @@ def FnFindOwningRepo(target_dir: str, repos: Dict[str, str]) -> Optional[str]:
         if t == a or t.startswith(a + os.sep):
             if best is None or len(a) > len(best):
                 best = a
-    return best
+    if best:
+        return best
+    # Fallback: check upward for .docgraph directory
+    curr = t
+    while True:
+        if os.path.isdir(os.path.join(curr, ".docgraph")):
+            return curr
+        parent = os.path.dirname(curr)
+        if parent == curr:
+            break
+        curr = parent
+    return t
 
 
 def FnExtractText(path: str) -> Dict[str, Any]:
@@ -202,6 +227,7 @@ def FnExtractText(path: str) -> Dict[str, Any]:
             from pypdf import PdfReader
             reader = PdfReader(path)
             chunks = []
+            missing_text_pages = []
             for i, page in enumerate(reader.pages, 1):
                 try:
                     t = page.extract_text() or ""
@@ -209,15 +235,18 @@ def FnExtractText(path: str) -> Dict[str, Any]:
                     t = ""
                 if t.strip():
                     chunks.append("[Page %d]\n%s" % (i, t.strip()))
+                else:
+                    missing_text_pages.append(i)
             text = "\n\n".join(chunks)
     except Exception as e:
         return {"ok": False, "error": "%s: %s" % (type(e).__name__, e)}
     text = (text or "").strip()
     if not text:
-        return {"ok": False, "error": "抽不到文字（可能是掃描圖片型 PDF/ppt）"}
+        return {"ok": False, "error": "抽不到文字（可能是掃描圖片型 PDF/ppt）", "missing_text_pages": missing_text_pages}
     truncated = len(text) > MAX_TEXT_CHARS
     return {"ok": True, "text": text[:MAX_TEXT_CHARS],
-            "chars": len(text), "truncated": truncated}
+            "chars": len(text), "truncated": truncated,
+            "missing_text_pages": missing_text_pages}
 
 
 def FnChatSummarize(text: str, source_names: List[str]) -> Dict[str, Any]:
@@ -739,33 +768,65 @@ def FnIngestCompoundTagging(summary_text: str, repo_path: str) -> Dict[str, Any]
     import urllib.request
     from .db import get_db_path
 
-    # 1. Fetch official concepts and blacklisted terms from db
-    official_concepts = []
-    blacklist_terms = []
-    db_p = None
-    try:
-        db_p = get_db_path(repo_path)
-    except Exception:
-        db_p = None
+    # 1. Fetch official concepts and blacklisted terms across requested repo(s)
+    # repo_path can be a single path, or comma-separated paths, or empty for all known repos
+    repos_to_scan = []
+    if repo_path and repo_path.strip():
+        for p in repo_path.split(","):
+            p = p.strip()
+            if os.path.isdir(p) and p not in repos_to_scan:
+                repos_to_scan.append(os.path.realpath(p))
 
-    if db_p and os.path.isfile(db_p):
+    if not repos_to_scan:
+        from .config import get_search_roots
+        from .pipeline import scan_doc_repositories
         try:
-            con = sqlite3.connect(db_p)
-            try:
-                for r in con.execute("SELECT name, aliases, category FROM concepts WHERE status <> 'candidate'"):
-                    c_name = r[0]
-                    c_aliases = r[1] or ""
-                    c_cat = r[2] or ""
-                    alias_str = f" (別名: {c_aliases})" if c_aliases else ""
-                    cat_str = f" [{c_cat}]" if c_cat else ""
-                    official_concepts.append(f"- {c_name}{alias_str}{cat_str}")
-                for r in con.execute("SELECT term FROM rejected_terms"):
-                    if r[0]:
-                        blacklist_terms.append(r[0])
-            finally:
-                con.close()
-        except Exception as e:
+            all_r = scan_doc_repositories(get_search_roots())
+            vals = all_r.values() if isinstance(all_r, dict) else (all_r or [])
+            for v in vals:
+                p = v.get("path", "") if isinstance(v, dict) else str(v)
+                if p and os.path.isdir(p) and p not in repos_to_scan:
+                    repos_to_scan.append(os.path.realpath(p))
+        except Exception:
             pass
+
+    concept_dict = {}  # name -> {aliases, category, repos: []}
+    blacklist_set = set()
+
+    for rp in repos_to_scan:
+        rp_name = os.path.basename(rp.rstrip("/\\")) or rp
+        db_p = None
+        try:
+            db_p = get_db_path(rp)
+        except Exception:
+            db_p = None
+        if db_p and os.path.isfile(db_p):
+            try:
+                con = sqlite3.connect(db_p)
+                try:
+                    for r in con.execute("SELECT name, aliases, category FROM concepts WHERE status <> 'candidate'"):
+                        c_name = r[0]
+                        c_aliases = r[1] or ""
+                        c_cat = r[2] or ""
+                        if c_name not in concept_dict:
+                            concept_dict[c_name] = {"aliases": c_aliases, "category": c_cat, "repos": [rp_name]}
+                        else:
+                            if rp_name not in concept_dict[c_name]["repos"]:
+                                concept_dict[c_name]["repos"].append(rp_name)
+                    for r in con.execute("SELECT term FROM rejected_terms"):
+                        if r[0]:
+                            blacklist_set.add(r[0])
+                finally:
+                    con.close()
+            except Exception:
+                pass
+
+    official_concepts = []
+    for c_name, meta in sorted(concept_dict.items()):
+        alias_str = f" (別名: {meta['aliases']})" if meta.get("aliases") else ""
+        cat_str = f" [{meta['category']}]" if meta.get("category") else ""
+        repo_str = f" <來源: {','.join(meta['repos'])}>" if meta.get("repos") else ""
+        official_concepts.append(f"- {c_name}{alias_str}{cat_str}{repo_str}")
 
     official_list_str = "\n".join(official_concepts) if official_concepts else "(尚無官方概念)"
 

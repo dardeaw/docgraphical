@@ -110,14 +110,34 @@ def run_vine_pipeline(repo_path: str, concept_name: str, target_quota: int = 20,
     1. target_quota (e.g. 20) newly unlinked candidate sections are discovered, or
     2. all relevant walk paths are exhausted.
     """
+    res = {}
+    for ev in run_vine_pipeline_stream(repo_path, concept_name, target_quota=target_quota, max_walk_files=max_walk_files):
+        if ev.get("event") == "done":
+            res = ev.get("data", {})
+        elif ev.get("event") == "error":
+            return {"ok": False, "error": ev.get("error")}
+    return res or {"ok": False, "error": "No result produced"}
+
+
+def run_vine_pipeline_stream(repo_path: str, concept_name: str, target_quota: int = 20, max_walk_files: int = 30):
+    """Generator yielding real-time SSE events during Vine deep crawl.
+    
+    Events yielded:
+    - {"event": "start", "run_id": str, "title": str, "existing_count": int, "existing_docs": int}
+    - {"event": "progress", "file": str, "spent": int, "walked_files": int, "step": int, "max_steps": int, "status": str}
+    - {"event": "hit", "item": dict, "count": int}
+    - {"event": "done", "data": dict}
+    - {"event": "error", "error": str}
+    """
     from .db import get_db_path
-    from .crawl import FnCrawlStart, FnCrawlNext, FnCrawlFinish, _is_doc_file, _RUNS
+    from .crawl import FnCrawlStart, FnCrawlNext, FnCrawlFinish, _is_doc_file, _locate_mention, _is_noise
 
     name = (concept_name or "").strip()
     repo = os.path.abspath(repo_path)
     db_path = get_db_path(repo)
     if not db_path or not os.path.isfile(db_path):
-        return {"ok": False, "error": f"Database not found for {repo}"}
+        yield {"event": "error", "error": f"Database not found for {repo}"}
+        return
 
     con = sqlite3.connect(db_path)
     try:
@@ -132,27 +152,119 @@ def run_vine_pipeline(repo_path: str, concept_name: str, target_quota: int = 20,
 
     st = FnCrawlStart(repo, seed_text=name, max_starts=5)
     if not st.get("ok"):
-        return {"ok": False, "error": st.get("error") or "Vine start failed"}
+        yield {"event": "error", "error": st.get("error") or "Vine start failed"}
+        return
     
     run_id = st["run_id"]
     spent_total += 1
 
+    yield {
+        "event": "start",
+        "run_id": run_id,
+        "title": name,
+        "quota": target_quota,
+        "existing_count": metrics["ref_count"],
+        "existing_docs": metrics["doc_count"]
+    }
+
     walked_files = 0
     max_steps = max(10, max_walk_files * 2)
 
-    for _ in range(max_steps):
+    def _eval_and_yield_candidate(f, m):
+        if not f or not m or _is_noise(m) or not _is_doc_file(f):
+            return None
+        loc = _locate_mention(repo, f, m) or {}
+        h = loc.get("heading") or ""
+        ln = loc.get("line") or 0
+        lvl = loc.get("level", 0)
+
+        target_key = f"{f}::{h}" if h else f
+        if target_key in seen_keys:
+            return None
+
+        # Check against redundant file-level heading
+        f_basename = os.path.basename(f)
+        f_no_ext = f_basename[:-3] if f_basename.lower().endswith(".md") else f_basename
+        c_base = re.sub(r"^[0-9_\-\s]+", "", f_no_ext).lower().strip()
+        c_h1 = re.sub(r"^[0-9_\-\s]+", "", h).lower().strip()
+        c_base = re.sub(r"^\d{8}_[^\s_]+_", "", c_base).strip()
+        c_h1 = re.sub(r"^\d{8}_[^\s_]+_", "", c_h1).strip()
+        if ln <= 3 and (h.strip() == f_no_ext.strip() or c_base == c_h1 or (c_base and c_base in c_h1) or (c_h1 and c_h1 in c_base)):
+            return None
+
+        # Check against existing knowledge base links
+        if is_already_linked(f, h, signatures):
+            return None
+
+        item = {
+            "file": f,
+            "term": m,
+            "line": ln,
+            "heading": h,
+            "level": lvl,
+            "refId": f"heading::{f}::L{ln}::{h}" if h else f"file::{f}",
+            "snippet": m
+        }
+        # Try extracting context snippet from file
+        try:
+            with open(os.path.join(repo, f), "r", encoding="utf-8", errors="replace") as fh:
+                f_lines = fh.readlines()
+                if 1 <= ln <= len(f_lines):
+                    item["snippet"] = f_lines[ln - 1].strip()
+        except Exception:
+            pass
+        seen_keys.add(target_key)
+        new_items.append(item)
+        return item
+
+    for step_idx in range(1, max_steps + 1):
         if len(new_items) >= target_quota:
             break
 
         nx = FnCrawlNext(run_id, max_files=max_walk_files)
         if not nx.get("ok"):
             break
+
+        current_node = nx.get("node") or ""
         if nx.get("kind") == "file":
             walked_files += 1
+
+        spent_total = nx.get("spent", spent_total)
+
+        yield {
+            "event": "progress",
+            "file": current_node,
+            "kind": nx.get("kind", ""),
+            "spent": spent_total,
+            "walked_files": walked_files,
+            "step": step_idx,
+            "max_steps": max_steps,
+            "found_count": len(new_items),
+            "status": f"掃描中：{os.path.basename(current_node) if current_node else '分析節點'}"
+        }
+
+        # Check newly staged items in this batch
+        batch = nx.get("batch") or []
+        for b in batch:
+            b_file = b.get("node")
+            for c in b.get("concepts") or []:
+                m_term = c.get("term")
+                cand = _eval_and_yield_candidate(b_file, m_term)
+                if cand:
+                    yield {
+                        "event": "hit",
+                        "item": cand,
+                        "count": len(new_items)
+                    }
+                    if len(new_items) >= target_quota:
+                        break
+            if len(new_items) >= target_quota:
+                break
 
         if nx.get("done"):
             break
 
+    # Final stage evaluation
     fin = FnCrawlFinish(run_id)
     spent_total += fin.get("spent", 0)
     raw_kept = fin.get("kept") or []
@@ -160,35 +272,17 @@ def run_vine_pipeline(repo_path: str, concept_name: str, target_quota: int = 20,
     for k in raw_kept:
         f = (k or {}).get("file")
         m = (k or {}).get("term")
-        h = (k or {}).get("heading") or ""
-        if not f or not m or not _is_doc_file(f):
-            continue
-        
-        target_key = f"{f}::{h}" if h else f
-        if target_key in seen_keys:
-            continue
-        
-        # Check against redundant file-level heading (e.g. line 1 heading equals filename)
-        f_basename = os.path.basename(f)
-        f_no_ext = f_basename[:-3] if f_basename.lower().endswith(".md") else f_basename
-        c_base = re.sub(r"^[0-9_\-\s]+", "", f_no_ext).lower().strip()
-        c_h1 = re.sub(r"^[0-9_\-\s]+", "", h).lower().strip()
-        c_base = re.sub(r"^\d{8}_[^\s_]+_", "", c_base).strip()
-        c_h1 = re.sub(r"^\d{8}_[^\s_]+_", "", c_h1).strip()
-        ln = (k or {}).get("line") or 0
-        if ln <= 3 and (h.strip() == f_no_ext.strip() or c_base == c_h1 or (c_base and c_base in c_h1) or (c_h1 and c_h1 in c_base)):
-            continue
+        cand = _eval_and_yield_candidate(f, m)
+        if cand:
+            yield {
+                "event": "hit",
+                "item": cand,
+                "count": len(new_items)
+            }
+            if len(new_items) >= target_quota:
+                break
 
-        # Check against existing knowledge base links
-        if is_already_linked(f, h, signatures):
-            continue
-
-        seen_keys.add(target_key)
-        new_items.append(k)
-        if len(new_items) >= target_quota:
-            break
-
-    return {
+    final_payload = {
         "ok": True,
         "title": name,
         "quota": target_quota,
@@ -199,6 +293,11 @@ def run_vine_pipeline(repo_path: str, concept_name: str, target_quota: int = 20,
         "existing_docs": metrics["doc_count"],
         "spent": spent_total,
         "walked_files": walked_files
+    }
+
+    yield {
+        "event": "done",
+        "data": final_payload
     }
 
 
@@ -298,12 +397,31 @@ def scan_candidate_sections(repo_path: str, rel_file: str, terms: List[str], sig
 
 def run_prospect_pipeline(repo_paths: List[str], db_path: str, concept_name: str, target_quota: int = 20) -> Dict[str, Any]:
     """Execute Prospect recount for a single concept with hierarchical section discovery (md -> h1 -> h2)."""
+    res = {}
+    for ev in run_prospect_pipeline_stream(repo_paths, db_path, concept_name, target_quota=target_quota):
+        if ev.get("event") == "done":
+            res = ev.get("data", {})
+        elif ev.get("event") == "error":
+            return {"ok": False, "error": ev.get("error")}
+    return res or {"ok": False, "error": "No result produced"}
+
+
+def run_prospect_pipeline_stream(repo_paths: List[str], db_path: str, concept_name: str, target_quota: int = 20):
+    """Generator yielding real-time SSE events during Prospect recount with section discovery."""
     from .concept_scan import FnRecountOneTerm, FnMineCorpus, _FnNorm
 
     name = (concept_name or "").strip()
+    yield {
+        "event": "start",
+        "title": name,
+        "quota": target_quota,
+        "type": "prospect"
+    }
+
     res = FnRecountOneTerm(repo_paths, db_path, name)
     if not res.get("ok"):
-        return res
+        yield {"event": "error", "error": res.get("error") or "Prospect recount failed"}
+        return
 
     con = sqlite3.connect(db_path)
     try:
@@ -311,6 +429,15 @@ def run_prospect_pipeline(repo_paths: List[str], db_path: str, concept_name: str
         sigs = get_linked_section_signatures(con, name)
     finally:
         con.close()
+
+    yield {
+        "event": "progress",
+        "status": f"統計詞頻完成（DF: {res.get('df', 0)}, TF: {res.get('tf', 0)}），檢索別名與落點檔案中...",
+        "df": res.get("df", 0),
+        "tf": res.get("tf", 0),
+        "existing_count": metrics["ref_count"],
+        "existing_docs": metrics["doc_count"]
+    }
 
     # Query aliases from concepts table
     aliases = []
@@ -343,11 +470,22 @@ def run_prospect_pipeline(repo_paths: List[str], db_path: str, concept_name: str
                     continue
                 matched_rel_files.add(f_rel)
 
-    # Scan sections for all matching files
+    sorted_files = sorted(matched_rel_files)
+    total_files = len(sorted_files)
     primary_repo = repo_paths[0] if repo_paths else ""
     all_sections = []
-    for f_rel in sorted(matched_rel_files):
-        # Locate file on disk
+    unlinked_candidates = []
+    linked_candidates = []
+
+    for idx, f_rel in enumerate(sorted_files, 1):
+        yield {
+            "event": "progress",
+            "file": f_rel,
+            "step": idx,
+            "max_steps": total_files,
+            "status": f"分析章節落點 ({idx}/{total_files})：{os.path.basename(f_rel)}"
+        }
+
         f_repo = primary_repo
         for rp in repo_paths:
             if os.path.isfile(os.path.join(rp, f_rel)):
@@ -356,9 +494,16 @@ def run_prospect_pipeline(repo_paths: List[str], db_path: str, concept_name: str
         sec_list = scan_candidate_sections(f_repo, f_rel, terms_to_check, sigs)
         all_sections.extend(sec_list)
 
-    # Separate unlinked vs already linked
-    unlinked_candidates = [s for s in all_sections if not s.get("already_linked")]
-    linked_candidates = [s for s in all_sections if s.get("already_linked")]
+        for s in sec_list:
+            if s.get("already_linked"):
+                linked_candidates.append(s)
+            else:
+                unlinked_candidates.append(s)
+                yield {
+                    "event": "hit",
+                    "item": s,
+                    "count": len(unlinked_candidates)
+                }
 
     # Hierarchical sort order: level ascending (0=md, 1=h1, 2=h2, 3=h3), then file path, then line number
     unlinked_candidates.sort(key=lambda x: (x.get("level", 99), x.get("file", ""), x.get("line", 0)))
@@ -366,10 +511,7 @@ def run_prospect_pipeline(repo_paths: List[str], db_path: str, concept_name: str
     # Cap unlinked candidates by target_quota (default 20)
     capped_unlinked = unlinked_candidates[:target_quota]
 
-    # Combined candidate list for review dialog
-    final_candidates = capped_unlinked + [s for s in linked_candidates if s.get("level") == 0]
-
-    return {
+    final_payload = {
         "ok": True,
         "term": name,
         "quota": target_quota,
@@ -383,4 +525,10 @@ def run_prospect_pipeline(repo_paths: List[str], db_path: str, concept_name: str
         "existing_count": metrics["ref_count"],
         "existing_docs": metrics["doc_count"]
     }
+
+    yield {
+        "event": "done",
+        "data": final_payload
+    }
+
 

@@ -7,6 +7,20 @@ All notable changes to the DocGraphical project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.0.6] - 2026-11-10
+
+### Added & Improved
+- **Multi-Repository Concept Scope & Global Matching**:
+  - Added an interactive concept repository scope selector to the Ingest panel, supporting single repository, custom subset selection, or global multi-repo matching.
+  - Dynamically triggers real-time official concept matching on selection change, with full English, Traditional Chinese, and Japanese i18n support.
+- **Ingest Save & Lock Safeguard**:
+  - Once document summaries are written and indexed into the knowledge base, the concept repository selector, concept pills, and filename input are locked with disabled states (`cursor: not-allowed`) to prevent accidental overwrites while clearly showcasing established wiki links.
+- **Robust SSE Streaming & Multi-Repo Exploration**:
+  - Implemented SSE streaming endpoints (`/api/crawl/refresh/stream` and `/api/concepts/scan/recount-one/stream`) for real-time progress visualization and cancelability.
+  - Enhanced Vine crawling and Prospect recounting pipelines to seamlessly aggregate across registered repositories.
+
+---
+
 ## [3.0.5] - 2026-11-06
 
 ### Added & Improved
