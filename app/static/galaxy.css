@@ -3922,9 +3922,8 @@ select.modal-input:focus,
   padding: 4px 12px !important;
 }
 
-/* LLM Settings Form & Model List Polish */
+/* LLM Settings Form & Model List Polish (display is driven by switchSettingsTab inline style; never !important it) */
 #stg-page-llm {
-  display: flex !important;
   flex-direction: column !important;
   height: 100% !important;
   overflow: hidden !important;
@@ -4041,3 +4040,57 @@ select.modal-input:focus,
 
 
 
+
+/* In-doc find bar (Ctrl+F, docked inside the Markdown reader panel) */
+#doc-find-bar {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  z-index: 60;
+  display: none;
+  align-items: center;
+  gap: 4px;
+  background: #161b22;
+  border: 1px solid #388bfd;
+  border-radius: 6px;
+  padding: 5px 6px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.6);
+  width: 400px;
+  max-width: calc(100% - 16px);
+  box-sizing: border-box;
+  font-size: 12px;
+}
+#doc-find-bar .mini-btn {
+  padding: 2px 6px !important;
+  font-size: 11px !important;
+  line-height: 1.2 !important;
+  border-radius: 4px !important;
+  min-width: 0 !important;
+  flex-shrink: 0 !important;
+}
+#doc-find-bar input {
+  flex: 1 1 auto !important;
+  min-width: 0 !important;
+  width: auto !important;
+  font-size: 12px !important;
+  padding: 4px 8px !important;
+  border-radius: 4px !important;
+}
+#doc-find-bar #doc-find-count {
+  font-size: 11px;
+  min-width: 52px;
+  text-align: center;
+  flex-shrink: 0;
+  color: #8b949e;
+}
+.doc-find-hit {
+  background: #7a5c00;
+  color: #fff;
+  border-radius: 2px;
+  padding: 0 1px;
+}
+.doc-find-hit.current {
+  background: #ff8c00;
+  color: #000;
+  outline: 1px solid #ffd700;
+}

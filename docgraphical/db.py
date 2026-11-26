@@ -81,15 +81,41 @@ CREATE VIRTUAL TABLE IF NOT EXISTS nodes_fts USING fts5(
 """
 
 
+_CORE_TABLES = ("nodes", "edges", "files")
+
+
+def _FnDbHasCoreTables(db_path: str) -> bool:
+    """True if the sqlite file exists and contains the core graph tables.
+
+    Guards every read path against 0-byte / half-written DB files left by
+    crashed indexing runs (sqlite3.connect creates the file on open, schema
+    may never have been written). Read-only open, never creates anything.
+    """
+    try:
+        if not db_path or not os.path.exists(db_path):
+            return False
+        con = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
+        try:
+            tables = {r[0] for r in con.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+        finally:
+            con.close()
+        return all(t in tables for t in _CORE_TABLES)
+    except Exception:
+        return False
+
+
 def get_db_path(repo_path: str) -> str:
     repo_path = os.path.abspath(repo_path)
-    for candidate in [
+    cands = [
         os.path.join(repo_path, ".docgraphical", "docgraphical.db"),
         os.path.join(repo_path, ".docgraph", "docgraph.db"),
         os.path.join(repo_path, ".docgraphical", "docgraph.db"),
         os.path.join(repo_path, ".docgraph", "docgraphical.db"),
-    ]:
-        if os.path.exists(candidate):
+    ]
+    # Prefer a DB that actually has the core schema; a schemaless file
+    # (0-byte / half-written by a crashed run) must never win.
+    for candidate in cands:
+        if _FnDbHasCoreTables(candidate):
             return candidate
     dot_dir = os.path.join(repo_path, ".docgraphical")
     os.makedirs(dot_dir, exist_ok=True)
@@ -110,7 +136,11 @@ def compute_hash(content: str) -> str:
 
 
 def _FnExistingDbPath(repo_path: str) -> Optional[str]:
-    """Return the existing DB path without creating anything (None = no index)."""
+    """Return the existing DB path without creating anything (None = no index).
+
+    Schemaless files (0-byte / half-written) are skipped so one bad repo
+    can never poison a merged multi-repo read.
+    """
     repo_path = os.path.abspath(repo_path)
     for candidate in [
         os.path.join(repo_path, ".docgraphical", "docgraphical.db"),
@@ -118,7 +148,7 @@ def _FnExistingDbPath(repo_path: str) -> Optional[str]:
         os.path.join(repo_path, ".docgraphical", "docgraph.db"),
         os.path.join(repo_path, ".docgraph", "docgraphical.db"),
     ]:
-        if os.path.exists(candidate):
+        if _FnDbHasCoreTables(candidate):
             return candidate
     return None
 
@@ -534,19 +564,15 @@ def _FnSyncGlobalIndex(cur: sqlite3.Cursor, repo_path: str) -> None:
                 pass
         with open(idx_path, "w", encoding="utf-8") as f:
             f.write(final_content)
-        # Auto-index DOC_CATALOG.md itself into files/nodes so it is never marked as "pending/unindexed"
+        # Auto-index DOC_CATALOG.md itself into files/nodes so it is never marked as "pending/unindexed".
+        # Must be a FULL parse (file node + headings), not a files-row-only
+        # upsert: a freshly compiled catalog never went through the main
+        # parse loop, and a files-only row renders as permanently unindexed.
+        # Concepts stay out via the AST Isolation Guard in _FnInsertFileNodes.
         try:
             rel_cat = "DOC_CATALOG.md"
-            st_cat = os.stat(idx_path)
-            c_hash_cat = compute_hash(final_content)
-            cur.execute("""
-                INSERT INTO files (path, content_hash, size, modified_at, node_count)
-                VALUES (?, ?, ?, ?, 0)
-                ON CONFLICT(path) DO UPDATE SET
-                    content_hash = excluded.content_hash,
-                    size = excluded.size,
-                    modified_at = excluded.modified_at
-            """, (rel_cat, c_hash_cat, st_cat.st_size, st_cat.st_mtime))
+            _FnDeleteFileRows(cur, rel_cat)
+            _FnInsertFileNodes(cur, repo_path, idx_path, rel_cat)
         except Exception:
             pass
     except Exception:
@@ -559,75 +585,86 @@ def fetch_graph_data(repo_path: str) -> Dict[str, Any]:
     if not os.path.exists(db_path):
         index_repository(repo_path)
 
-    conn = sqlite3.connect(db_path)
-    cur = conn.cursor()
+    try:
+        conn = sqlite3.connect(db_path)
+        cur = conn.cursor()
+        # A repo whose DB lost its schema must read as "unindexed", never 500.
+        if not _FnDbHasCoreTables(db_path):
+            return {"nodes": [], "links": []}
 
-    # Fetch nodes, filtering out isolated concepts (must have >= 2 distinct sources)
-    cur.execute("""
+        # Fetch nodes, filtering out isolated concepts (must have >= 2 distinct sources)
+        cur.execute("""
         SELECT id, name, kind, level, start_line, end_line, token_estimate, file_path, content
         FROM nodes
         WHERE kind != 'concept'
            OR id IN (SELECT target FROM edges WHERE kind = 'wiki_link')
            OR name IN (SELECT name FROM concepts);
     """)
-    rows = cur.fetchall()
+        rows = cur.fetchall()
 
-    nodes = []
-    KIND_COLORS = {
-        "concept": "#e2e8f0",
-        "file": "#f0883e",       # Document (Warm Cyber Orange)
-        "heading_1": "#58a6ff",  # H1 Primary (Electric Blue)
-        "heading_2": "#3fb950",  # H2 Major (Emerald Green)
-        "heading_3": "#bc8cff",  # H3 Subsection (Vivid Purple)
-        "heading_4": "#ff7bba",  # H4 Detail (Vibrant Rose Pink - 100% distinct from Document Orange!)
-        "heading_5": "#00d2d3",  # H5 Fine (Cyan / Turquoise)
-        "heading_6": "#ffd700",  # H6 Micro (Bright Gold)
-    }
+        nodes = []
+        KIND_COLORS = {
+            "concept": "#e2e8f0",
+            "file": "#f0883e",       # Document (Warm Cyber Orange)
+            "heading_1": "#58a6ff",  # H1 Primary (Electric Blue)
+            "heading_2": "#3fb950",  # H2 Major (Emerald Green)
+            "heading_3": "#bc8cff",  # H3 Subsection (Vivid Purple)
+            "heading_4": "#ff7bba",  # H4 Detail (Vibrant Rose Pink - 100% distinct from Document Orange!)
+            "heading_5": "#00d2d3",  # H5 Fine (Cyan / Turquoise)
+            "heading_6": "#ffd700",  # H6 Micro (Bright Gold)
+        }
 
-    # Hierarchy-based gradual sizing: File(12) -> H1(8.5) -> H2(6.0) -> H3(4.2) -> H4(3.0) -> H5/6(2.2)
-    KIND_VALS = {
-        "concept": 9.5,
-        "file": 12.0,
-        "heading_1": 8.5,
-        "heading_2": 6.0,
-        "heading_3": 4.2,
-        "heading_4": 3.0,
-        "heading_5": 2.2,
-        "heading_6": 1.8
-    }
+        # Hierarchy-based gradual sizing: File(12) -> H1(8.5) -> H2(6.0) -> H3(4.2) -> H4(3.0) -> H5/6(2.2)
+        KIND_VALS = {
+            "concept": 9.5,
+            "file": 12.0,
+            "heading_1": 8.5,
+            "heading_2": 6.0,
+            "heading_3": 4.2,
+            "heading_4": 3.0,
+            "heading_5": 2.2,
+            "heading_6": 1.8
+        }
 
-    for r in rows:
-        nid, name, kind, level, start_l, end_l, tokens, fpath, content = r
-        val = KIND_VALS.get(kind, 3.0)
-        nodes.append({
-            "id": nid,
-            "name": name,
-            "kind": kind,
-            "level": level,
-            "line": start_l,
-            "file": fpath,
-            "abs_path": os.path.normpath(os.path.join(repo_path, fpath)) if not os.path.isabs(fpath) else fpath,
-            "tokens": tokens,
-            "val": val,
-            "project": os.path.basename(os.path.normpath(repo_path)) or repo_path,
-            "color": KIND_COLORS.get(kind, "#8b949e"),
-            "content": content
-        })
+        for r in rows:
+            nid, name, kind, level, start_l, end_l, tokens, fpath, content = r
+            val = KIND_VALS.get(kind, 3.0)
+            nodes.append({
+                "id": nid,
+                "name": name,
+                "kind": kind,
+                "level": level,
+                "line": start_l,
+                "file": fpath,
+                "abs_path": os.path.normpath(os.path.join(repo_path, fpath)) if not os.path.isabs(fpath) else fpath,
+                "tokens": tokens,
+                "val": val,
+                "project": os.path.basename(os.path.normpath(repo_path)) or repo_path,
+                "color": KIND_COLORS.get(kind, "#8b949e"),
+                "content": content
+            })
 
-    cur.execute("SELECT id, source, target, kind FROM edges;")
-    edges = []
-    for r in cur.fetchall():
-        eid, src, tgt, kind = r
-        edges.append({
-            "id": eid,
-            "source": src,
-            "target": tgt,
-            "kind": kind,
-            "color": "rgba(88, 166, 255, 0.45)" if kind == "parent_child" else "rgba(0, 255, 170, 0.75)"
-        })
+        cur.execute("SELECT id, source, target, kind FROM edges;")
+        edges = []
+        for r in cur.fetchall():
+            eid, src, tgt, kind = r
+            edges.append({
+                "id": eid,
+                "source": src,
+                "target": tgt,
+                "kind": kind,
+                "color": "rgba(88, 166, 255, 0.45)" if kind == "parent_child" else "rgba(0, 255, 170, 0.75)"
+            })
 
-    conn.close()
-    return {"nodes": nodes, "links": edges}
+        return {"nodes": nodes, "links": edges}
+    except Exception:
+        # Corrupt / half-written DB mid-read: unindexed, never 500.
+        return {"nodes": [], "links": []}
+    finally:
+        try:
+            conn.close()
+        except Exception:
+            pass
 
 
 def fetch_graph_merged(repo_paths: List[str]) -> Dict[str, Any]:
@@ -950,15 +987,19 @@ def get_concepts_tree(repo_path: str) -> dict:
                 official_tree[cat].append(item)
 
         # 4. Auto-discover candidate concepts from edges that are not yet in concepts table
-        cur.execute("""
+        try:
+            cur.execute("""
             SELECT target, COUNT(DISTINCT source) 
             FROM edges 
             WHERE kind = 'wiki_link' 
             GROUP BY target 
             HAVING COUNT(DISTINCT source) >= 2
         """)
+            edge_rows = cur.fetchall()
+        except Exception:
+            edge_rows = []
         known_names = {r[0] for r in rows}
-        for tgt, cnt in cur.fetchall():
+        for tgt, cnt in edge_rows:
             cname = tgt.replace("concept::", "")
             if cname not in known_names:
                 # Add auto candidate
@@ -1779,6 +1820,8 @@ def lint_repository(repo_path: str) -> Dict[str, Any]:
     p = get_db_path(repo_path)
     if not os.path.exists(p):
         return {"ok": False, "error": "Database not found for repository"}
+    if not _FnDbHasCoreTables(p):
+        return {"ok": False, "error": "Database not initialized for repository"}
 
     conn = sqlite3.connect(p)
     cur = conn.cursor()

@@ -13,6 +13,10 @@ let allProjectsList = [];
 const selectedProjects = new Set();
 // Explorer checkbox selection persists across reloads/refresh (galaxy-style)
 const PROJECTS_SEL_KEY = 'docgraphical-selected-projects';
+// Scoped per workspace so two workspaces never share checkbox state.
+function projectSelKey() {
+  try { return PROJECTS_SEL_KEY + '.' + getTabWorkspaceId(); } catch (e) { return PROJECTS_SEL_KEY; }
+}
 
 const highlightNodes = new Set();
 const highlightLinks = new Set();
@@ -918,7 +922,7 @@ function getNodeRelativePathInProject(n, projName) {
 
 // ─── 3. Project & Graph Data Loading ──────────────────────────────
 function persistSelectedProjects() {
-  try { localStorage.setItem(PROJECTS_SEL_KEY, JSON.stringify(Array.from(selectedProjects))); } catch (e) { /* ignore */ }
+  try { localStorage.setItem(projectSelKey(), JSON.stringify(Array.from(selectedProjects))); } catch (e) { /* ignore */ }
 }
 
 function loadProjects(opts = {}) {
@@ -939,7 +943,7 @@ function loadProjects(opts = {}) {
       if (bPreserve && vPrev) {
         vChosen = vPrev;
       } else {
-        try { vChosen = JSON.parse(localStorage.getItem(PROJECTS_SEL_KEY) || 'null'); } catch (e) { vChosen = null; }
+        try { vChosen = JSON.parse(localStorage.getItem(projectSelKey()) || 'null'); } catch (e) { vChosen = null; }
       }
       if (Array.isArray(vChosen) && vChosen.length) {
         vChosen.filter(n => vNames.has(n)).forEach(n => selectedProjects.add(n));
@@ -1006,7 +1010,16 @@ function loadMasterGraphAndFilter() {
       masterGraphData = data || { nodes: [], links: [] };
       filterGraphBySelectedProjects(true);
     })
-    .catch(err => console.error('Failed to load graph:', err));
+    .catch(err => {
+      console.error('Failed to load graph:', err);
+      // Never leave the explorer stuck on the previous workspace: render
+      // whatever we have (project list + pending files) and tell the user.
+      try { buildProjectTree(); } catch (e) { /* ignore */ }
+      try {
+        const lang = (typeof currentLanguage !== 'undefined') ? currentLanguage : 'zh';
+        if (typeof showToast === 'function') showToast(lang === 'zh' ? '⚠ 圖譜載入失敗，已顯示專案清單，可按全部同步重試' : 'Graph load failed; project list shown, press Sync to retry');
+      } catch (e) { /* ignore */ }
+    });
 }
 
 function filterGraphBySelectedProjects(isInitial = false) {
@@ -2811,7 +2824,6 @@ function scanDirectory() {
     .then(res => res.json())
     .then(res => {
       if (res.success) {
-        input.value = '';
         loadProjects();
         const lang = (typeof currentLanguage !== 'undefined') ? currentLanguage : 'zh';
         const msg = lang === 'zh' ? '✅ 目錄已加入專案儲存庫！' : '✅ Directory added successfully!';
@@ -2908,6 +2920,84 @@ function renderRepoTable(projects) {
     </td>`;
     tbody.appendChild(tr);
   }
+
+  // Excluded list lives below the table; refresh it on every repo load.
+  loadExcludedList();
+}
+
+// Excluded roots, shown below the repo table so anyone can restore them
+// with one click (restore = re-add, which also lifts the exclusion).
+function loadExcludedList() {
+  fetch('/api/paths/excluded')
+    .then(res => res.json())
+    .then(data => renderExcludedList((data && data.excluded) || []))
+    .catch(() => renderExcludedList([]));
+}
+
+function renderExcludedList(excluded) {
+  const wrap = document.getElementById('excluded-repos-wrap');
+  const list = document.getElementById('excluded-repos-list');
+  const title = document.getElementById('lbl-excluded-title');
+  if (!wrap || !list) return;
+  const lang = (typeof currentLanguage !== 'undefined') ? currentLanguage : 'zh';
+  const zh = lang === 'zh', ja = lang === 'ja';
+  if (!excluded || !excluded.length) {
+    wrap.style.display = 'none';
+    list.innerHTML = '';
+    return;
+  }
+  wrap.style.display = '';
+  if (title) title.innerText = zh ? `🚫 已排除的目錄（${excluded.length}）` : (ja ? `🚫 除外ディレクトリ（${excluded.length}）` : `Excluded directories (${excluded.length})`);
+  list.innerHTML = '';
+  excluded.forEach(p => {
+    const row = document.createElement('div');
+    row.style.cssText = 'display:flex; align-items:center; gap:10px; padding:8px 14px; border-top:1px solid #21262d; font-size:13px;';
+    if (list.children.length === 0) row.style.borderTop = 'none';
+    const esc = (p || '').replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+    row.innerHTML = `
+      <span style="color:#8b949e;">🚫</span>
+      <span style="flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:#c9d1d9; font-family:monospace;" title="${escapeHtml(p || '')}">${escapeHtml(p || '')}</span>
+      <button class="mini-btn" style="color:#3fb950; border-color:#2ea043; padding:3px 12px; flex-shrink:0;" onclick="restoreExcludedPath('${esc}')" title="${zh ? '加回專案儲存庫' : (ja ? '戻す' : 'Restore')}">${zh ? '↩ 加回' : (ja ? '↩ 戻す' : '↩ Restore')}</button>
+      <button class="mini-btn" style="color:#f85149; border-color:#5a2d2d; padding:3px 12px; flex-shrink:0;" onclick="forgetExcludedPath('${esc}')" title="${zh ? '從排除名單移除（不再顯示，要加回請重新 Scan）' : (ja ? '除外リストから削除' : 'Remove from excluded list')}">${zh ? '移除' : (ja ? '削除' : 'Remove')}</button>
+    `;
+    list.appendChild(row);
+  });
+}
+
+function restoreExcludedPath(path) {
+  fetch('/api/paths/add', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ path })
+  })
+    .then(res => res.json())
+    .then(res => {
+      if (res && res.success) {
+        const lang = (typeof currentLanguage !== 'undefined') ? currentLanguage : 'zh';
+        if (typeof showToast === 'function') showToast(lang === 'zh' ? '↩ 已加回專案儲存庫' : 'Restored to repositories');
+        if (typeof loadProjects === 'function') loadProjects();
+      } else {
+        alert('Restore failed: ' + ((res && res.error) || 'Unknown error'));
+      }
+    })
+    .catch(err => alert('Request failed: ' + err));
+}
+
+function forgetExcludedPath(path) {
+  fetch('/api/paths/forget', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ path })
+  })
+    .then(res => res.json())
+    .then(res => {
+      if (res && res.success) {
+        if (typeof loadProjects === 'function') loadProjects();
+      } else {
+        alert('Remove failed: ' + ((res && res.error) || 'Unknown error'));
+      }
+    })
+    .catch(err => alert('Request failed: ' + err));
 }
 
 // Busy-state helper for index action buttons (galaxy-style: disable while running).
@@ -4697,6 +4787,14 @@ function init3DNavControls() {
         e.preventDefault();
         return;
       }
+    }
+
+    // In-doc find (Ctrl/Cmd+F): Electron has no native find UI, and the
+    // Markdown reader is the primary reading surface, so route it here.
+    if ((e.ctrlKey || e.metaKey) && code === 'KeyF') {
+      e.preventDefault();
+      openDocFind();
+      return;
     }
 
     // Copy hotkey handling (Ctrl+C / Cmd+C)
@@ -11132,6 +11230,39 @@ let gWorkspaces = [];
 let gActiveWorkspaceId = 'default';
 let gRenamingWsId = null;
 
+// Per-tab workspace independence: each tab keeps its own active id in
+// sessionStorage (per-tab, not localStorage). A global fetch patch injects
+// it as X-Workspace-Id on every /api call, so two tabs can sit on different
+// workspaces without flipping each other. Server manifest `active` is only
+// the default for brand-new tabs.
+const WS_ACTIVE_KEY = 'docgraph.ws.active';
+function getTabWorkspaceId() {
+  try { return sessionStorage.getItem(WS_ACTIVE_KEY) || 'default'; } catch (e) { return 'default'; }
+}
+function setTabWorkspaceId(id) {
+  gActiveWorkspaceId = id;
+  try { sessionStorage.setItem(WS_ACTIVE_KEY, id); } catch (e) { /* ignore */ }
+}
+(function () {
+  if (window.__wsFetchPatched) return;
+  window.__wsFetchPatched = true;
+  const _fetch = window.fetch.bind(window);
+  window.fetch = function (url, opts) {
+    try {
+      if (typeof url === 'string' && url.indexOf('/api/') === 0) {
+        opts = opts || {};
+        const wid = getTabWorkspaceId();
+        if (opts.headers && typeof opts.headers.set === 'function') {
+          opts.headers.set('X-Workspace-Id', wid);
+        } else {
+          opts.headers = Object.assign({}, opts.headers, { 'X-Workspace-Id': wid });
+        }
+      }
+    } catch (e) { /* ignore */ }
+    return _fetch(url, opts);
+  };
+})();
+
 function toggleWorkspaceDropdown(forceState) {
   const menu = document.getElementById('ws-dropdown-menu');
   const btn = document.getElementById('btn-ws-capsule');
@@ -11158,7 +11289,15 @@ function loadWorkspaces(bReloadProjects = true) {
     .then(data => {
       if (data && data.success) {
         gWorkspaces = data.workspaces || [];
-        gActiveWorkspaceId = data.active || 'default';
+        const ids = gWorkspaces.map(w => w.id);
+        // Per-tab active: keep this tab's choice; only seed/validate.
+        let tab = null;
+        try { tab = sessionStorage.getItem(WS_ACTIVE_KEY); } catch (e) { tab = null; }
+        if (!tab || ids.indexOf(tab) < 0) {
+          tab = (data.active && ids.indexOf(data.active) >= 0) ? data.active : (ids[0] || 'default');
+          try { sessionStorage.setItem(WS_ACTIVE_KEY, tab); } catch (e) { /* ignore */ }
+        }
+        gActiveWorkspaceId = tab;
         renderWorkspaceUI();
         if (bReloadProjects && typeof loadProjects === 'function') {
           // Trigger repo load if workspace changed
@@ -11252,37 +11391,34 @@ function renderWorkspaceUI() {
 }
 
 function switchActiveWorkspace(wsId) {
-  if (wsId === gActiveWorkspaceId) {
+  if (wsId === getTabWorkspaceId()) {
     toggleWorkspaceDropdown(false);
     return;
   }
+  // Per-tab switch: local only, no waiting. Server global is untouched so
+  // other tabs are unaffected (they send their own X-Workspace-Id).
+  setTabWorkspaceId(wsId);
+  renderWorkspaceUI();
+  toggleWorkspaceDropdown(false);
+  const lang = (typeof currentLanguage !== 'undefined') ? currentLanguage : 'zh';
+  const msg = (lang === 'zh') ? '✨ 已切換工作區' : '✨ Workspace activated';
+  if (typeof showToast === 'function') showToast(msg);
+
+  // Reload UI and data for the new workspace
+  if (typeof loadProjects === 'function') loadProjects();
+  if (typeof loadGraphData === 'function') loadGraphData();
+  if (typeof loadPromptsList === 'function') loadPromptsList();
+  if (typeof refreshProviderList === 'function') refreshProviderList();
+  if (typeof updateActiveLLMDisplay === 'function') updateActiveLLMDisplay();
+  if (typeof loadImageSettingsToUI === 'function') loadImageSettingsToUI();
+  loadWorkspaces(false);
+
+  // Record as server default for brand-new tabs / CLI (fire-and-forget).
   fetch('/api/workspaces/switch', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ id: wsId })
-  })
-    .then(res => res.json())
-    .then(res => {
-      if (res && res.success) {
-        gActiveWorkspaceId = wsId;
-        toggleWorkspaceDropdown(false);
-        const lang = (typeof currentLanguage !== 'undefined') ? currentLanguage : 'zh';
-        const msg = (lang === 'zh') ? '✨ 已切換工作區' : '✨ Workspace activated';
-        if (typeof showToast === 'function') showToast(msg);
-
-        // Reload UI and data for the new workspace
-        if (typeof loadProjects === 'function') loadProjects();
-        if (typeof loadGraphData === 'function') loadGraphData();
-        if (typeof loadPromptsList === 'function') loadPromptsList();
-        if (typeof refreshProviderList === 'function') refreshProviderList();
-        if (typeof updateActiveLLMDisplay === 'function') updateActiveLLMDisplay();
-        if (typeof loadImageSettingsToUI === 'function') loadImageSettingsToUI();
-        loadWorkspaces(false);
-      } else {
-        alert('Switch failed: ' + (res.error || 'Unknown error'));
-      }
-    })
-    .catch(err => alert('Request failed: ' + err));
+  }).catch(() => {});
 }
 
 function promptCreateWorkspace() {
@@ -11291,7 +11427,8 @@ function promptCreateWorkspace() {
   const title = zh ? '➕ 建立新工作區' : (ja ? '➕ 新規ワークスペース作成' : '➕ Create New Workspace');
   const msg = zh ? '請輸入新工作區名稱（例如：伺服器研發專案、新人教材）：' : 'Enter a name for the new workspace:';
 
-  openCyberPrompt(title, msg, '', zh ? '建立後可在頂端下拉選單隨時秒級切換' : 'You can switch between workspaces anytime from the top bar.', (name) => {
+  const tip = zh ? '建立後可在頂端下拉選單隨時秒級切換' : (ja ? 'トップのドロップダウンからいつでも切替できます' : 'You can switch between workspaces anytime from the top bar.');
+  showCyberPrompt(title, msg, '', (name) => {
     if (!name || !name.trim()) return;
     fetch('/api/workspaces/create', {
       method: 'POST',
@@ -11308,7 +11445,7 @@ function promptCreateWorkspace() {
         }
       })
       .catch(err => alert('Request failed: ' + err));
-  });
+  }, { tip: tip });
 }
 
 function startRenameWorkspace(wsId, event) {
@@ -11358,7 +11495,7 @@ function confirmDeleteWorkspace(wsId, wsName, event) {
   const msg = zh ? `確定要刪除工作區「${wsName}」嗎？` : `Are you sure you want to delete workspace '${wsName}'?`;
   const tip = zh ? '刪除工作區僅移除工作區配置，各專案硬碟檔案與本地資料庫不受影響。' : 'Deleting a workspace only removes its profile; disk files remain intact.';
 
-  openCyberConfirm(title, msg, tip, () => {
+  showCyberConfirm(title, msg, () => {
     fetch('/api/workspaces/delete', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -11370,7 +11507,8 @@ function confirmDeleteWorkspace(wsId, wsName, event) {
           if (typeof showToast === 'function') {
             showToast(zh ? '🗑️ 工作區已刪除' : '🗑️ Workspace deleted');
           }
-          gActiveWorkspaceId = res.active || 'default';
+          try { localStorage.removeItem(PROJECTS_SEL_KEY + '.' + wsId); } catch (e) { /* ignore */ }
+          if (wsId === getTabWorkspaceId()) setTabWorkspaceId(res.active || 'default');
           loadWorkspaces(true);
           if (typeof loadProjects === 'function') loadProjects();
           if (typeof loadGraphData === 'function') loadGraphData();
@@ -11379,7 +11517,7 @@ function confirmDeleteWorkspace(wsId, wsName, event) {
         }
       })
       .catch(err => alert('Request failed: ' + err));
-  });
+  }, { tip: tip });
 }
 
 // Auto-mount workspace loader when page is ready
@@ -11387,6 +11525,166 @@ if (document.readyState === 'loading') {
   document.addEventListener('DOMContentLoaded', () => loadWorkspaces(false));
 } else {
   loadWorkspaces(false);
+}
+
+// ─── In-doc find (Ctrl/Cmd+F) for the Markdown reader ────────────────
+let gDocFindHits = [];
+let gDocFindIndex = -1;
+
+function docFindScope() {
+  return document.getElementById('d-code-markdown') || document.getElementById('doc-panel');
+}
+
+function updateDocFindCount() {
+  const el = document.getElementById('doc-find-count');
+  if (!el) return;
+  if (!gDocFindHits.length) {
+    const inp = document.getElementById('doc-find-input');
+    el.textContent = (inp && inp.value) ? '0' : '';
+  } else {
+    el.textContent = (gDocFindIndex + 1) + ' / ' + gDocFindHits.length;
+  }
+}
+
+function clearDocFindHits() {
+  try {
+    const scope = docFindScope();
+    if (scope) {
+      scope.querySelectorAll('span.doc-find-hit').forEach(sp => {
+        const parent = sp.parentNode;
+        if (!parent) return;
+        parent.replaceChild(document.createTextNode(sp.textContent), sp);
+        parent.normalize();
+      });
+    }
+  } catch (e) { /* ignore */ }
+  gDocFindHits = [];
+  gDocFindIndex = -1;
+  updateDocFindCount();
+}
+
+function openDocFind() {
+  const scope = docFindScope();
+  if (!scope || !scope.textContent.trim()) {
+    if (typeof showToast === 'function') showToast('先開一份文件再搜尋');
+    return;
+  }
+  let bar = document.getElementById('doc-find-bar');
+  if (!bar) {
+    bar = document.createElement('div');
+    bar.id = 'doc-find-bar';
+    bar.innerHTML = `
+      <span style="color:#58a6ff; font-weight:700; font-size:12px; flex-shrink:0;">🔍</span>
+      <input id="doc-find-input" class="modal-input" placeholder="搜尋本文件…" />
+      <span id="doc-find-count"></span>
+      <button class="mini-btn" id="doc-find-prev" title="上一個 (Shift+Enter)">▲</button>
+      <button class="mini-btn" id="doc-find-next" title="下一個 (Enter)">▼</button>
+      <button class="mini-btn" id="doc-find-close" title="關閉 (Esc)">✕</button>
+    `;
+    const host = document.getElementById('doc-panel') || document.body;
+    try {
+      if (host && host !== document.body && getComputedStyle(host).position === 'static') host.style.position = 'relative';
+    } catch (e) { /* ignore */ }
+    host.appendChild(bar);
+    const inp = bar.querySelector('#doc-find-input');
+    inp.addEventListener('input', () => runDocFind());
+    inp.addEventListener('keydown', (ev) => {
+      if (ev.key === 'Enter') {
+        ev.preventDefault();
+        docFindStep(ev.shiftKey ? -1 : 1);
+      } else if (ev.key === 'Escape') {
+        ev.preventDefault();
+        ev.stopPropagation();
+        closeDocFind();
+      }
+    });
+    bar.querySelector('#doc-find-prev').onclick = () => docFindStep(-1);
+    bar.querySelector('#doc-find-next').onclick = () => docFindStep(1);
+    bar.querySelector('#doc-find-close').onclick = () => closeDocFind();
+  }
+  bar.style.display = 'flex';
+  const inp = document.getElementById('doc-find-input');
+  inp.focus();
+  inp.select();
+  if (inp.value) runDocFind();
+}
+
+function closeDocFind() {
+  const bar = document.getElementById('doc-find-bar');
+  if (bar) bar.style.display = 'none';
+  clearDocFindHits();
+}
+
+function runDocFind() {
+  clearDocFindHits();
+  const inp = document.getElementById('doc-find-input');
+  const scope = docFindScope();
+  const query = (inp && inp.value ? inp.value : '').trim();
+  if (!query || !scope) {
+    updateDocFindCount();
+    return;
+  }
+  const q = query.toLowerCase();
+  const walker = document.createTreeWalker(scope, NodeFilter.SHOW_TEXT, {
+    acceptNode(node) {
+      if (!node.nodeValue || !node.nodeValue.trim()) return NodeFilter.FILTER_REJECT;
+      const p = node.parentNode;
+      if (!p || p.nodeName === 'SCRIPT' || p.nodeName === 'STYLE' || p.nodeName === 'TEXTAREA' || p.nodeName === 'INPUT') return NodeFilter.FILTER_REJECT;
+      if (p.closest && p.closest('.doc-find-hit, #doc-find-bar')) return NodeFilter.FILTER_REJECT;
+      return NodeFilter.FILTER_ACCEPT;
+    }
+  });
+  const textNodes = [];
+  while (walker.nextNode()) textNodes.push(walker.currentNode);
+  textNodes.forEach(tn => {
+    const text = tn.nodeValue;
+    const lower = text.toLowerCase();
+    let from = 0, pos = lower.indexOf(q, from);
+    if (pos < 0) return;
+    const frag = document.createDocumentFragment();
+    while (pos >= 0) {
+      if (pos > from) frag.appendChild(document.createTextNode(text.slice(from, pos)));
+      const hit = document.createElement('span');
+      hit.className = 'doc-find-hit';
+      hit.textContent = text.slice(pos, pos + query.length);
+      frag.appendChild(hit);
+      gDocFindHits.push(hit);
+      from = pos + query.length;
+      pos = lower.indexOf(q, from);
+    }
+    if (from < text.length) frag.appendChild(document.createTextNode(text.slice(from)));
+    tn.parentNode.replaceChild(frag, tn);
+  });
+  if (gDocFindHits.length) {
+    gDocFindIndex = 0;
+    paintDocFindCurrent();
+  }
+  updateDocFindCount();
+}
+
+function paintDocFindCurrent() {
+  gDocFindHits.forEach((h, i) => h.classList.toggle('current', i === gDocFindIndex));
+  const cur = gDocFindHits[gDocFindIndex];
+  if (cur && cur.scrollIntoView) {
+    try { cur.scrollIntoView({ block: 'center', behavior: 'smooth' }); } catch (e) {
+      try { cur.scrollIntoView(); } catch (e2) { /* ignore */ }
+    }
+  }
+  updateDocFindCount();
+}
+
+function docFindStep(dir) {
+  if (!gDocFindHits.length) {
+    runDocFind();
+    return;
+  }
+  // Drop dead highlights if the doc re-rendered underneath us.
+  if (!gDocFindHits[0].isConnected) {
+    runDocFind();
+    if (!gDocFindHits.length) return;
+  }
+  gDocFindIndex = (gDocFindIndex + dir + gDocFindHits.length) % gDocFindHits.length;
+  paintDocFindCurrent();
 }
 
 

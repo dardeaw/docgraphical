@@ -34,7 +34,7 @@ if (window.THREE && !window.THREE.Timer) {
 </script>
 <script src="/static/three-spritetext.min.js"></script>
 <script src="/static/3d-force-graph.min.js"></script>
-<link rel="stylesheet" href="/static/galaxy.css?v=3.0.6">
+<link rel="stylesheet" href="/static/galaxy.css?v=3.1.0">
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark-dimmed.min.css">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
@@ -534,6 +534,10 @@ if (window.THREE && !window.THREE.Timer) {
                 </tbody>
               </table>
             </div>
+            <div id="excluded-repos-wrap" style="display:none; margin-top:12px;">
+              <label id="lbl-excluded-title" style="font-weight:600; font-size:12px; color:#8b949e; display:block; margin-bottom:6px;"></label>
+              <div id="excluded-repos-list" style="border:1px dashed #5a2d2d; border-radius:6px; overflow:hidden;"></div>
+            </div>
           </div>
         </div>
 
@@ -971,7 +975,7 @@ function confirmBrowsePick() {
   closeBrowsePicker();
 }
 </script>
-<script src="/static/docgraph.js?v=3.0.8"></script>
+<script src="/static/docgraph.js?v=3.1.0"></script>
 
 <!-- Sleek In-App Concepts Action Modal (No ugly browser prompts!) -->
 <div id="concept-action-modal" class="modal-overlay" style="display:none; position:fixed; top:0; left:0; width:100vw; height:100vh; background:rgba(0,0,0,0.75); z-index:9999; align-items:center; justify-content:center; backdrop-filter:blur(3px);">
@@ -1112,25 +1116,6 @@ function confirmBrowsePick() {
     <div style="padding:12px 20px; border-top:1px solid #30363d; display:flex; justify-content:flex-end; gap:10px; background:#0d1117;">
       <button onclick="closeCyberConfirm(false)" class="mini-btn" style="padding:8px 18px; font-size:14px; border-radius:6px;" id="btn-cyber-confirm-cancel">取消</button>
       <button onclick="closeCyberConfirm(true)" style="background:#da3633; border:1px solid #f85149; color:#fff; border-radius:6px; padding:8px 22px; font-size:14.5px; font-weight:700; cursor:pointer;" id="btn-cyber-confirm-ok">確定</button>
-    </div>
-  </div>
-</div>
-
-<!-- In-App Cyber Prompt Dialog (Sleek Rename & Input Modal) -->
-<div id="cyber-prompt-modal" class="modal-overlay" style="display:none; position:fixed; top:0; left:0; width:100vw; height:100vh; background:rgba(0,0,0,0.75); z-index:10002; align-items:center; justify-content:center; backdrop-filter:blur(4px);">
-  <div style="background:#161b22; border:1px solid #30363d; border-radius:12px; width:500px; max-width:94vw; box-shadow:0 20px 50px rgba(0,0,0,0.85); display:flex; flex-direction:column; overflow:hidden;">
-    <div style="padding:14px 20px; border-bottom:1px solid #30363d; display:flex; justify-content:space-between; align-items:center; background:#0d1117;">
-      <span id="cyber-prompt-title" style="font-weight:700; font-size:16px; color:#58a6ff;">✏️ 重新命名</span>
-      <button onclick="closeCyberPrompt(false)" style="background:none; border:none; color:#8b949e; cursor:pointer; font-size:18px; line-height:1; padding:2px 6px;">✕</button>
-    </div>
-    <div style="padding:20px; background:#161b22; display:flex; flex-direction:column; gap:12px;">
-      <div id="cyber-prompt-msg" style="font-size:14px; color:#c9d1d9; line-height:1.5;">請輸入新名稱：</div>
-      <input type="text" id="cyber-prompt-input" class="modal-input" style="font-size:14.5px; padding:10px 14px; height:auto; line-height:1.4; border-radius:6px; background:#0d1117; color:#e6edf3; border:1px solid #30363d;" />
-      <div id="cyber-prompt-tip" style="font-size:12.5px; color:#8b949e; line-height:1.4;"></div>
-    </div>
-    <div style="padding:12px 20px; border-top:1px solid #30363d; display:flex; justify-content:flex-end; gap:10px; background:#0d1117;">
-      <button onclick="closeCyberPrompt(false)" class="mini-btn" style="padding:8px 18px; font-size:14px; border-radius:6px;" id="btn-cyber-prompt-cancel">取消</button>
-      <button onclick="closeCyberPrompt(true)" class="btn-primary" style="padding:8px 22px; font-size:14px; font-weight:700; border-radius:6px;" id="btn-cyber-prompt-ok">確定</button>
     </div>
   </div>
 </div>

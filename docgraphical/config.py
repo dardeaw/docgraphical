@@ -42,10 +42,20 @@ def get_default_db_path(repo_path: Optional[str] = None) -> str:
 
 def load_config() -> Dict[str, List[str]]:
     """Load configuration.
-    
-    If DOCGRAPHICAL_CONFIG environment variable is explicitly set (e.g. isolated test mode),
-    read directly from that file. Otherwise, delegate to the active Workspace config.
+
+    Inside a browser request carrying X-Workspace-Id, the tab's own
+    workspace always wins (per-tab independence). Otherwise, if
+    DOCGRAPHICAL_CONFIG is set (e.g. `app.py -p 5003` port-pinned file),
+    read that file; if not, use the active Workspace config.
     """
+    try:
+        from . import workspace as _ws
+        req_id = _ws.get_request_workspace_id()
+        if req_id:
+            return _ws.load_workspace_config(ws_id=req_id)
+    except Exception:
+        pass
+
     if os.environ.get("DOCGRAPHICAL_CONFIG"):
         cfg_file = _get_config_file()
         roots: List[str] = []
@@ -65,7 +75,17 @@ def load_config() -> Dict[str, List[str]]:
 
 
 def save_config(cfg: Dict[str, List[str]]) -> None:
-    """Save configuration."""
+    """Save configuration. Mirrors load_config: a request carrying
+    X-Workspace-Id saves to that workspace, otherwise legacy behavior."""
+    try:
+        from . import workspace as _ws
+        req_id = _ws.get_request_workspace_id()
+        if req_id:
+            _ws.save_workspace_config(cfg, ws_id=req_id)
+            return
+    except Exception:
+        pass
+
     if os.environ.get("DOCGRAPHICAL_CONFIG"):
         try:
             with open(_get_config_file(), "w", encoding="utf-8") as f:

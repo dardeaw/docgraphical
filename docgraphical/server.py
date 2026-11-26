@@ -537,6 +537,29 @@ def create_app(initial_paths: Optional[List[str]] = None, search_roots: Optional
             save_config(cfg)
         return jsonify({"success": True, "path": abs_p})
 
+    @app.route("/api/paths/excluded", methods=["GET"])
+    def get_excluded_paths():
+        # Read-only: workspace-aware via load_config (per-tab header wins).
+        cfg = load_config()
+        return jsonify({"success": True, "excluded": cfg.get("excluded_paths") or []})
+
+    @app.route("/api/paths/forget", methods=["POST"])
+    def forget_excluded_path():
+        # Drop a path from BOTH lists: it will no longer show as excluded,
+        # and will not come back unless the user Scans it again.
+        data = request.get_json(silent=True) or {}
+        target_path = (data.get("path") or "").strip()
+        if not target_path:
+            return jsonify({"success": False, "error": "Missing path parameter"}), 400
+        abs_p = os.path.abspath(target_path)
+        cfg = load_config()
+        if abs_p in cfg["custom_roots"]:
+            cfg["custom_roots"].remove(abs_p)
+        if abs_p in cfg["excluded_paths"]:
+            cfg["excluded_paths"].remove(abs_p)
+        save_config(cfg)
+        return jsonify({"success": True, "path": abs_p})
+
     @app.route("/api/paths/exclude", methods=["POST"])
     def exclude_custom_path():
         data = request.get_json(silent=True) or {}

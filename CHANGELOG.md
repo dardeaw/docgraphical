@@ -7,6 +7,31 @@ All notable changes to the DocGraphical project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.1.0] - 2026-11-26
+
+### Added
+- **Per-Tab Workspace Independence**:
+  - Each browser tab now keeps its own active workspace (`sessionStorage` + `X-Workspace-Id` header injected on every `/api` call); switching workspaces in one tab no longer flips other tabs.
+  - Request-scoped workspace resolution (`get_request_workspace_id()`) drives roots config, graph, prompts, and settings reads; the server-global manifest `active` is only the default for brand-new tabs. Checkbox selection is also scoped per workspace.
+- **Excluded-Directories Management**:
+  - New `GET /api/paths/excluded` and `POST /api/paths/forget` endpoints; the repository manager now renders an excluded-directories section below the repo table with one-click **Restore** (re-add) and **Remove** (forget) actions.
+- **In-Document Find Bar (Ctrl/Cmd+F)**:
+  - Floating find bar docked inside the Markdown reader with live highlight, match counter (`n / total`), Enter/Shift+Enter navigation, and Esc to close — required for Electron, which has no native find UI.
+
+### Fixed
+- **Workspace create/delete buttons dead**: `promptCreateWorkspace` / `confirmDeleteWorkspace` called undefined `openCyberPrompt` / `openCyberConfirm`; now call the existing `showCyberPrompt` / `showCyberConfirm` with matching signatures.
+- **Duplicate `cyber-prompt-modal`**: removed the second copy with colliding element IDs.
+- **`/api/graph` HTTP 500 from schemaless SQLite files**: 0-byte / half-written DBs left by crashed indexing runs no longer poison merged reads — the resolver prefers DBs containing the core schema (`nodes`, `edges`, `files`), and reads return empty ("unindexed") instead of 500 (`fetch_graph_data`, `get_concepts_tree`, `lint_repository` hardened).
+- **`DOC_CATALOG.md` stuck at "pending" on fresh repos**: catalog compilation now performs a full parse (file node + heading nodes, concepts still excluded) instead of a files-row-only upsert.
+- **Port-pinned config bypassed workspaces** (`app.py -p 5003` + `DOCGRAPHICAL_CONFIG`): requests carrying a workspace id now resolve to that workspace, and `save_config` mirrors `load_config` so workspace writes no longer leak into the port file.
+- **LLM settings page always visible**: `#stg-page-llm { display: flex !important; }` overrode tab switching; the `!important` on `display` is removed.
+- Scan input no longer cleared after a successful add.
+
+### Changed
+- LLM provider settings stay port-global (shared across workspaces on the same port), as before.
+
+---
+
 ## [3.0.6] - 2026-11-10
 
 ### Added & Improved

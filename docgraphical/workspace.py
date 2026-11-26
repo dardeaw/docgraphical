@@ -75,7 +75,39 @@ def save_manifest(manifest: Dict[str, Any]) -> None:
         print(f"Failed to save workspaces manifest: {e}", file=sys.stderr)
 
 
+def get_request_workspace_id() -> Optional[str]:
+    """Return the validated per-request workspace id, or None.
+
+    A browser tab sends its own workspace via X-Workspace-Id header
+    (or ?workspace=). Stale/unknown ids return None so callers fall back
+    to the manifest default instead of serving an empty ghost workspace.
+    Outside a Flask request (CLI, tests, background threads) -> None.
+    """
+    try:
+        from flask import has_request_context, request as flask_request
+        if not has_request_context():
+            return None
+        cand = (flask_request.headers.get("X-Workspace-Id") or "").strip() \
+            or (flask_request.args.get("workspace") or "").strip()
+        if not cand:
+            return None
+        try:
+            ids = [w.get("id") for w in get_manifest().get("workspaces", []) if isinstance(w, dict)]
+        except Exception:
+            return None
+        if not ids:
+            return cand
+        return cand if cand in ids else None
+    except Exception:
+        return None
+
+
 def get_active_workspace_id() -> str:
+    # Per-tab independence: a tab's own workspace wins inside requests.
+    # Server-global env/manifest is only the fallback for CLI / first load.
+    req_id = get_request_workspace_id()
+    if req_id:
+        return req_id
     # Explicit env override takes highest precedence (CLI --workspace or isolated mode)
     env_ws = os.environ.get("DOCGRAPHICAL_ACTIVE_WORKSPACE")
     if env_ws:
